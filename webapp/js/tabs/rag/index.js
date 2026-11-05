@@ -13,7 +13,7 @@
  *
  * Eventi tra tab (app.bus):
  *   ascolta  "rag:query"  {detail: {question}}  → imposta la domanda e avvia la ricerca
- *   invia    "transformer:view" "contesto"      → il tab Transformer mostra la vista Contesto
+ *   invia    "transformer:view" {view: "contesto", question} → il tab Transformer mostra la vista Contesto
  * In alternativa all'evento, l'indirizzo #rag/q=<domanda> avvia la ricerca all'apertura.
  */
 import * as THREE from "three";
@@ -424,11 +424,11 @@ export async function createTab(root, app) {
     setQuestion(question.trim(), true);
   });
 
+  /** Apre la vista Contesto del tab Transformer con la domanda scritta qui. */
   async function openTransformerContext() {
-    app.open("transformer");
-    // Il tab Transformer si carica alla prima apertura: aspettiamo che esista prima di inviare l'evento.
-    for (let i = 0; i < 100 && app.instances && !app.instances.get("transformer")?.instance; i++) await new Promise((r) => setTimeout(r, 100));
-    app.bus.dispatchEvent(new CustomEvent("transformer:view", { detail: "contesto" }));
+    await app.open("transformer"); // si risolve quando il tab (caricato alla prima apertura) è pronto
+    const question = settings.question.trim();
+    app.bus.dispatchEvent(new CustomEvent("transformer:view", { detail: question ? { view: "contesto", question } : "contesto" }));
   }
 
   // grafici "HNSW al crescere dei vettori": si misurano la prima volta che il pannello si apre

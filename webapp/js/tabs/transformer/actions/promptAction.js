@@ -427,6 +427,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
       const run = runPrompt(engine, options.text, options);
       ctx.data.run = run;
       charts.reset(run);
+      charts.reveal(); // il pannello potrebbe essere rimasto sulla sezione Training
       scene = buildScene(run);
       return withActivate(buildSteps(run));
     },

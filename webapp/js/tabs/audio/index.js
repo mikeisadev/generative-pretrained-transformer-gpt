@@ -99,6 +99,11 @@ export async function createTab(root, app) {
       { id: "macro", label: "Panoramica", maxDistance: Infinity, group: macro },
     ],
     widgetParent: stage,
+    // Scelta a mano nel selettore: "Dettaglio" avvicina la camera al cuore del generatore,
+    // gli altri livelli inquadrano tutta la pipeline (il livello resta quello scelto).
+    onPick: (mode) => {
+      if (mode !== "auto") tab.focus(mode === "detail" ? "genCore" : "overview");
+    },
   });
 
   const P = parts;

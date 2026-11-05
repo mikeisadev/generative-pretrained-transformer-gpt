@@ -17,7 +17,6 @@
  *   - facoltativo: "context:question" con detail = { question } imposta la domanda di questa vista.
  */
 import * as THREE from "three";
-import { sleep } from "../../../core/dom.js";
 import { registerContextAction } from "./action.js";
 import { ContextCharts } from "./contextCharts.js";
 import { CONTEXT_DISTANCES, DIAGRAM_IDS, STACK, overviewBox, slotsBox } from "./layout.js";
@@ -29,7 +28,6 @@ import { STAGE } from "./texts.js";
 
 const VIEW_ID = "contesto";
 const FRONT = new THREE.Vector3(0.03, 0.07, 1).normalize(); // quasi di fronte: le schede restano leggibili
-const RAG_WAIT_MS = 10000;
 /**
  * Rapporto larghezza/altezza della parte visibile dello stage per cui sono tarate le soglie del LOD
  * (1600×900 con il pannello del codice aperto). Su uno stage più stretto la camera deve stare più
@@ -249,14 +247,12 @@ export function installContext(tab) {
 }
 
 /**
- * Apre il tab "Database vettoriale (RAG)" con la stessa domanda. Il tab si crea alla prima
- * apertura (import dinamico): aspettiamo che esista, poi mandiamo "rag:query".
+ * Apre il tab "Database vettoriale (RAG)" con la stessa domanda: app.open attende che il tab
+ * esista (si crea alla prima apertura), poi mandiamo "rag:query".
  */
 async function openRag(tab, view) {
   const app = tab.app;
   const detail = { question: view.question, topK: view.scenario?.topK ?? 5, similarityThreshold: view.scenario?.threshold ?? 0.5, source: "transformer" };
-  app.open("rag");
-  const deadline = performance.now() + RAG_WAIT_MS;
-  while (!app.instances?.get("rag")?.instance && performance.now() < deadline) await sleep(50);
+  await app.open("rag"); // si risolve quando il tab (caricato alla prima apertura) è pronto
   app.bus.dispatchEvent(new CustomEvent("rag:query", { detail }));
 }

@@ -86,6 +86,11 @@ export class PromptCharts {
   }
 
   /** Nuovo prompt: svuota le serie. */
+  /** Porta la sezione Prompt in vista nel pannello dei grafici. */
+  reveal() {
+    this.section.root.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
   reset(run) {
     this.run = run;
     this.token = -1;
