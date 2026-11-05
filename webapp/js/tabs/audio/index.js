@@ -338,7 +338,7 @@ export async function createTab(root, app) {
     flows.tick(dt);
     if (stageTarget !== null && !ui.player.action) {
       const s = P.encoder.stage;
-      const next = s + Math.sign(stageTarget - s) * Math.min(Math.abs(stageTarget - s), dt * 1.2);
+      const next = s + Math.sign(stageTarget - s) * Math.min(Math.abs(stageTarget - s), dt * 1.8);
       P.encoder.setStage(next);
       if (next === stageTarget) stageTarget = null;
     }
