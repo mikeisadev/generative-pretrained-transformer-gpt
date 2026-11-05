@@ -24,6 +24,7 @@ export const STACK = {
   outputY: 41,
   outputTopX: -4,
   outputTopY: 45.5,
+  rightX: 23, // bordo destro della pila (blocchi larghi ~44 unità, centrati in x = 0)
 };
 
 /** Slot delle fasi: centro (x, y) e dimensioni (w, h). */
@@ -96,10 +97,10 @@ export function slotsBox(ids, pad = 1) {
 export const DIAGRAM_IDS = Object.keys(SLOTS);
 export function overviewBox() {
   const box = slotsBox(DIAGRAM_IDS, 2);
-  box.expandByPoint(new THREE.Vector3(23, -50, 0));
-  box.expandByPoint(new THREE.Vector3(23, 50, 0));
+  box.expandByPoint(new THREE.Vector3(STACK.rightX, -50, 0));
+  box.expandByPoint(new THREE.Vector3(STACK.rightX, 50, 0));
   return box;
 }
 
-/** Soglie del LOD in questa vista: il diagramma con la pila è largo ~145 unità. */
-export const CONTEXT_DISTANCES = { detail: 72, blocks: 185 };
+/** Soglie del LOD in questa vista (stage di riferimento, vedi index.js): il diagramma con la pila è largo ~145 unità. */
+export const CONTEXT_DISTANCES = { detail: 72, blocks: 195 };

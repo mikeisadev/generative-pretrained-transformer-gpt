@@ -9,10 +9,11 @@
 export const INTRO = `Qui il modello <strong>lavora</strong> davanti a te, con i suoi pesi veri. Le azioni sono di due tipi,
 e conviene tenerli ben distinti:`;
 
+/** Il segnaposto {{params}} si riempie con il dato vero di model.json (vedi pane.js). */
 export const CATEGORIES = {
   prompt: {
     title: "Prompt (inferenza)",
-    lead: `Il modello è già addestrato: i suoi 209.729 pesi sono <strong>fissi</strong>. Gli dai un testo e lui
+    lead: `Il modello è già addestrato: i suoi {{params}} pesi sono <strong>fissi</strong>. Gli dai un testo e lui
       calcola, un carattere alla volta, che cosa viene dopo. È quello che succede ogni volta che scrivi a un
       chatbot: nessun peso cambia, il modello "legge" e "prevede".`,
   },
@@ -38,13 +39,13 @@ export const DEEP_PROMPT = [
   {
     title: "Approfondimento: attention e feed-forward",
     items: [
-      { tex: "Q = xW_Q,\\quad K = xW_K,\\quad V = xW_V", note: "Ogni head ha le sue tre matrici (in PyTorch di forma 16 × 64: da 64 numeri a 16): query (cosa cerco), key (cosa offro), value (cosa passo)." },
+      { tex: "Q = X W_Q^{\\top},\\quad K = X W_K^{\\top},\\quad V = X W_V^{\\top}", note: "X contiene i T token del contesto, uno per riga (T × 64). Ogni head ha le sue tre matrici di forma 16 × 64, come i pesi di nn.Linear (che calcola x·Wᵀ): da 64 numeri a 16. Query = cosa cerco, key = cosa offro, value = cosa passo." },
       { tex: "\\mathrm{att} = \\mathrm{softmax}\\!\\left(\\frac{QK^\\top}{\\sqrt{16}} + M\\right)", note: "Punteggi scalati per √16 = 4, poi la maschera causale M e la softmax riga per riga." },
       { tex: "M_{ij} = \\begin{cases} 0 & j \\le i \\\\ -\\infty & j > i \\end{cases}", note: "M vieta di guardare il futuro: dopo la softmax quei pesi valgono esattamente 0." },
       { tex: "\\text{out}_h = \\mathrm{att}_h\\, V_h", note: "Ogni head fa la media pesata dei value." },
-      { tex: "x \\leftarrow x + W_O\\,[\\text{out}_0; \\dots; \\text{out}_3] + b_O", note: "Le 4 head si concatenano, la proiezione le rimescola e il risultato si somma al residual stream." },
-      { tex: "h = \\mathrm{ReLU}(W_1\\,\\mathrm{LN}_2(x) + b_1)", note: "Feed-forward, primo strato: 64 → 256 neuroni; la ReLU azzera i negativi." },
-      { tex: "x \\leftarrow x + W_2\\, h + b_2", note: "Secondo strato: 256 → 64, sommato al residual stream. Lavora su ogni posizione da sola." },
+      { tex: "x_t \\leftarrow x_t + W_O\\,[\\text{out}_0; \\dots; \\text{out}_3]_t + b_O", note: "Per ogni posizione t (vettore colonna da qui in giù): le 4 head si concatenano (4 × 16 = 64), la proiezione W_O (64 × 64) le rimescola e il risultato si somma al residual stream." },
+      { tex: "h_t = \\mathrm{ReLU}(W_1\\,\\mathrm{LN}_2(x_t) + b_1)", note: "Feed-forward, primo strato: W_1 ha forma 256 × 64, quindi 64 → 256 neuroni; la ReLU azzera i negativi." },
+      { tex: "x_t \\leftarrow x_t + W_2\\, h_t + b_2", note: "Secondo strato: 256 → 64, sommato al residual stream. Lavora su ogni posizione da sola." },
     ],
   },
   {
@@ -74,7 +75,7 @@ export const DEEP_TRAINING = [
       { tex: "\\theta \\leftarrow \\theta - \\gamma\\lambda\\theta", note: "AdamW (formule di PyTorch): prima il weight decay \"disaccoppiato\"…" },
       { tex: "m_t = \\beta_1 m_{t-1} + (1-\\beta_1)\\, g_t", note: "…poi la media mobile del gradiente…" },
       { tex: "v_t = \\beta_2 v_{t-1} + (1-\\beta_2)\\, g_t^2", note: "…e del suo quadrato." },
-      { tex: "\\theta_t = \\theta - \\gamma\\, \\frac{\\hat m_t}{\\sqrt{\\hat v_t} + \\epsilon}", note: "Con m̂ e v̂ corretti per i primi passi (divisi per 1 − β^t). Nel nostro training γ = 0,001, β = (0,9; 0,999), ε = 10⁻⁸, λ = 0,01: i valori predefiniti di torch.optim.AdamW." },
+      { tex: "\\theta_t = \\theta - \\gamma\\, \\frac{\\hat m_t}{\\sqrt{\\hat v_t} + \\epsilon}", note: "Con m̂ e v̂ corretti per i primi passi (divisi per 1 − βᵗ). Nel nostro training γ = 0,001, β = (0,9; 0,999), ε = 10⁻⁸, λ = 0,01: i valori predefiniti di torch.optim.AdamW." },
       { tex: "\\lVert \\Delta\\theta \\rVert / \\lVert \\theta \\rVert \\approx 10^{-3}", note: "Regola pratica (appunti CS231n): se il rapporto update/peso è molto più piccolo il learning rate è troppo basso, se è molto più grande è troppo alto." },
     ],
   },

@@ -495,6 +495,7 @@ class Chart {
  * ============================================================================================== */
 
 const MARGIN = { top: 22, right: 12, tickBand: 18, labelBand: 16 };
+const END_LABEL_MAX = 110; // px al massimo per le etichette "nome valore" a destra delle linee
 
 /** Rettangolo dell'area dati, lasciando spazio alle etichette dei tick y (misurate) e agli assi. */
 function plotArea(ctx, { width, height }, yTickLabels, { right = MARGIN.right, xLabel = "", top = MARGIN.top } = {}) {
@@ -795,9 +796,16 @@ class LineRenderer extends BaseRenderer {
     const yAxis = this.log ? logTicks(yMin, yMax, { pad: 1.08 }) : niceTicks(yMin, yMax);
     const yLabels = yAxis.ticks.map((t) => (this.log ? formatValue(t) : formatTick(t, yAxis.step, Math.max(Math.abs(yAxis.min), Math.abs(yAxis.max)))));
     const visible = [...this.series.values()].filter((s) => s.count);
-    const endLabels = visible.length <= 4 ? visible.map((s) => `${s.name} ${this.chart.formatValue(s.ys[s.count - 1])}`) : [];
     ctx.font = FONT;
-    const right = endLabels.length ? Math.min(110, 14 + endLabels.reduce((m, t) => Math.max(m, ctx.measureText(t).width), 0)) : MARGIN.right;
+    const full = visible.length <= 4 ? visible.map((s) => `${s.name} ${this.chart.formatValue(s.ys[s.count - 1])}`) : [];
+    const right = full.length ? Math.min(END_LABEL_MAX, 14 + full.reduce((m, t) => Math.max(m, ctx.measureText(t).width), 0)) : MARGIN.right;
+    // Etichette troppo lunghe: si accorcia il nome, mai il valore (il nome completo è nella legenda).
+    const endLabels = full.map((text, i) => {
+      if (ctx.measureText(text).width <= right - 10) return text;
+      const value = this.chart.formatValue(visible[i].ys[visible[i].count - 1]);
+      const room = right - 10 - ctx.measureText(` ${value}`).width;
+      return room > 24 ? `${fitText(ctx, visible[i].name, room)} ${value}` : value;
+    });
     const plot = plotArea(ctx, frame, yLabels, { right, xLabel: this.options.xLabel });
 
     const xDomain = xMin === xMax ? niceTicks(xMin, xMax) : { min: xMin, max: xMax };

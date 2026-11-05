@@ -76,8 +76,14 @@ export function buildAudio(lab, initialStyle) {
     t.position.set(0, LH / 2 + 0.85, 0);
     lens.add(t);
   }
-  const legend = label("segnale   ·   finestra di Hann   ·   segnale × finestra", { size: 0.26, color: "#cbd5e1" });
-  legend.position.set(0, -LH / 2 - 0.55, 0);
+  // legenda con i colori delle tre curve (azzurro, giallo, rosa)
+  const legend = new THREE.Group();
+  [
+    ["segnale", "#67e8f9", -LW / 3],
+    ["finestra di Hann", "#fbbf24", 0],
+    ["segnale × finestra", "#f472b6", LW / 3],
+  ].forEach(([text, color, x]) => placeLabel(legend, text, x, 0, 0, { size: 0.34, color }));
+  legend.position.set(0, -LH / 2 - 0.6, 0);
   lens.add(lensBg, lensEdge, raw.line, hann.line, windowed.line, stems, dots, legend);
   // linee che collegano il tratto ingrandito alla lente
   const linkPos = new Float32Array(12);
@@ -349,7 +355,7 @@ export function buildRvq(lab, initialStyle, styleIds) {
   grid.group.position.y = -0.55;
   group.add(grid.group);
   for (let k = 0; k < Q; k++) placeLabel(group, `cb ${k + 1}`, -w / 2 - 0.65, -0.55 + grid.rowY(k), 0, { size: 0.26, color: "#94a3b8" });
-  const gridTitle = label("Token: 4 numeri interi per ogni frame da 20 ms", { size: 0.32, color: "#e2e8f0" });
+  const gridTitle = label("Token: 4 numeri interi per ogni frame (uno ogni 20 ms)", { size: 0.32, color: "#e2e8f0" });
   gridTitle.position.set(0, 1.35, 0);
   group.add(gridTitle);
   const frameMark = new THREE.Mesh(new THREE.BoxGeometry(grid.cell * 1.6, 3.2, 0.3), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthWrite: false }));
@@ -360,7 +366,7 @@ export function buildRvq(lab, initialStyle, styleIds) {
 
   // --- lente con i numeri: 16 frame a partire da `lensStart`
   const LENS = 16;
-  const lensState = { start: 0, cursor: -1, rows: [T, T, T, T] };
+  const lensState = { start: 0, cursor: -1, rows: new Array(Q).fill(T) };
   let codes = lab.codes[initialStyle];
   const lens = canvasPanel(w, 2.7, (ctx, cw, ch) => {
     const padL = 120;
@@ -405,6 +411,17 @@ export function buildRvq(lab, initialStyle, styleIds) {
   });
   lens.position.set(0, -3.95, 0);
   group.add(lens);
+  // Durante le azioni reveal() e setLens() arrivano a ogni frame: il canvas (e l'upload della
+  // texture) si rifà al più una volta per frame e solo se qualcosa è cambiato davvero.
+  let lensDirty = false;
+  const redrawLens = () => {
+    if (lensDirty) return;
+    lensDirty = true;
+    queueMicrotask(() => {
+      lensDirty = false;
+      lens.userData.redraw();
+    });
+  };
 
   const styleOffset = (id) => styleIds.indexOf(id) * T;
   let style = initialStyle;
@@ -441,20 +458,26 @@ export function buildRvq(lab, initialStyle, styleIds) {
       style = id;
       codes = lab.codes[id];
       grid.setCodes(codes, T);
-      lens.userData.redraw();
+      redrawLens();
     },
     /** Quanti frame mostrare per ogni codebook (array di 4) o un numero per tutti. */
     reveal(perRow) {
-      const rows = Array.isArray(perRow) ? perRow : [perRow, perRow, perRow, perRow];
-      grid.reveal(0, rows);
-      lensState.rows = rows.slice();
-      lens.userData.redraw();
+      let changed = false;
+      for (let k = 0; k < Q; k++) {
+        const n = Array.isArray(perRow) ? perRow[k] : perRow;
+        changed ||= lensState.rows[k] !== n;
+        lensState.rows[k] = n;
+      }
+      grid.reveal(0, lensState.rows);
+      if (changed) redrawLens();
     },
     setCursor,
     setLens(start, cursorFrame = -1) {
-      lensState.start = Math.max(0, Math.min(T - LENS, start));
+      const s = Math.max(0, Math.min(T - LENS, start));
+      if (s === lensState.start && cursorFrame === lensState.cursor) return;
+      lensState.start = s;
       lensState.cursor = cursorFrame;
-      lens.userData.redraw();
+      redrawLens();
     },
   };
 }

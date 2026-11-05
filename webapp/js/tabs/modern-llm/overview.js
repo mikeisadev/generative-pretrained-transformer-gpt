@@ -49,16 +49,18 @@ export function buildMacro() {
   for (let i = 0; i < 4; i++) arrow(group, [[macroX(i) + MACRO_W / 2 + 0.8, MACRO_Y], [macroX(i + 1) - MACRO_W / 2 - 0.8, MACRO_Y]], { color: 0x67e8f9, radius: 0.7, head: 4.5, z: 0.5 });
   // sotto "Modello" e "Inferenza": ragionamento e strumenti, usati al momento della risposta
   const subY = -44;
-  const reasonX = macroX(3) + 8;
-  const toolX = macroX(4) + 8;
+  const reasonX = macroX(3);
+  const toolX = macroX(4);
+  const topY = MACRO_Y - 20.5; // bordo inferiore dei blocchi della pipeline
   bigBlock(group, { title: "Ragionamento", subtitle: "più calcolo", text: "Catena di pensiero, più tentativi, verifica.", color: "#a3e635" }, { x: reasonX, y: subY, w: 50, h: 30, S: 12 });
   bigBlock(group, { title: "Tool e agenti", subtitle: "chiamate a strumenti", text: "Il modello chiede, il programma esegue, il risultato torna.", color: PALETTE.tool }, { x: toolX, y: subY, w: 50, h: 30, S: 12 });
-  arrow(group, [[macroX(4) - 8, MACRO_Y - 20.5], [reasonX + 6, subY + 15.5]], { color: 0xa3e635, radius: 0.6, head: 4 });
-  arrow(group, [[macroX(4) + 4, MACRO_Y - 20.5], [toolX, subY + 15.5]], { color: 0x34d399, radius: 0.6, head: 4 });
+  arrow(group, [[toolX - 12, topY], [reasonX + 12, subY + 15.5]], { color: 0xa3e635, radius: 0.6, head: 4 });
+  arrow(group, [[toolX, topY], [toolX, subY + 15.5]], { color: 0x34d399, radius: 0.6, head: 4 });
   // ritorno: le risposte verificate diventano segnale di addestramento (RL con ricompense verificabili)
-  arrow(group, [[reasonX - 25.5, subY], [macroX(2), subY], [macroX(2), MACRO_Y - 20.5]], { color: 0xfacc15, radius: 0.55, head: 4 });
-  const back = label("risposte verificate → ricompensa (RL)", { size: 4.4, color: "#fde68a" });
-  back.position.set(macroX(2) + 3 + back.scale.x / 2, subY + 3.6, 0.5);
+  const returnStartX = reasonX - 25.5;
+  arrow(group, [[returnStartX, subY], [macroX(2), subY], [macroX(2), topY]], { color: 0xfacc15, radius: 0.55, head: 4 });
+  const back = label("risposte verificate", { size: 4, color: "#fde68a", sub: "→ ricompensa (RL)", subColor: "#fde68a" });
+  back.position.set(macroX(2) + 2 + back.scale.x / 2, subY - 2 - back.scale.y / 2, 0.5);
   group.add(back);
   const title = label("Dalla raccolta dei dati alla risposta", { size: 7, color: "#e2e8f0" });
   title.position.set(0, MACRO_Y + 30, 0);

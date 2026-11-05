@@ -5,6 +5,7 @@
  *   pipeline.js   livello Dettaglio: pipeline text-to-image (U-Net oppure DiT)
  *   videoScene.js livello Dettaglio della parte video (cubo spazio-temporale, patch, attention)
  *   overview.js   livelli Blocchi e Panoramica (immagine e video)
+ *   levels.js     zoom semantico (LOD) e inquadrature dei livelli scelti a mano
  *   lab.js        "banco di lavoro" sopra la scena dove le azioni mostrano immagini e latenti
  *   actions.js    azioni animate su immagini (rumore, generazione, VAE, dentro il denoiser)
  *   denoiserSim.js denoiser simulato (dichiarato) per la generazione; imagery.js immagini e VAE simulato
@@ -15,12 +16,12 @@
 import * as THREE from "three";
 import { el } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
-import { LODController } from "../../core/lod.js";
 import { Menu } from "../../core/ui/menu.js";
 import { installActions } from "./actions.js";
 import { PATH, SOURCES } from "./content.js";
 import { renderScene, SimulatedVAE } from "./imagery.js";
 import { Lab } from "./lab.js";
+import { createLevels, FRONT } from "./levels.js";
 import { fillGaussian, mulberry32 } from "./math.js";
 import { DenoiserSim } from "./denoiserSim.js";
 import { buildBlocks, buildMacro, VIDEO_Y } from "./overview.js";
@@ -33,15 +34,12 @@ import { buildVideoScene } from "./videoScene.js";
 
 const IMAGE_SIZE = 256;
 
-/** Vista (camera) di partenza per ogni livello del LOD quando l'utente lo sceglie a mano. */
-const LEVEL_DISTANCE = { detail: 70, blocks: 170, macro: 380 };
-
-/** Direzione della camera per gli schemi: quasi di fronte, appena dall'alto. */
-const FRONT = new THREE.Vector3(0, 0.12, 1).normalize();
 /** Direzione per i dettagli: un po' di lato e dall'alto per dare profondità, ma testo leggibile. */
 const DETAIL_DIR = new THREE.Vector3(0.16, 0.2, 1).normalize();
-/** Riquadro della vista d'insieme (coordinate di scena): righe "Immagini" e "Video" del livello Blocchi. */
-const OVERVIEW_BOX = new THREE.Box3(new THREE.Vector3(-78, VIDEO_Y - 10, 0), new THREE.Vector3(75, 19, 0));
+/** Stessa soglia del nucleo (layout.js, codePanel.js) per il layout a una colonna. */
+const NARROW = window.matchMedia("(max-width: 900px)");
+/** Altezza del banco di lavoro: abbastanza sopra la pipeline da non sovrapporsi alle sue etichette. */
+const LAB_Y = 48;
 
 export async function createTab(root, app) {
   const ui = createTabLayout(root, {
@@ -70,50 +68,36 @@ export async function createTab(root, app) {
   host.onFrame((dt) => {
     for (const f of pipeline.flows) f.userData.tick(dt);
   });
+  // pavimento sotto la parte video: solo nel livello Dettaglio (negli schemi taglierebbe i blocchi)
   const grid = new THREE.GridHelper(400, 100, 0x1e293b, 0x111827);
   grid.position.y = VIDEO_Y - 16;
-  host.scene.add(grid);
+  detail.add(grid);
 
-  // stato iniziale delle texture: latente di puro rumore, immagine finale, embedding di t
-  const noise = fillGaussian(new Float32Array(vae.z0.length), mulberry32(1234));
-  pipeline.latentTex.forEach((t, c) => t.set(noise, c));
-  pipeline.epsTex.forEach((t, c) => t.set(noise, c));
-  pipeline.imageTex.set(reference);
-  pipeline.setTimestep(999);
+  // stato iniziale delle texture (vedi tab.resetPipeline): latente di puro rumore, immagine finale
+  const initialNoise = fillGaussian(new Float32Array(vae.z0.length), mulberry32(1234));
+  let shownCode = null; // firma del frammento di codice mostrato (vedi tab.showCode)
 
   const lab = new Lab({ textScale: 1.45 });
-  lab.group.position.set(0, 30, 0);
+  lab.group.position.set(0, LAB_Y, 0);
   host.scene.add(lab.group);
 
-  // `lod` è dichiarato prima: il costruttore chiama subito onChange
-  let lod = null;
-  lod = new LODController(host, {
-    levels: [
-      { id: "detail", label: "Dettaglio", maxDistance: 118, group: detail },
-      { id: "blocks", label: "Blocchi", maxDistance: 300, group: blocks.group },
-      { id: "macro", label: "Panoramica", maxDistance: Infinity, group: macro.group },
-    ],
+  const levels = createLevels({
+    host,
+    director,
+    groups: { detail, blocks: blocks.group, macro: macro.group },
     widgetParent: stage,
-    onChange: (id) => {
-      if (lod?.mode !== "auto" && lod?.mode === id) flyToLevel(id);
-    },
-  });
-  /** Scelta manuale di un livello: la camera si porta a una distanza adatta (di fronte per gli schemi). */
-  function flyToLevel(id) {
-    if (id === "detail") {
-      // se si stava guardando la parte video resta lì, altrimenti si va sul denoiser
+    // "Dettaglio" scelto a mano: se si stava guardando la parte video si resta lì, altrimenti il denoiser
+    focusDetail: () => {
       const onVideo = host.controls.target.y < VIDEO_Y * 0.75;
       return tab.focus(onVideo ? video.regions.intro() : tab.denoiser, { showFrame: false, margin: 1.05 });
-    }
-    const target = id === "macro" ? new THREE.Vector3(0, -36, 0) : OVERVIEW_BOX.getCenter(new THREE.Vector3());
-    return director.flyTo(target.clone().addScaledVector(FRONT, LEVEL_DISTANCE[id]), target, 1);
-  }
+    },
+  });
 
   // --- oggetto condiviso dai moduli
   const tab = {
     app,
     ui,
-    lod,
+    lod: levels.lod,
     lab,
     vae,
     sim,
@@ -123,24 +107,58 @@ export async function createTab(root, app) {
     video,
     blocks,
     denoiser: "unet",
-    /** Mostra un frammento di codice vero (chiave di SNIPPETS). */
+    /**
+     * Mostra un frammento di codice vero (chiave di SNIPPETS). Se è già quello mostrato non fa
+     * nulla: i passi delle azioni possono chiamarlo sempre (così "passo indietro" ritrova il codice
+     * giusto) senza riaprire il pannello che l'utente ha ridotto.
+     */
     showCode(key, title, highlight = []) {
       const s = SNIPPETS[key];
       if (!s) return;
+      const signature = `${key}|${title}|${highlight.join("|")}`;
+      if (signature === shownCode && !codePanel.root.hidden) return;
+      shownCode = signature;
       codePanel.show({ title, file: s.file, startLine: s.startLine, code: s.code, language: s.language, highlight });
+      // Su schermi stretti il pannello è un foglio in basso che, insieme alla barra del player,
+      // coprirebbe la scena: durante le azioni si apre ridotto (il titolo resta, si espande a mano).
+      if (ui.player.action && NARROW.matches) codePanel.root.classList.add("minimized");
     },
-    /** Vola su un componente del registro o su un oggetto. */
+    hideCode() {
+      shownCode = null;
+      codePanel.hide();
+    },
+    /** Blocca il livello del LOD durante un'azione ("detail") o lo libera ("auto") senza muovere la camera. */
+    lockLevel: levels.lock,
+    /** Riporta la pipeline allo stato iniziale (latente di rumore, immagine di riferimento, t = 999). */
+    resetPipeline() {
+      pipeline.latentTex.forEach((t, c) => t.set(initialNoise, c));
+      pipeline.epsTex.forEach((t, c) => t.set(initialNoise, c));
+      pipeline.imageTex.set(reference);
+      pipeline.setTimestep(999);
+    },
+    /**
+     * Vola su un componente del registro (id), su più componenti insieme (array di id), su un
+     * oggetto o su un Box3.
+     */
     focus(target, options) {
-      const object = typeof target === "string" ? pipeline.registry.get(target) ?? video.registry.get(target) : target;
-      if (!object) return Promise.resolve();
+      const lookup = (id) => pipeline.registry.get(id) ?? video.registry.get(id);
+      const targets = (Array.isArray(target) ? target : [target]).map((t) => (typeof t === "string" ? lookup(t) : t)).filter(Boolean);
+      if (!targets.length) return Promise.resolve();
       // Calcolo rimandato di un microtask: se nello stesso istante si apre il pannello del codice,
       // l'inquadratura tiene già conto dello spazio che copre.
-      return Promise.resolve().then(() => director.focus(object.isBox3 ? object : framingBox(object), { direction: DETAIL_DIR, ...options }));
+      return Promise.resolve().then(() => {
+        const box = new THREE.Box3();
+        for (const t of targets) box.union(t.isBox3 ? t : framingBox(t));
+        return director.focus(box, { direction: DETAIL_DIR, ...options });
+      });
     },
     setCaption(text) {
       ui.caption.textContent = text;
     },
     setDenoiser(kind) {
+      if (kind === tab.denoiser) return;
+      // "Un passo dentro il denoiser" ha i passi costruiti per il denoiser visibile all'avvio
+      if (ui.player.action?.id === "inside") ui.player.stop();
       tab.denoiser = kind;
       pipeline.setDenoiser(kind);
       blocks.unet.visible = kind === "unet";
@@ -148,6 +166,8 @@ export async function createTab(root, app) {
       viewButtons?.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.view === kind));
     },
   };
+
+  tab.resetPipeline();
 
   // --- sidebar
   const panePath = sidebar.addPane({ id: "percorso", title: "Percorso" });
@@ -160,7 +180,7 @@ export async function createTab(root, app) {
       if (item.denoiser) tab.setDenoiser(item.denoiser);
       if (item.focus) tab.focus(item.focus, { margin: item.margin ?? 1.25 });
       if (item.code) tab.showCode(item.code, item.codeTitle ?? title, item.highlight ?? []);
-      else codePanel.hide();
+      else tab.hideCode();
       tab.setCaption(item.caption ?? "");
     },
   });
@@ -168,7 +188,7 @@ export async function createTab(root, app) {
   const viewDefs = [
     { id: "unet", title: "Stable Diffusion: U-Net", text: "Encoder-decoder con skip connection, ResNet block, self- e cross-attention.", run: () => (tab.setDenoiser("unet"), tab.focus("unet")) },
     { id: "dit", title: "Diffusion Transformer (DiT)", text: "Il latente diventa una sequenza di patch: blocchi transformer con adaLN, come nel nostro GPT.", run: () => (tab.setDenoiser("dit"), tab.focus("dit")) },
-    { id: "pipeline", title: "Tutta la pipeline", text: "Dal prompt all'immagine, vista d'insieme (livello Blocchi).", run: () => tab.focus(OVERVIEW_BOX, { showFrame: false, margin: 1.08, direction: FRONT }) },
+    { id: "pipeline", title: "Tutta la pipeline", text: "Dal prompt all'immagine, vista d'insieme (livello Blocchi).", run: () => levels.flyToLevel("blocks") },
     { id: "video", title: "Video: latenti spazio-temporali", text: "Cubo di latenti, patch spazio-temporali, attention nello spazio e nel tempo.", run: () => tab.focus(video.regions.intro(), { showFrame: false, margin: 1.02, direction: FRONT }) },
   ];
   const viewButtons = el(
@@ -182,7 +202,7 @@ export async function createTab(root, app) {
           dataset: { view: v.id },
           className: v.id === "unet" ? "active" : "",
           onclick: () => {
-            codePanel.hide(); // le viste servono a guardare la scena: niente pannello sopra
+            tab.hideCode(); // le viste servono a guardare la scena: niente pannello sopra
             tab.setCaption("");
             v.run();
           },
@@ -200,7 +220,7 @@ export async function createTab(root, app) {
   installPlots(tab);
   installActions(tab, paneActions);
   installVideo(tab, paneActions);
-  ui.player.renderOverview(tab.actionsList, { categories: ["Immagini", "Video"] });
+  ui.player.renderOverview(tab.actionsList, { categories: ["Training", "Generazione (prompt)", "Video"] });
 
   // --- tasti
   root.tabIndex = -1;
@@ -214,9 +234,9 @@ export async function createTab(root, app) {
     }
   });
 
-  codePanel.hide(); // si apre quando un passo del percorso o un'azione mostra del codice
+  tab.hideCode(); // si apre quando un passo del percorso o un'azione mostra del codice
   tab.menu.select("idea.cosa");
-  tab.focus(OVERVIEW_BOX, { showFrame: false, margin: 1.08, duration: 0.01, direction: FRONT });
+  levels.flyToLevel("blocks", 0.01);
   window.__diffusionTab = tab; // per il debug dalla console e per gli screenshot automatici
 
   return {

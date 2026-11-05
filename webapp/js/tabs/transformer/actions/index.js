@@ -20,9 +20,16 @@ import { TrainingData } from "./trainingData.js";
 import { createTrainingRunAction } from "./trainingRun.js";
 import { createTrainingStepAction } from "./trainingStep.js";
 
+/** Id delle azioni di questo modulo (per riconoscerle nel player condiviso). */
+const OWN_ACTIONS = new Set(["prompt", "training-step", "training-run"]);
+
 /**
- * Se la preparazione di un'azione fallisce (rete, dati mancanti, prompt non valido) l'azione
- * mostra un solo passo con il messaggio, invece di lasciare un errore in console.
+ * Avvolge un'azione con due protezioni:
+ * - se la preparazione fallisce (rete, dati mancanti, prompt non valido) l'azione mostra un solo
+ *   passo con il messaggio, invece di lasciare un errore in console;
+ * - `ctx.isStale()` dice se, durante le attese di `build`, l'utente ha interrotto l'azione o ne ha
+ *   avviata un'altra (anche la stessa, con un doppio clic): in quel caso `build` non deve toccare
+ *   la scena e restituisce zero passi.
  */
 function safely(action, stage, tab) {
   const build = action.build;
@@ -34,9 +41,16 @@ function safely(action, stage, tab) {
       tab.focus("overview");
     },
     async build(ctx) {
+      // su schermi stretti la sidebar copre la scena: la chiudiamo, l'azione si guarda a tutto schermo
+      if (window.matchMedia?.("(max-width: 900px)").matches) tab.ui.root.classList.add("sidebar-collapsed");
+      const { player, data } = ctx;
+      const owner = player.action;
+      ctx.isStale = () => player.action !== owner || player.data !== data;
       try {
-        return await build(ctx);
+        const steps = await build(ctx);
+        return ctx.isStale() ? [] : steps;
       } catch (error) {
+        if (ctx.isStale()) return [];
         console.warn(`Azione "${action.title}":`, error);
         stage.restore();
         return [{ title: "Impossibile avviare l'azione", caption: error.message, duration: 6 }];
@@ -93,4 +107,32 @@ export function installActions(tab) {
     ui.player.register(wrapped);
   }
   pane.render(true);
+
+  installNarrowLayout(tab);
+
+  // Le azioni lavorano sulla vista "Architettura": se l'utente passa a un'altra vista, l'azione
+  // in corso si ferma (e la scena torna com'era) invece di continuare sotto un'altra vista.
+  tab.events.addEventListener("view", (event) => {
+    if (event.detail !== "architettura" && OWN_ACTIONS.has(ui.player.action?.id)) ui.player.stop();
+  });
+}
+
+/**
+ * Schermi stretti (≤ 900 px): il pannello del codice sta in basso e coprirebbe la barra del player.
+ * Durante le nostre azioni la classe `tfa-playing` lo sposta sopra la barra (vedi
+ * transformer-actions.css) e a ogni passo lo riduce alla sola intestazione: la scena resta
+ * visibile e chi vuole leggere il codice lo riapre con il suo pulsante.
+ */
+function installNarrowLayout(tab) {
+  const { ui } = tab;
+  const narrow = window.matchMedia("(max-width: 900px)");
+  const sync = () => {
+    const mine = OWN_ACTIONS.has(ui.player.action?.id);
+    ui.root.classList.toggle("tfa-playing", mine);
+    if (!mine || !narrow.matches) return;
+    ui.root.style.setProperty("--tfa-player-h", `${ui.player.bar.offsetHeight}px`);
+    ui.codePanel?.root.classList.add("minimized");
+  };
+  ui.player.on("step", sync);
+  ui.player.on("state", sync);
 }

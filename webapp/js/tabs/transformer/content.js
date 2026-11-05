@@ -391,7 +391,7 @@ export const STEPS = [
         title: "La loss: quanto sbaglia il modello",
         focus: "logits",
         code: "loss",
-        text: `<p>La cross-entropy misura quanto probabilità il modello ha dato al carattere giusto: più è bassa, meglio è.</p>
+        text: `<p>La cross-entropy misura quanta probabilità il modello ha dato al carattere giusto: più è bassa, meglio è.</p>
           <p>Un modello appena nato tira a indovinare tra {{vocab_size}} caratteri, quindi parte da circa
           ln({{vocab_size}}) ≈ <b>{{ln_vocab}}</b>. Dopo 5000 step il nostro arriva intorno a 1,66 sul train e 1,82 sulla validation.</p>`,
         math: [{ tex: String.raw`\mathcal{L} = -\frac{1}{BT}\sum_{b,t}\log p_\theta\big(y_{b,t}\mid x_{b,\le t}\big)` }],
@@ -444,6 +444,39 @@ export const STEPS = [
           <p>Il codice a destra cambia un singolo peso e lo ripristina: è l'esperimento <code>06_edit_a_weight.py</code>.</p>`,
         math: [{ tex: String.raw`N = \underbrace{VC}_{\text{tok}} + \underbrace{T_{\max}C}_{\text{pos}} + L\,\underbrace{(12C^2+10C)}_{\text{blocco}} + \underbrace{2C}_{\mathrm{LN}_f} + \underbrace{CV+V}_{\text{head}}`, note: "Con V={{vocab_size}}, C={{n_embd}}, T_max={{block_size}}, L={{n_layer}}: N = {{total}}." }],
       },
+    ],
+  },
+];
+
+/**
+ * Pannello "Fonti" del tab: da dove vengono il codice, l'architettura e le scelte di training.
+ * Solo fonti pubbliche e verificabili; i numeri del nostro modello vengono da data/model.json.
+ */
+export const SOURCES = [
+  {
+    title: "Il codice del corso",
+    items: [
+      { title: "Andrej Karpathy, «Let's build GPT: from scratch, in code, spelled out» (video, 2023)", url: "https://www.youtube.com/watch?v=kCc8FmEb1nY", note: "Il video da cui nasce il pacchetto gpt/: bigram, trucco matematico, attention, blocchi." },
+      { title: "karpathy/ng-video-lecture (GitHub)", url: "https://github.com/karpathy/ng-video-lecture", note: "Il notebook e lo script originali del video; i bug corretti sono elencati nel README del progetto." },
+      { title: "karpathy/nanoGPT (GitHub)", url: "https://github.com/karpathy/nanoGPT", note: "La versione «grande» dello stesso codice, usata per riprodurre GPT-2." },
+      { title: "Tiny Shakespeare (karpathy/char-rnn)", url: "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt", note: "Il file di testo del training (circa 1,1 milioni di caratteri)." },
+    ],
+  },
+  {
+    title: "Articoli scientifici",
+    items: [
+      { title: "Vaswani et al., «Attention Is All You Need» (2017)", url: "https://arxiv.org/abs/1706.03762", note: "Il transformer: scaled dot-product attention, multi-head, feed-forward 4×, connessioni residue." },
+      { title: "Radford et al., «Language Models are Unsupervised Multitask Learners» (GPT-2, 2019)", url: "https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf", note: "Il transformer solo-decoder con LayerNorm prima di ogni sotto-strato (pre-norm), come il nostro." },
+      { title: "He et al., «Deep Residual Learning for Image Recognition» (2015)", url: "https://arxiv.org/abs/1512.03385", note: "Le connessioni residue: x = x + f(x)." },
+      { title: "Ba, Kiros, Hinton, «Layer Normalization» (2016)", url: "https://arxiv.org/abs/1607.06450", note: "La normalizzazione sulle feature di ogni token, con γ e β appresi." },
+      { title: "Loshchilov, Hutter, «Decoupled Weight Decay Regularization» (AdamW, 2017)", url: "https://arxiv.org/abs/1711.05101", note: "L'ottimizzatore del training (torch.optim.AdamW)." },
+    ],
+  },
+  {
+    title: "Documentazione",
+    items: [
+      { title: "PyTorch: torch.nn", url: "https://pytorch.org/docs/stable/nn.html", note: "Embedding, Linear, LayerNorm, Dropout: i mattoni usati in gpt/." },
+      { title: "Spring AI Reference", url: "https://docs.spring.io/spring-ai/reference/", note: "Advisor, ChatClient, tool calling e vector store della vista Contesto e del tab RAG (lezioni L16-L18)." },
     ],
   },
 ];

@@ -9,7 +9,9 @@
  *   Panoramica → levels.js (Contesto → LLM → Risposta)
  *
  * Stato dell'animazione (`state`, vedi FULL_STATE): ogni passo dell'azione lo imposta in enter()
- * e lo fa avanzare in update(); le schede si ridisegnano solo quando la loro parte cambia.
+ * e lo fa avanzare in update(); le schede si ridisegnano solo quando la loro parte cambia, e mai
+ * più di una volta ogni REDRAW_INTERVAL secondi (durante lo streaming arrivano ~20 token al
+ * secondo: ridisegnare e ricaricare la texture a ogni token costerebbe più del rendering).
  * Nel ciclo per frame non si allocano oggetti: vettori, matrici e colori di lavoro sono riusati.
  */
 import * as THREE from "three";
@@ -38,6 +40,8 @@ export const FULL_STATE = Object.freeze({
 const NODE = { idle: new THREE.Color("#475569"), visited: new THREE.Color("#38bdf8"), hit: new THREE.Color("#34d399") };
 const EMBED_BARS = { pos: new THREE.Color("#fb923c"), neg: new THREE.Color("#3b82f6") };
 const TOKEN_TILES = 120;
+const REDRAW_INTERVAL = 0.12; // secondi minimi tra due ridisegni della stessa scheda
+const REDRAWS_PER_FRAME = 2; // upload di texture al massimo per frame
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _p = new THREE.Vector3();
@@ -52,6 +56,8 @@ export class ContextScene {
     this.levels.detail.name = "context-detail";
     this.state = { ...FULL_STATE };
     this.drawn = {}; // ultimo stato disegnato di barre e grafo
+    this.dirty = new Set(); // schede da ridisegnare (lo fa tick(), con un limite di frequenza)
+    this.time = 0;
     this.scenario = null;
     this.flows = [];
     this.routes = new Map();
@@ -96,7 +102,8 @@ export class ContextScene {
 
     // vettore della domanda: una barra per dimensione (256), nella metà bassa della scheda "embed"
     const e = SLOTS.embed;
-    this.embedArea = { x0: e.x - e.w / 2 + 0.7, width: e.w - 1.4, y: e.y - 1.9, scale: 4.2 };
+    // y = linea dello zero; maxHeight = altezza della barra più lunga (scala ricalcolata per ogni domanda)
+    this.embedArea = { x0: e.x - e.w / 2 + 0.7, width: e.w - 1.4, y: e.y - 1.6, maxHeight: 2.4, scale: 1 };
     this.embedBars = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 0.12), new THREE.MeshBasicMaterial({ transparent: true }), 256);
     this.embedBars.position.z = 0.15;
     this.embedBars.count = 0;
@@ -104,7 +111,8 @@ export class ContextScene {
 
     // grafo HNSW: nodi e archi del piano 0, posizioni = proiezione PCA dei vettori dei chunk
     const v = SLOTS.vectordb;
-    this.graphArea = { x: v.x, y: v.y - 0.7, w: v.w - 2.4, h: v.h - 5 };
+    // tra la riga "Nodi visitati" e la legenda in fondo alla scheda (i nodi non devono coprirla)
+    this.graphArea = { x: v.x, y: v.y - 0.4, w: v.w - 2.4, h: v.h - 6.2 };
     this.nodes = new THREE.InstancedMesh(new THREE.SphereGeometry(0.34, 16, 12), new THREE.MeshBasicMaterial({ transparent: true }), 64);
     this.nodes.position.z = 0.3;
     this.nodes.count = 0;
@@ -157,7 +165,16 @@ export class ContextScene {
     this.scenario = s;
     const vec = s.embedding?.vector;
     this.embedBars.count = vec ? vec.length : 0;
-    if (vec) for (let i = 0; i < vec.length; i++) this.embedBars.setColorAt(i, vec[i] >= 0 ? EMBED_BARS.pos : EMBED_BARS.neg);
+    if (vec) {
+      // la barra più lunga riempie l'area: i valori di un vettore normalizzato a 256 dimensioni
+      // sono piccoli (~0,06) e a scala fissa le barre sarebbero quasi piatte
+      let peak = 1e-6;
+      for (let i = 0; i < vec.length; i++) {
+        peak = Math.max(peak, Math.abs(vec[i]));
+        this.embedBars.setColorAt(i, vec[i] >= 0 ? EMBED_BARS.pos : EMBED_BARS.neg);
+      }
+      this.embedArea.scale = this.embedArea.maxHeight / peak;
+    }
     if (this.embedBars.instanceColor) this.embedBars.instanceColor.needsUpdate = true;
 
     const r = s.search;
@@ -207,6 +224,7 @@ export class ContextScene {
     }
     for (const card of this.cards.values()) card.key = null; // forza il ridisegno
     this.drawn = {};
+    this.dirty.clear();
     this.applyState();
   }
 
@@ -225,15 +243,35 @@ export class ContextScene {
     if (!s) return;
     const st = this.state;
     for (const [id, card] of this.cards) {
-      const key = stateKey(id, st, s);
-      card.draw(key, (pen) => PAINTERS[id](pen, s, st, this.info));
+      if (stateKey(id, st, s) !== card.key) this.dirty.add(id);
+      else this.dirty.delete(id);
     }
+    // senza ciclo per frame (vista nascosta) si disegna subito: nessuna animazione da proteggere
+    if (!this.visible) this.redrawCards(Infinity, Infinity);
     // barre e grafo si ricaricano sulla GPU solo se la loro parte di stato è cambiata
     if (this.drawn.embed !== st.embed) this.updateEmbedBars((this.drawn.embed = st.embed));
     const graphKey = `${Math.min(st.visited, 999)}:${st.retrieved}`;
     if (this.drawn.graph !== graphKey) {
       this.drawn.graph = graphKey;
       this.updateGraph(st.visited, st.retrieved);
+    }
+  }
+
+  /**
+   * Ridisegna le schede in attesa: al massimo `budget` per chiamata, e solo se l'ultimo ridisegno
+   * di quella scheda è più vecchio di REDRAW_INTERVAL. Disegna sempre lo stato più recente.
+   */
+  redrawCards(budget = REDRAWS_PER_FRAME, now = this.time) {
+    const s = this.scenario;
+    if (!s) return;
+    for (const id of this.dirty) {
+      if (budget <= 0) break;
+      const card = this.cards.get(id);
+      if (now - card.drawnAt < REDRAW_INTERVAL) continue;
+      this.dirty.delete(id);
+      card.draw(stateKey(id, this.state, s), (pen) => PAINTERS[id](pen, s, this.state, this.info));
+      card.drawnAt = Number.isFinite(now) ? now : this.time;
+      budget--;
     }
   }
 
@@ -338,6 +376,8 @@ export class ContextScene {
   // ---------------------------------------------------------------- ciclo per frame e visibilità
 
   tick(dt, elapsed) {
+    this.time = elapsed;
+    if (this.dirty.size) this.redrawCards();
     for (const f of this.flows) f.userData.tick(dt);
     const pulse = 0.6 + 0.4 * Math.sin(elapsed * 5);
     for (const o of Object.values(this.outlines)) if (o.visible) o.material.color.setRGB(0.4 * pulse, 0.91 * pulse, 0.98 * pulse);

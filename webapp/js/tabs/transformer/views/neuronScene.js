@@ -1,8 +1,8 @@
 /**
  * Scena 3D della vista "Rete neurale" (dati e calcoli in neuronModel.js).
  *
- * Prestazioni: tutti i neuroni sono UNA InstancedMesh (colore per istanza = attivazione);
- * tutti i 207.552 archi con peso sono UNA LineSegments, scritta nell'ordine "dal più forte"
+ * Prestazioni: tutti i neuroni sono UN THREE.Points (colore per vertice = attivazione);
+ * tutti gli archi con peso (207.552) sono UNA LineSegments, scritta nell'ordine "dal più forte"
  * (neuronModel.buildEdges → order): la soglia "mostra solo i pesi più forti" è soltanto
  * geometry.setDrawRange, senza ricostruire niente. Il livello "Blocchi" riusa la stessa
  * geometria con un materiale proprio (regola del LOD). Nessuna allocazione per frame.
@@ -26,31 +26,37 @@ const POS = [251, 146, 60].map((v) => v / 255); // arancione: positivo (come le 
 const NEG = [59, 130, 246].map((v) => v / 255); // blu: negativo
 const BASE = [0.3, 0.34, 0.42]; // neurone a zero: grigio visibile sullo sfondo scuro
 const PENDING = [0.13, 0.16, 0.21]; // non ancora calcolato (animazione)
+const PROB = [0.4, 0.91, 0.98]; // uscita: probabilità (azzurro)
+const INPUT = [0.88, 0.95, 1]; // ingresso one-hot acceso (quasi bianco)
+const ALL_REVEALED = () => 1;
 const STRIP_ROW = 0.4; // altezza di una riga della striscia dell'attention
 const STRIP_W = 2.2;
 
-/** Descrizioni delle colonne per il livello Blocchi. */
-const COLUMN_TEXT = {
-  tok_onehot: ["65 neuroni", "Un solo neurone acceso: il carattere in ingresso."],
-  pos_onehot: ["32 neuroni", "Acceso solo quello della posizione t."],
-  tok_emb: ["64 · tabella", "La riga della tabella del token."],
-  pos_emb: ["64 · tabella", "La riga della tabella della posizione."],
-  x0: ["64 · somma", "Token + posizione, numero per numero."],
-  x: ["64 · ingresso", "Lo stesso vettore uscito dalla riga sotto."],
-  ln1: ["64 · γ, β", "Normalizza: media 0, varianza 1."],
-  qkv: ["4 head × 3 × 16", "Query, key e value di ogni head."],
-  ctx: ["0 pesi", "Coefficienti calcolati dai dati: softmax(q·k)."],
-  concat: ["64 = 4 × 16", "Le uscite delle head affiancate."],
-  proj: ["64 + bias", "Rimescola le head."],
-  resid1: ["residuo", "x + attention"],
-  ln2: ["64 · γ, β", "Normalizza di nuovo."],
-  hidden: ["256 · ReLU", "Espande e scarta i negativi."],
-  ffnOut: ["64 + bias", "Comprime di nuovo a 64."],
-  resid2: ["residuo", "x + feed-forward"],
-  ln_f: ["64 · γ, β", "Normalizzazione finale."],
-  logits: ["65 + bias", "Un punteggio per carattere."],
-  probs: ["65", "Probabilità che sommano a 1."],
-};
+/** Descrizioni delle colonne per il livello Blocchi (numeri dalla configurazione del modello). */
+function columnText({ vocab_size: V, block_size: T, n_embd: C, n_head: H }) {
+  const hs = C / H;
+  return {
+    tok_onehot: [`${V} neuroni`, "Un solo neurone acceso: il carattere in ingresso."],
+    pos_onehot: [`${T} neuroni`, "Acceso solo quello della posizione t."],
+    tok_emb: [`${C} · tabella`, "La riga della tabella del token."],
+    pos_emb: [`${C} · tabella`, "La riga della tabella della posizione."],
+    x0: [`${C} · somma`, "Token + posizione, numero per numero."],
+    x: [`${C} · ingresso`, "Lo stesso vettore uscito dalla riga sotto."],
+    ln1: [`${C} · γ, β`, "Normalizza: media 0, varianza 1."],
+    qkv: [`${H} head × 3 × ${hs}`, "Query, key e value di ogni head."],
+    ctx: ["0 pesi", "Coefficienti calcolati dai dati: softmax(q·k)."],
+    concat: [`${C} = ${H} × ${hs}`, "Le uscite delle head affiancate."],
+    proj: [`${C} + bias`, "Rimescola le head."],
+    resid1: ["residuo", "x + attention"],
+    ln2: [`${C} · γ, β`, "Normalizza di nuovo."],
+    hidden: [`${4 * C} · ReLU`, "Espande e scarta i negativi."],
+    ffnOut: [`${C} + bias`, `Comprime di nuovo a ${C}.`],
+    resid2: ["residuo", "x + feed-forward"],
+    ln_f: [`${C} · γ, β`, "Normalizzazione finale."],
+    logits: [`${V} + bias`, "Un punteggio per carattere."],
+    probs: [`${V}`, "Probabilità che sommano a 1."],
+  };
+}
 
 function columnColor(col) {
   if (col.role === ROLE.input || col.key.endsWith("_emb")) return KIND_COLORS.embedding;
@@ -74,6 +80,7 @@ export class NeuronScene {
     this.macro.name = "neurons-macro";
     this.flows = [];
     this.tmp = new THREE.Vector3();
+    this.pointScale = { value: 1 };
     this.colorBuffer = new Float32Array(layout.count * 3);
     this.buildNeurons();
     this.buildStructure();
@@ -84,50 +91,75 @@ export class NeuronScene {
   }
 
   // ------------------------------------------------------------------ neuroni
+  /**
+   * Tutti i neuroni in UN solo THREE.Points: un vertice per neurone, disegnato come un disco.
+   * Prima erano 4.387 sfere istanziate (≈ 350.000 triangoli): con il rendering software un
+   * fotogramma costava ~300 ms; i punti costano quasi zero e da vicino restano tondi.
+   * Il diametro di ogni punto è in unità del mondo (attributo `aRadius`), come le sfere.
+   */
   buildNeurons() {
     const { count, positions, radii } = this.layout;
-    const mesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), // 80 triangoli: 4.387 sfere restano leggere
-      new THREE.MeshBasicMaterial({ color: 0xffffff }), count);
-    const m = new THREE.Matrix4();
-    for (let k = 0; k < count; k++) {
-      const r = radii[k];
-      m.makeScale(r, r, r).setPosition(positions[3 * k], positions[3 * k + 1], positions[3 * k + 2]);
-      mesh.setMatrixAt(k, m);
-    }
-    mesh.instanceColor = new THREE.InstancedBufferAttribute(this.colorBuffer, 3);
-    mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-    mesh.frustumCulled = false;
-    this.neurons = mesh;
-    this.detail.add(mesh);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("aRadius", new THREE.BufferAttribute(radii, 1));
+    const color = new THREE.BufferAttribute(this.colorBuffer, 3);
+    color.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute("color", color);
+    const material = new THREE.PointsMaterial({ vertexColors: true, sizeAttenuation: true, size: 1 });
+    material.onBeforeCompile = (shader) => {
+      // PointsMaterial: gl_PointSize = size * (scale / -z), con scale = metà dell'altezza in pixel.
+      // Per un diametro vero di 2r unità serve size = 2r / tan(fov/2): lo passa l'uniform uPointScale.
+      shader.uniforms.uPointScale = this.pointScale;
+      shader.vertexShader = shader.vertexShader
+        .replace("void main() {", "attribute float aRadius;\nuniform float uPointScale;\nvoid main() {")
+        .replace("gl_PointSize = size;", "gl_PointSize = size * 2.0 * aRadius * uPointScale;");
+      // Disco con il bordo un po' più scuro: sembra una pallina anche senza luci.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        "#include <color_fragment>\nfloat d = length(gl_PointCoord - 0.5) * 2.0;\nif (d > 1.0) discard;\ndiffuseColor.rgb *= mix(1.0, 0.7, smoothstep(0.55, 1.0, d));",
+      );
+    };
+    const points = new THREE.Points(geometry, material);
+    points.frustumCulled = false;
+    // La scala dipende dal campo visivo della camera: aggiornata prima di ogni disegno (nessuna allocazione).
+    points.onBeforeRender = (renderer, scene, camera) => {
+      this.pointScale.value = 1 / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    };
+    this.neurons = points;
+    this.detail.add(points);
   }
 
   /**
    * Colori dei neuroni: segno e intensità dell'attivazione, normalizzata per colonna.
    * @param {Float32Array} values @param {(colIndex: number) => number} reveal 0 = non calcolato, 1 = tutto
    */
-  setValues(values, reveal = () => 1) {
+  setValues(values, reveal = ALL_REVEALED) {
     const { columns } = this.layout;
     const c = this.colorBuffer;
-    columns.forEach((col, ci) => {
-      if (!col.n) return;
+    // Chiamata a ogni fotogramma durante l'animazione: niente closure né array temporanei qui dentro.
+    for (let ci = 0; ci < columns.length; ci++) {
+      const col = columns[ci];
+      if (!col.n) continue;
       const shown = Math.round(reveal(ci) * col.n);
       let max = 1e-9;
       for (let i = 0; i < col.n; i++) max = Math.max(max, Math.abs(values[col.offset + i]));
+      const isProbs = col.key === "probs";
+      const isInput = col.role === ROLE.input;
       for (let i = 0; i < col.n; i++) {
         const k = col.offset + i;
-        let rgb;
-        let a;
         if (i >= shown) {
           c.set(PENDING, 3 * k);
           continue;
         }
         const v = values[k];
-        if (col.key === "probs") {
-          a = Math.pow(v / max, 0.5);
-          rgb = [0.4, 0.91, 0.98];
-        } else if (col.role === ROLE.input) {
+        let rgb;
+        let a;
+        if (isProbs) {
+          a = Math.sqrt(v / max);
+          rgb = PROB;
+        } else if (isInput) {
           a = v > 0 ? 1 : 0;
-          rgb = [0.88, 0.95, 1];
+          rgb = INPUT;
         } else {
           a = Math.pow(Math.abs(v) / max, 0.6);
           rgb = v >= 0 ? POS : NEG;
@@ -136,8 +168,8 @@ export class NeuronScene {
         c[3 * k + 1] = BASE[1] + (rgb[1] - BASE[1]) * a;
         c[3 * k + 2] = BASE[2] + (rgb[2] - BASE[2]) * a;
       }
-    });
-    this.neurons.instanceColor.needsUpdate = true;
+    }
+    this.neurons.geometry.attributes.color.needsUpdate = true;
   }
 
   // ------------------------------------------------------------------ archi
@@ -209,7 +241,7 @@ export class NeuronScene {
       tag.position.set(col.x, col.key === "ctx" ? col.y + 7.2 : above, 0.2);
       this.detail.add(tag);
     }
-    // Q, K, V: tre gruppi nella stessa colonna (4 head da 16 ciascuno)
+    // Q, K, V: tre gruppi nella stessa colonna (n_head head da head_size ciascuno)
     for (let l = 0; l < this.spec.config.n_layer; l++) {
       const col = byId.get(`b${l}.qkv`);
       const C = this.spec.config.n_embd;
@@ -274,12 +306,13 @@ export class NeuronScene {
   // ------------------------------------------------------------------ livello Blocchi: un rettangolo per strato
   buildBlocksLevel() {
     const { columns, rows } = this.layout;
+    const texts = columnText(this.spec.config);
     for (const col of columns) {
       const same = columns.filter((c) => c.row === col.row && c !== col && Math.abs(c.x - col.x) > 0.01);
       const gap = Math.min(...same.map((c) => Math.abs(c.x - col.x)), 4);
       const width = Math.max(1.6, Math.min(3.4, gap - 0.35));
       const height = col.key === "ctx" ? 13.2 : col.yTop - col.yBottom + 0.7;
-      const [sub, text] = COLUMN_TEXT[col.key] ?? ["", ""];
+      const [sub, text] = texts[col.key] ?? ["", ""];
       const block = fitBlock({ title: col.short, subtitle: sub, text, width, height, maxScale: 1.7, color: columnColor(col), fill: "rgba(15,23,42,0.62)", bodyOpacity: 0.35, depth: 0.1 });
       block.position.set(col.x, col.y + (col.yTop + col.yBottom) / 2, 0.25);
       this.blocks.add(block);
@@ -299,7 +332,7 @@ export class NeuronScene {
     const params = this.spec.params;
     const sum = (test) => params.filter((p) => test(p.name)).reduce((a, p) => a + p.numel, 0);
     const neuronsIn = (row) => columns.filter((c) => c.row === row.index && c.role !== ROLE.copy).reduce((a, c) => a + c.n, 0);
-    const L = this.spec.config.n_layer;
+    const { n_layer: L, n_embd: C } = this.spec.config;
     const blocksOut = [];
     for (const row of rows) {
       const cols = columns.filter((c) => c.row === row.index);
@@ -315,11 +348,11 @@ export class NeuronScene {
       } else if (row.index > L) {
         title = "Uscita";
         n = sum((name) => name.startsWith("ln_f.") || name.startsWith("lm_head."));
-        text = "LayerNorm finale → 65 logits → softmax.";
+        text = `LayerNorm finale → ${this.spec.config.vocab_size} logits → softmax.`;
       } else {
         title = `Blocco ${row.layer}`;
         n = sum((name) => name.startsWith(`blocks.${row.layer}.`));
-        text = "LayerNorm → Q, K, V → attention → proiezione → + → LayerNorm → 256 nascosti → 64 → +";
+        text = `LayerNorm → Q, K, V → attention → proiezione → + → LayerNorm → ${4 * C} nascosti → ${C} → +`;
       }
       const block = fitBlock({
         title,

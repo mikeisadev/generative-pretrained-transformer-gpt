@@ -293,6 +293,12 @@ export class Links {
     this.line.geometry.attributes.color.needsUpdate = true;
   }
 
+  /** Nasconde il segmento i (lunghezza zero): niente linee "nere" dimenticate sullo sfondo. */
+  hide(i) {
+    this.positions.fill(0, i * 6, i * 6 + 6);
+    this.line.geometry.attributes.position.needsUpdate = true;
+  }
+
   setCount(n) {
     this.line.geometry.setDrawRange(0, 2 * Math.min(n, this.max));
   }

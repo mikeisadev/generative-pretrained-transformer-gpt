@@ -6,7 +6,7 @@
  * mentre avanza; senza azioni in corso i grafici mostrano la storia completa.
  */
 import { el } from "../../../core/dom.js";
-import { GROUP_KINDS, metricIndex, summarizeByKind } from "./trainingData.js";
+import { metricIndex, summarizeByKind } from "./trainingData.js";
 
 const LN_V = Math.log(65);
 const UPDATE_REFERENCE = 1e-3;
@@ -265,5 +265,3 @@ export class TrainingCharts {
     this.hist.setData({ values, bins: 50 });
   }
 }
-
-export { GROUP_KINDS };

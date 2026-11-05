@@ -10,6 +10,8 @@ import { meanAbsDiff, meanStd, SCHEDULES, snr } from "./math.js";
 import { REFERENCE_SCALE } from "./denoiserSim.js";
 
 const EVERY = 10; // un punto ogni 10 passi: 100 punti per curva bastano
+/** Nomi brevi delle serie: l'etichetta a fine linea deve entrare nel grafico. */
+const NAMES = { ddpm: "DDPM", sd: "SD 1.x" };
 
 function curve(schedule, f) {
   const pts = [];
@@ -27,11 +29,11 @@ export function installPlots(tab) {
   const beta = noise.chart("beta", {
     type: "line",
     title: "Schedule di β_t",
-    description: "Quanto rumore si aggiunge in UN passo. DDPM: retta da 0,0001 a 0,02. Stable Diffusion: 'scaled linear' da 0,00085 a 0,012 (si interpolano le radici).",
+    description: "Quanto rumore si aggiunge in UN passo. DDPM: retta da 0,0001 a 0,02. Stable Diffusion 1.x (SD 1.x): 'scaled linear' da 0,00085 a 0,012 (si interpolano le radici).",
     xLabel: "passo t",
     yLabel: "β_t",
   });
-  beta.setData({ series: [{ name: "DDPM (lineare)", points: curve(ddpm, (s, t) => s.betas[t]) }, { name: "Stable Diffusion (scaled linear)", points: curve(sd, (s, t) => s.betas[t]) }] });
+  beta.setData({ series: [{ name: NAMES.ddpm, points: curve(ddpm, (s, t) => s.betas[t]) }, { name: NAMES.sd, points: curve(sd, (s, t) => s.betas[t]) }] });
   const alphaBar = noise.chart("alphabar", {
     type: "line",
     title: "ᾱ_t: quanta immagine resta",
@@ -39,7 +41,7 @@ export function installPlots(tab) {
     xLabel: "passo t",
     yLabel: "ᾱ_t",
   });
-  alphaBar.setData({ series: [{ name: "DDPM", points: curve(ddpm, (s, t) => s.alphaBar[t]) }, { name: "Stable Diffusion", points: curve(sd, (s, t) => s.alphaBar[t]) }] });
+  alphaBar.setData({ series: [{ name: NAMES.ddpm, points: curve(ddpm, (s, t) => s.alphaBar[t]) }, { name: NAMES.sd, points: curve(sd, (s, t) => s.alphaBar[t]) }] });
   const snrChart = noise.chart("snr", {
     type: "line",
     title: "SNR(t) = ᾱ_t / (1 − ᾱ_t), scala log",
@@ -48,7 +50,7 @@ export function installPlots(tab) {
     yLabel: "SNR",
     yScale: "log",
   });
-  snrChart.setData({ series: [{ name: "DDPM", points: curve(ddpm, (s, t) => snr(s.alphaBar[t])) }, { name: "Stable Diffusion", points: curve(sd, (s, t) => snr(s.alphaBar[t])) }] });
+  snrChart.setData({ series: [{ name: NAMES.ddpm, points: curve(ddpm, (s, t) => snr(s.alphaBar[t])) }, { name: NAMES.sd, points: curve(sd, (s, t) => snr(s.alphaBar[t])) }] });
   const hist = noise.chart("hist", {
     type: "histogram",
     title: "Valori dei pixel di x_t",
@@ -131,6 +133,13 @@ export function installPlots(tab) {
       flicker.setData({ series: [{ name: "un frame alla volta", points: pairs(a) }, { name: "tutti insieme", points: pairs(b) }] });
     },
     open: () => charts.open(),
+    /** Porta in cima al pannello la sezione dell'azione in corso (anche a pannello chiuso). */
+    reveal(id) {
+      const section = charts.sections.get(id);
+      if (!section) return;
+      const body = charts.body;
+      body.scrollTop += section.root.getBoundingClientRect().top - body.getBoundingClientRect().top;
+    },
   };
   tab.plots.resetGeneration();
   tab.plots.showFlicker();

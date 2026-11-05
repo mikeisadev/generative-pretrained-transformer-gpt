@@ -7,7 +7,7 @@
  * dell'azione attiva restano quelle del nucleo); qui aggiungiamo dentro ogni categoria i nostri
  * contenuti. Le azioni registrate da altri moduli compaiono in coda, nelle loro categorie.
  */
-import { el } from "../../../core/dom.js";
+import { el, fillTemplate } from "../../../core/dom.js";
 import { mathBox } from "../../../core/ui/menu.js";
 import { VocabularyError } from "../../../engine/gpt.js";
 import { DEFAULT_PROMPT, PROMPT_LIMITS, checkPrompt } from "./promptRun.js";
@@ -179,7 +179,8 @@ export class ActionsPane {
     const prompt = section(CATEGORIES.prompt.title);
     if (prompt) {
       prompt.classList.add("tfa-group", "tfa-group-prompt");
-      prompt.querySelector("h3").after(html("p", "tfa-lead", CATEGORIES.prompt.lead), this.form);
+      const params = this.tab.spec.total_params.toLocaleString("it-IT");
+      prompt.querySelector("h3").after(html("p", "tfa-lead", fillTemplate(CATEGORIES.prompt.lead, { params })), this.form);
       prompt.append(this.output, ...this.deepPrompt);
     }
     const training = section(CATEGORIES.training.title);

@@ -37,7 +37,7 @@ export const STEPS = [
         title: "Cosa cambia rispetto al testo",
         focus: "overview",
         code: "js:codec.js#encodeFeatures",
-        text: `<p>Il GPT della lezione lavora su <strong>token discreti</strong>: 65 caratteri possibili, uno dopo l'altro. Il testo nasce già "a pezzi".</p>
+        text: `<p>Il GPT della lezione lavora su <strong>token discreti</strong>: {{gptVocab}} caratteri possibili, uno dopo l'altro. Il testo nasce già "a pezzi".</p>
           <p>L'audio invece è <strong>continuo</strong> e <strong>lunghissimo</strong>: {{samples}} campioni per {{duration}} secondi, mentre una frase di {{duration}} secondi ha qualche decina di caratteri.
           Per usare la stessa idea del "prossimo token" servono due passi in più:</p>
           <ul>
@@ -111,7 +111,7 @@ export const STEPS = [
         highlight: ["SEANetEncoder", "bins=1024"],
         text: `<p>Un codec neurale come <strong>SoundStream</strong> (Google, 2021) o <strong>EnCodec</strong> (Meta, 2022) ha un <strong>encoder convoluzionale</strong>: strati di convoluzioni che riducono via via la risoluzione nel tempo.
           In EnCodec a 24 kHz il fattore di riduzione è 8·5·4·2 = 320: esce <strong>un vettore ogni 320 campioni, cioè 75 al secondo</strong>. EnCodec aggiunge anche strati LSTM.</p>
-          <p>Nel <strong>nostro codec giocattolo</strong> (simulazione didattica) l'encoder è fisso e non impara: per ogni frame da 20 ms prende lo spettro di ampiezza fino a 4 kHz in scala logaritmica, un vettore di {{bins}} numeri.
+          <p>Nel <strong>nostro codec giocattolo</strong> (simulazione didattica) l'encoder è fisso e non impara: ogni 20 ms prende lo spettro di ampiezza di una finestra di 64 ms, fino a 4 kHz e in scala logaritmica: un vettore di {{bins}} numeri.
           Così si vede bene l'idea senza dover addestrare una rete.</p>`,
       },
       {

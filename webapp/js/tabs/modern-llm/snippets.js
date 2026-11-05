@@ -6,7 +6,7 @@
  * - Le funzioni JavaScript di questo tab: lette dal sorgente di sim.js a runtime, così il codice
  *   mostrato è esattamente quello che fa girare le animazioni.
  */
-import { fetchJson } from "../../core/binary.js";
+import { loadModel } from "./ourModel.js";
 
 export const EXTERNAL = {
   "llama.rmsnorm": {
@@ -148,7 +148,7 @@ const SIM_URL = new URL("./sim.js", import.meta.url);
 
 export class Snippets {
   constructor() {
-    this.model = fetchJson(new URL("../../../data/model.json", import.meta.url)).catch(() => null);
+    this.model = loadModel();
     this.sim = fetch(SIM_URL).then((r) => (r.ok ? r.text() : "")).catch(() => "");
   }
 

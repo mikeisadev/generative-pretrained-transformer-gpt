@@ -157,7 +157,7 @@ function interpAction(tab) {
       },
       {
         title: "Autoencoder sparso",
-        caption: "Il dictionary learning addestra un autoencoder a ricostruire le attivazioni usando poche «feature» accese su un dizionario molto più grande. Anthropic: da 4.000 feature (2023) a 34 milioni su Claude 3 Sonnet (2024). Nomi qui illustrativi.",
+        caption: "Il dictionary learning addestra un autoencoder a ricostruire le attivazioni usando poche «feature» accese su un dizionario molto più grande. Anthropic: oltre 4.000 feature da 512 neuroni (2023), fino a 34 milioni su Claude 3 Sonnet (2024). Nomi qui illustrativi.",
         duration: 6,
         enter() {
           r.sae(0.5);

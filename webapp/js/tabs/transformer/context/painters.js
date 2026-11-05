@@ -119,7 +119,7 @@ export const PAINTERS = {
     pen.ctx.globalAlpha = 1;
   },
 
-  tokenize(pen, s, st) {
+  tokenize(pen, s, st, info) {
     pen.header("Tokenizzazione", "testo → token");
     if (!s.prompt) return unused(pen, "Nessun token: domanda bloccata.");
     const pieces = tokenize(s.question).slice(0, 20);
@@ -131,7 +131,7 @@ export const PAINTERS = {
     }
     pen.y += 1.35;
     const n = st.call >= 2 && s.calls[1] ? s.calls[1].input : s.prompt.tokens.total;
-    pen.text(`≈ ${it(n)} token BPE per ${PRODUCTION_MODEL}. Il nostro GPT (1 token = 1 carattere) ne legge al massimo 32: qui ne servirebbero ${it(s.prompt.text.length)}.`, { size: 0.6, color: INK.muted, maxLines: 3 });
+    pen.text(`≈ ${it(n)} token BPE per ${PRODUCTION_MODEL}. Il nostro GPT (1 token = 1 carattere) ne legge al massimo ${info.block}: qui ne servirebbero ${it(s.prompt.text.length)}.`, { size: 0.6, color: INK.muted, maxLines: 3 });
   },
 
   llm(pen, s, st, info) {

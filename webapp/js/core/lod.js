@@ -36,6 +36,25 @@ export function setGroupOpacity(group, alpha) {
   });
 }
 
+/**
+ * Cambia l'opacità "di base" di un materiale gestito dal LOD (per animazioni di opacità che devono
+ * convivere con le sfumature tra livelli): il LOD calcola opacity = baseOpacity × alpha del livello,
+ * quindi qui si aggiorna la base e si riapplica l'alpha in corso.
+ */
+export function setBaseOpacity(material, opacity) {
+  const ud = material.userData;
+  const base = ud.baseOpacity ?? material.opacity;
+  const alpha = base > 1e-6 ? material.opacity / base : 1;
+  if (ud.baseOpacity === undefined) ud.baseTransparent = material.transparent;
+  ud.baseOpacity = opacity;
+  material.opacity = opacity * alpha;
+  const transparent = ud.baseTransparent || opacity < 0.999 || alpha < 0.999;
+  if (material.transparent !== transparent) {
+    material.transparent = transparent;
+    material.needsUpdate = true;
+  }
+}
+
 export class LODController {
   /**
    * @param {import("./sceneHost.js").SceneHost} host
@@ -43,12 +62,18 @@ export class LODController {
    * @param {{id: string, label: string, maxDistance: number, group: THREE.Object3D}[]} options.levels
    *        dal più vicino al più lontano; l'ultimo livello di solito ha maxDistance = Infinity
    * @param {HTMLElement} [options.widgetParent] dove disegnare il selettore dei livelli
-   * @param {(id: string) => void} [options.onChange]
+   * @param {(id: string) => void} [options.onChange] a ogni cambio del livello attivo
+   * @param {(mode: string) => void} [options.onPick] quando lo STUDENTE sceglie un livello nel selettore
+   *        (non quando lo fa il codice con setMode): di solito per inquadrare quel livello
+   * @param {() => number} [options.distanceScale] moltiplica tutte le soglie (es. > 1 su schermi stretti,
+   *        dove per far entrare lo stesso oggetto la camera deve stare più lontana)
    */
-  constructor(host, { levels, widgetParent = null, onChange = () => {} }) {
+  constructor(host, { levels, widgetParent = null, onChange = () => {}, onPick = null, distanceScale = () => 1 }) {
     this.host = host;
     this.levels = levels;
     this.onChange = onChange;
+    this.onPick = onPick;
+    this.distanceScale = distanceScale;
     this.mode = "auto";
     this.alphas = new Map(levels.map((l) => [l.id, 0]));
     this.current = null;
@@ -57,7 +82,8 @@ export class LODController {
     this.setActive(this.pickByDistance(host.zoomDistance()), true);
   }
 
-  pickByDistance(d) {
+  pickByDistance(distance) {
+    const d = distance / Math.max(1e-6, this.distanceScale());
     const index = this.levels.findIndex((l) => l.id === this.current);
     for (let i = 0; i < this.levels.length; i++) {
       const level = this.levels[i];
@@ -73,6 +99,12 @@ export class LODController {
     this.mode = mode;
     this.widget?.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
     if (mode !== "auto") this.setActive(mode);
+  }
+
+  /** Scelta dal selettore: come setMode, più il richiamo onPick (es. per inquadrare il livello). */
+  pick(mode) {
+    this.setMode(mode);
+    this.onPick?.(mode);
   }
 
   setActive(id, immediate = false) {
@@ -104,7 +136,7 @@ export class LODController {
       { className: "lod-switch", role: "group", ariaLabel: "Livello di dettaglio" },
       el("span", { className: "lod-title" }, "Zoom: ", el("strong", { dataset: { current: "" } })),
       ...buttons.map((b) =>
-        el("button", { type: "button", className: b.mode === "auto" ? "active" : "", dataset: { mode: b.mode }, onclick: () => this.setMode(b.mode) }, b.label),
+        el("button", { type: "button", className: b.mode === "auto" ? "active" : "", dataset: { mode: b.mode }, onclick: () => this.pick(b.mode) }, b.label),
       ),
     );
     parent.append(widget);

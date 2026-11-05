@@ -7,7 +7,8 @@
  *     id, title, category,            // category raggruppa le azioni nella panoramica (es. "Prompt", "Training")
  *     summary,                        // una frase per la panoramica
  *     steps?: Step[],                 // passi fissi, oppure
- *     build?: async (ctx) => Step[],  // passi costruiti al momento (es. tanti passi quanti token generati)
+ *     build?: async (ctx) => Step[],  // passi costruiti al momento (es. tanti passi quanti token generati);
+ *                                     // ctx.isStale() diventa true se l'utente ferma o riavvia durante l'attesa
  *     onStart?(ctx), onEnd?(ctx), onStop?(ctx)
  *   }
  * Un passo:
@@ -38,6 +39,7 @@ export class ActionPlayer {
     this.playing = false;
     this.speed = 1;
     this.data = {};
+    this.run = 0; // cresce a ogni start/stop: una preparazione (build) superata non deve partire
     this.listeners = { step: new Set(), state: new Set(), end: new Set() };
     this.renderBar(parent);
     host.onFrame((dt) => this.tick(dt));
@@ -82,6 +84,7 @@ export class ActionPlayer {
     const action = this.actions.get(id);
     if (!action) throw new Error(`azione sconosciuta: ${id}`);
     this.stop();
+    const run = ++this.run;
     this.action = action;
     this.data = {};
     this.bar.hidden = false;
@@ -89,8 +92,12 @@ export class ActionPlayer {
     this.caption.textContent = "Preparazione…";
     this.overview?.querySelectorAll(".action-card").forEach((c) => c.classList.toggle("active", c.dataset.action === id));
     const ctx = this.ctx();
+    ctx.isStale = () => run !== this.run; // per le build lunghe: smetti di toccare la scena se true
     await action.onStart?.(ctx);
-    this.steps = action.steps ?? (await action.build?.(ctx)) ?? [];
+    if (run !== this.run) return; // fermata o sostituita durante onStart
+    const steps = action.steps ?? (await action.build?.(ctx)) ?? [];
+    if (run !== this.run) return; // fermata o sostituita durante la preparazione
+    this.steps = steps;
     this.index = -1;
     this.playing = true;
     this.goTo(0);
@@ -99,6 +106,7 @@ export class ActionPlayer {
 
   stop() {
     if (!this.action) return;
+    this.run++;
     this.currentStep()?.exit?.(this.ctx());
     this.action.onStop?.(this.ctx());
     this.action = null;

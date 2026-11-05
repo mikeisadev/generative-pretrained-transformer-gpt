@@ -19,7 +19,9 @@ import {
   logitsGradient,
   makeBatch,
   quantizeSigned,
+  rateLimiter,
   rowNorms,
+  scaledScores,
   segmentIndex,
   softmaxWithTemperature,
   visibleChar,
@@ -111,6 +113,21 @@ test("quantizzazione come gpt/export.py e piccole utility numeriche", () => {
   assert.deepEqual([...rowNorms(Float32Array.from([3, 4, 0, 0]), 2, 2)], [5, 0]);
 });
 
+test("rateLimiter: al massimo N volte al secondo di tempo reale, con forzatura e reset", () => {
+  let now = 0;
+  const limiter = rateLimiter(10, () => now); // un aggiornamento ogni 100 ms
+  assert.equal(limiter.ready(), true);
+  now = 50;
+  assert.equal(limiter.ready(), false);
+  assert.equal(limiter.ready(true), true, "la forzatura (fine del passo) passa sempre");
+  now = 120;
+  assert.equal(limiter.ready(), false, "il conteggio riparte dall'ultimo aggiornamento forzato");
+  now = 151;
+  assert.equal(limiter.ready(), true);
+  limiter.reset();
+  assert.equal(limiter.ready(), true, "dopo reset il primo aggiornamento è immediato");
+});
+
 test("makeBatch: y è x spostato di uno, come get_batch", () => {
   const ids = Array.from({ length: 100 }, (_, i) => i);
   const batch = makeBatch(ids, 8, 4, mulberry32(3));
@@ -158,6 +175,16 @@ test("runPrompt: i dati raccolti coincidono con il motore (stesso seed → stess
   assert.equal(s0.contextStart, DEFAULT_PROMPT.length - 32);
   // la ruota con il numero estratto indica proprio il token scelto
   assert.equal(segmentIndex(cumulative(s0.probs), s0.u), s0.id);
+  // i punteggi "prima della maschera" coincidono con quelli del motore sotto la diagonale
+  const head = run.trace.blocks[0].heads[0];
+  const T = run.trace.T;
+  const raw = scaledScores(head.q, head.k, T, run.trace.headSize);
+  for (let i = 0; i < T; i++) {
+    for (let j = 0; j < T; j++) {
+      if (j <= i) assert.ok(Math.abs(raw[i * T + j] - head.scores[i * T + j]) < 1e-4, `punteggio (${i}, ${j})`);
+      else assert.equal(head.scores[i * T + j], -Infinity);
+    }
+  }
   // l'ultima riga della logit lens coincide con la distribuzione a temperatura 1
   const { probs } = e.nextTokenDistribution(s0.contextIds, { temperature: 1 });
   s0.lens.at(-1).probs.forEach((p, i) => close(p, probs[i], 1e-5));

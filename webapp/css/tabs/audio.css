@@ -73,4 +73,19 @@
 .audio-link { margin-top: 10px; width: 100%; }
 
 /* Durante un'azione il pannello del codice si accorcia e lascia libera la barra del player in basso. */
-.audio-tab:has(.player-bar:not([hidden])) .code-panel { max-height: calc(100% - 290px); }
+@media (min-width: 901px) {
+  .audio-tab:has(.player-bar:not([hidden])) .code-panel { max-height: calc(100% - 290px); }
+}
+
+/* Telefono e tablet stretto: tre file di comandi che non si coprono.
+   1ª fila: menu, "Vista d'insieme", "Ascolta" (testo corto), "Grafici"; 2ª fila: selettore dello zoom.
+   Durante un'azione il codice sta in alto, la barra del player in basso, la scena nel mezzo. */
+@media (max-width: 900px) {
+  .audio-tab .stage-toolbar { left: 56px; right: auto; }
+  .audio-tab .stage-toolbar button { font-size: 12px; padding: 5px 8px; white-space: nowrap; }
+  .audio-tab .audio-wide { display: none; }
+  .audio-tab .lod-switch { top: 52px; left: 12px; max-width: calc(100% - 24px); flex-wrap: wrap; }
+  .audio-tab .lod-switch .lod-title { display: none; }
+  .audio-tab:not(.sidebar-collapsed) :is(.lod-switch, .stage-toolbar) { display: none; }
+  .audio-tab:has(.player-bar:not([hidden])) .code-panel { top: 96px; bottom: auto; max-height: 30vh; }
+}

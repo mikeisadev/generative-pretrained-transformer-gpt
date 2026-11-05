@@ -62,6 +62,27 @@
 .rag-sources a { color: #7dd3fc; }
 .rag-sources p { margin: 2px 0 0; }
 
-/* Pannello del codice un po' più stretto in questo tab: le stazioni 3D hanno lavagne di testo
-   che devono restare leggibili accanto al codice. */
-.rag-tab .code-panel { width: min(470px, 34vw); }
+/* Pannello del codice in questo tab.
+   - Opaco, senza backdrop-filter e con un'ombra corta: sopra una scena 3D che cambia a ogni frame,
+     sfocatura e ombra larga vanno ricalcolate a ogni frame (con il rendering software costavano
+     circa 30 ms per frame).
+   - Su schermi larghi è più stretto: le lavagne 3D accanto devono restare leggibili.
+   - Durante un'azione non deve coprire la barra del player (in basso al centro). */
+.rag-tab .code-panel {
+  backdrop-filter: none;
+  background: #0f172a;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+@media (min-width: 901px) {
+  .rag-tab .code-panel { width: min(470px, 34vw); }
+  .rag-tab:has(.player-bar:not([hidden])) .code-panel { max-height: calc(100% - 280px); }
+}
+@media (max-width: 900px) {
+  /* telefono: durante le azioni il codice sta in alto (ridotto all'intestazione, vedi index.js) */
+  .rag-tab:has(.player-bar:not([hidden])) .code-panel { top: 104px; bottom: auto; max-height: 34vh; }
+}
+@media (max-width: 600px) {
+  /* il selettore dello zoom va a capo invece di finire sotto il pulsante "Grafici" */
+  .rag-tab .lod-switch { flex-wrap: wrap; right: 120px; }
+  .rag-tab .lod-switch .lod-title { width: 100%; }
+}

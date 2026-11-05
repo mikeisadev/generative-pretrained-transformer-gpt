@@ -13,6 +13,11 @@ const RIGHT_X = 9.2;
 const Y0 = 2.6;
 const cx = (j, x0) => x0 + (j - (FLASH_N - 1) / 2) * CELL;
 const cy = (i) => Y0 + ((FLASH_N - 1) / 2 - i) * CELL;
+/** Testo di riposo della regione (ripristinato anche alla fine dell'azione). */
+const DEFAULT_NOTE = [
+  { text: "Il risultato è identico all'attention normale: cambia solo come si muovono i dati.", bold: true },
+  { text: "Contesti lunghi: Llama 3.1 e DeepSeek-V3 arrivano a 128K token.", color: PALETTE.muted },
+];
 
 export function buildFlash(group) {
   text(group, "FlashAttention: a blocchi", LEFT_X, 8.9, { size: 0.5, color: "#5eead4" });
@@ -63,12 +68,13 @@ export function buildFlash(group) {
       api.lastW = W;
       windowNote.set(W >= FLASH_N ? "Senza finestra: ogni token vede tutti i precedenti" : `W = ${W}: ogni token vede solo gli ultimi ${W}\n(Mistral 7B: W = 4096)`);
     },
-    note(lines) {
+    /** Testo sotto le matrici; senza argomenti torna quello di riposo. */
+    note(lines = DEFAULT_NOTE) {
       note.set(lines);
     },
   };
   api.tile(-1);
   api.window(4);
-  api.note([{ text: "Il risultato è identico all'attention normale: cambia solo come si muovono i dati.", bold: true }, { text: "Contesti lunghi: Llama 3.1 e DeepSeek-V3 arrivano a 128K token.", color: PALETTE.muted }]);
+  api.note();
   return api;
 }

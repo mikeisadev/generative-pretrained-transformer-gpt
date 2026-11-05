@@ -18,6 +18,13 @@ const human = (v) => {
   return String(Math.round(v));
 };
 
+/** Testo di riposo sotto le barre (l'azione «Capacità emergenti» lo sostituisce e poi lo ripristina). */
+const DEFAULT_NOTE = [
+  { text: "Fit di Chinchilla: L(N, D) = 1,69 + 406,4 / N^0,34 + 410,7 / D^0,28, con C ≈ 6·N·D", bold: true },
+  { text: "Questo fit dà modelli più piccoli degli altri due metodi del paper (63-67B per il budget di Gopher).", color: PALETTE.muted },
+  { text: "Da quelli viene Chinchilla: 70B parametri e 1,4T token, stesso calcolo di Gopher (280B), risultati migliori.", color: PALETTE.muted },
+];
+
 export function buildScaling(group) {
   const bars = new Cells(BUDGETS.length * 2, { w: 1.9, h: 1, d: 0.6 });
   group.add(bars.mesh);
@@ -30,11 +37,7 @@ export function buildScaling(group) {
   text(group, "■ parametri N", -11.4, -7.9, { size: 0.45, color: "#fb923c" });
   text(group, "■ token D", -5.4, -7.9, { size: 0.45, color: "#f472b6" });
   text(group, "altezza in scala log: ogni tacca = ×10", 6.2, -7.9, { size: 0.4, color: PALETTE.muted });
-  const note = new Plate({ w: 34, h: 3, size: 0.55, align: "center" }).place(group, 0, -10.6);
-  note.set([
-    { text: "Fit di Chinchilla: L(N, D) = 1,69 + 406,4 / N^0,34 + 410,7 / D^0,28, con C ≈ 6·N·D", bold: true },
-    { text: "Chinchilla: 70B parametri e 1,4T token, stesso calcolo di Gopher (280B) e risultati migliori.", color: PALETTE.muted },
-  ]);
+  const note = new Plate({ w: 34, h: 3.4, size: 0.55, align: "center" }).place(group, 0, -10.5);
 
   const api = {
     values,
@@ -57,7 +60,12 @@ export function buildScaling(group) {
       });
       api.focus = focus;
     },
+    /** Testo sotto le barre; senza argomenti torna quello di riposo. */
+    note(lines = DEFAULT_NOTE) {
+      note.set(lines);
+    },
   };
   api.set(1, -1);
+  api.note();
   return api;
 }

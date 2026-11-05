@@ -123,7 +123,7 @@ function kvAction(tab) {
         enter() {
           r.set(r.T, true);
           tab.plots.kvWork.setData(work(r.T));
-          tab.ui.charts.open();
+          tab.openCharts();
         },
       },
     ],
@@ -146,6 +146,7 @@ function flashAction(tab) {
     onStop() {
       r.tile(-1);
       r.window(4);
+      r.note();
     },
     steps: [
       {
@@ -155,7 +156,7 @@ function flashAction(tab) {
         enter() {
           r.tile(-1);
           r.window(FLASH_N);
-          r.note([{ text: "Matrice intera: T² numeri scritti e riletti dalla HBM.", bold: true }, { text: "Qui T = 16; con 128K token sarebbero 16 miliardi di punteggi per head.", color: "#94a3b8" }]);
+          r.note([{ text: "Matrice intera: T² numeri scritti e riletti dalla HBM.", bold: true }, { text: "Qui T = 16; con 128K token (131.072) sarebbero circa 17 miliardi di punteggi per head e per layer.", color: "#94a3b8" }]);
         },
       },
       {
@@ -175,7 +176,7 @@ function flashAction(tab) {
       },
       {
         title: "Fatto",
-        caption: "Tutti i blocchi utili calcolati. Nel paper: fino a 3 volte più veloce dell'implementazione standard e memoria aggiuntiva che cresce in modo lineare con la lunghezza, non quadratico.",
+        caption: "Tutti i blocchi utili calcolati. Nel paper: addestramento di GPT-2 3 volte più veloce e memoria aggiuntiva che cresce in modo lineare con la lunghezza, non quadratico.",
         duration: 3.5,
         enter() {
           r.window(FLASH_N);
@@ -262,7 +263,7 @@ function specAction(tab) {
         duration: 6,
         enter() {
           r.set(SPEC_ROUNDS.length);
-          tab.ui.charts.open();
+          tab.openCharts();
           tab.plots.spec.setHighlight({ x: 0.7 });
         },
       },

@@ -67,3 +67,8 @@
 .tfa-chart-controls { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 12.5px; color: var(--muted); }
 .tfa-chart-controls label { display: flex; align-items: center; gap: 6px; }
 .tfa-chart-controls .tfa-select { width: auto; padding: 3px 6px; }
+
+/* Schermi stretti: durante un'azione il codice (ridotto) sta sopra la barra del player, non sotto. */
+@media (max-width: 900px) {
+  .tfa-playing .code-panel { bottom: calc(var(--tfa-player-h, 150px) + 52px); max-height: 32vh; }
+}

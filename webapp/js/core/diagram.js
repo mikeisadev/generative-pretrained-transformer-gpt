@@ -77,11 +77,19 @@ export function makeBlock({ title, subtitle = "", text = "", width = 6, height =
     y += titlePx * 0.62 * 1.4 + 2;
   }
   if (text) {
-    const bodyPx = titlePx * 0.6;
+    // La descrizione deve entrare tutta: se non ci sta, il corpo del testo si rimpicciolisce
+    // (fino al 60% della misura normale); solo oltre quel limite le ultime righe vengono tagliate.
+    const fits = (px) => {
+      ctx.font = `400 ${px}px Inter, system-ui, sans-serif`;
+      const lines = wrapLines(ctx, text, canvas.width - 2 * pad);
+      return { lines, ok: y + px * 0.3 + lines.length * px * 1.3 - px * 0.3 <= canvas.height - pad };
+    };
+    let bodyPx = titlePx * 0.6;
+    let layout = fits(bodyPx);
+    while (!layout.ok && bodyPx > titlePx * 0.36) layout = fits((bodyPx *= 0.92));
     ctx.fillStyle = "#e2e8f0";
-    ctx.font = `400 ${bodyPx}px Inter, system-ui, sans-serif`;
     y += bodyPx * 0.3;
-    for (const line of wrapLines(ctx, text, canvas.width - 2 * pad)) {
+    for (const line of layout.lines) {
       if (y + bodyPx > canvas.height - pad) break;
       ctx.fillText(line, pad, y);
       y += bodyPx * 1.3;
@@ -94,7 +102,9 @@ export function makeBlock({ title, subtitle = "", text = "", width = 6, height =
   const group = new THREE.Group();
   const face = new THREE.Mesh(
     new THREE.PlaneGeometry(width, height),
-    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }),
+    // polygonOffset: da lontano 0,01 unità non bastano a separare la faccia col testo dal corpo
+    // (z-fighting: righe scure sul testo); l'offset la porta sempre davanti.
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }),
   );
   face.position.z = depth / 2 + 0.01;
   const body = new THREE.Mesh(

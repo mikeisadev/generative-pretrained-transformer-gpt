@@ -110,10 +110,20 @@ export class VectorGrid {
 /**
  * makeBlock con testo ingrandito: il blocco si costruisce piccolo (w/S × h/S) e si scala di S,
  * così titolo e descrizione crescono con il rettangolo e restano leggibili.
+ *
+ * Scalando, la faccia col testo resta a 0.01·S dal corpo del blocco e da lontano il depth buffer
+ * non distingue più le due superfici (z-fighting: righe scure sul testo). Il polygon offset tiene
+ * la faccia sempre davanti al corpo.
  */
 export function bigBlock(spec, { w, h, S = 2.2 }) {
   const block = makeBlock({ ...spec, width: w / S, height: h / S });
   block.scale.setScalar(S);
+  block.traverse((o) => {
+    if (!o.material?.map) return;
+    o.material.polygonOffset = true;
+    o.material.polygonOffsetFactor = -2;
+    o.material.polygonOffsetUnits = -4;
+  });
   return block;
 }
 

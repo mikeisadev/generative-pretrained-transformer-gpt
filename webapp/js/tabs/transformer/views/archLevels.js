@@ -62,6 +62,7 @@ const union = (a, b) => {
 function buildBlocksLevel(tab) {
   const { spec, arch } = tab;
   const cfg = spec.config;
+  const C = cfg.n_embd;
   const totals = componentTotals(spec.params);
   const count = (id) => totals.get(id)?.count ?? 0;
   const shapeOf = (name) => shapeText(spec.params.find((p) => p.name === name).shape);
@@ -79,11 +80,11 @@ function buildBlocksLevel(tab) {
   const emb = slots.get("embeddings");
   const tok = slotBlock(group, emb, {
     title: "Token embedding", subtitle: `${shapeOf("token_embedding_table.weight")} · ${pesi(count("tok_emb"))}`, color: KIND_COLORS.embedding,
-    text: "Ogni token id sceglie una riga: il suo vettore di 64 numeri.",
+    text: `Ogni token id sceglie una riga: il suo vettore di ${cfg.n_embd} numeri.`,
   }, { y: 2.25, height: 4 });
   const pos = slotBlock(group, emb, {
     title: "Position embedding", subtitle: `${shapeOf("position_embedding_table.weight")} · ${pesi(count("pos_emb"))}`, color: KIND_COLORS.embedding,
-    text: "Un vettore per ogni posizione 0…31: dice dove sta il token.",
+    text: `Un vettore per ogni posizione 0…${cfg.block_size - 1}: dice dove sta il token.`,
   }, { y: -2.15, height: 3.8 });
   rects.set("embeddings", union(rectOf(tok), rectOf(pos)));
   rects.set("embed_add", rectOf(slotBlock(group, slots.get("embed_add"), {
@@ -114,10 +115,10 @@ function buildBlocksLevel(tab) {
     const sub = (id, o) => rects.set(id, rectOf(slotBlock(group, slots.get(id), o, { y: cy, height: h })));
     sub(`${p}.ln1`, { title: "LayerNorm", subtitle: `ln1 · ${count(`${p}.ln1`)}`, color: KIND_COLORS.norm, text: "Riporta ogni vettore a media 0 e varianza 1, poi applica γ e β." });
     sub(`${p}.heads`, { title: "Attention", subtitle: `${cfg.n_head} head · ${fmt(count(`${p}.heads`))}`, color: KIND_COLORS.attention, text: "Ogni token guarda i token precedenti e raccoglie da loro informazioni (Q, K, V)." });
-    sub(`${p}.proj`, { title: "Proiezione", subtitle: `sa.proj · ${fmt(count(`${p}.proj`))}`, color: KIND_COLORS.attention, text: "Rimescola le uscite delle head in un unico vettore da 64." });
+    sub(`${p}.proj`, { title: "Proiezione", subtitle: `sa.proj · ${fmt(count(`${p}.proj`))}`, color: KIND_COLORS.attention, text: `Rimescola le uscite delle head in un unico vettore da ${cfg.n_embd}.` });
     sub(`${p}.add1`, { title: "+", subtitle: "residuo", color: KIND_COLORS.data, text: "x + attention" });
     sub(`${p}.ln2`, { title: "LayerNorm", subtitle: `ln2 · ${count(`${p}.ln2`)}`, color: KIND_COLORS.norm, text: "Normalizza di nuovo, prima della feed-forward." });
-    sub(`${p}.ffwd`, { title: "Feed-forward", subtitle: `64 → 256 → 64 · ${fmt(count(`${p}.ffwd`))}`, color: KIND_COLORS.ffwd, text: "Elabora ogni token da solo: espande a 256 numeri, applica la ReLU, comprime di nuovo a 64." });
+    sub(`${p}.ffwd`, { title: "Feed-forward", subtitle: `${C} → ${4 * C} → ${C} · ${fmt(count(`${p}.ffwd`))}`, color: KIND_COLORS.ffwd, text: `Elabora ogni token da solo: espande a ${4 * C} numeri, applica la ReLU, comprime di nuovo a ${C}.` });
     sub(`${p}.add2`, { title: "+", subtitle: "residuo", color: KIND_COLORS.data, text: "x + feed-forward" });
 
     // Connessioni residue: archi sotto i rettangoli, dall'ingresso del blocco ai due "+".
@@ -138,7 +139,7 @@ function buildBlocksLevel(tab) {
   })));
   rects.set("lm_head", rectOf(slotBlock(group, slots.get("lm_head"), {
     title: "lm_head", subtitle: `${lmShape} + bias · ${fmt(count("lm_head"))}`, color: KIND_COLORS.output,
-    text: "Trasforma il vettore in 65 punteggi (logits), uno per carattere.",
+    text: `Trasforma il vettore in ${cfg.vocab_size} punteggi (logits), uno per carattere.`,
   })));
   rects.set("logits", rectOf(slotBlock(group, slots.get("logits"), {
     title: "Softmax", subtitle: `${cfg.vocab_size} probabilità · 0 pesi`, color: KIND_COLORS.data,
@@ -175,7 +176,7 @@ function buildMacroLevel(tab) {
   const input = fitBlock({
     width: width * 0.8, height: ioHeight, maxScale: 7, color: KIND_COLORS.embedding,
     title: "Input: i token",
-    subtitle: `${cfg.block_size} token · ${fmt(inInput)} pesi`,
+    subtitle: `fino a ${cfg.block_size} token · ${fmt(inInput)} pesi`,
     text: "Ogni carattere diventa un vettore: embedding del token + embedding della posizione.",
   });
   place(group, input, 0, rowY(0) - ioShift);
@@ -184,9 +185,9 @@ function buildMacroLevel(tab) {
   const yTop = rowY(cfg.n_layer) + ROW_CONTENT / 2;
   const transformer = fitBlock({
     width, height: yTop - yBottom, maxScale: 10, color: "#7dd3fc", depth: 0.3,
-    title: `Transformer: ${cfg.n_layer} blocchi (attention + feed-forward)`,
-    subtitle: `${fmt(total)} parametri in tutto`,
-    text: `Lo stesso blocco ripetuto ${cfg.n_layer} volte, dal basso verso l'alto: qui dentro ci sono ${fmt(inBlocks)} parametri (${pct(inBlocks)}). L'attention fa comunicare i token tra loro, la feed-forward elabora ogni token da solo, le connessioni residue sommano ogni risultato al vettore di partenza.`,
+    title: "Transformer",
+    subtitle: `${cfg.n_layer} blocchi uguali`, // il sottotitolo non va a capo: corto, o rimpicciolirebbe tutto il testo
+    text: `${fmt(inBlocks)} parametri (${pct(inBlocks)} del modello). Lo stesso blocco (attention + feed-forward) ripetuto ${cfg.n_layer} volte, dal basso verso l'alto. L'attention fa comunicare i token tra loro, la feed-forward elabora ogni token da solo, le connessioni residue sommano ogni risultato al vettore di partenza.`,
   });
   place(group, transformer, 0, (yBottom + yTop) / 2);
 
@@ -210,10 +211,11 @@ function buildMacroLevel(tab) {
   const rects = new Map();
   const inputRect = rectOf(input);
   const outputRect = rectOf(output);
+  const transformerRect = rectOf(transformer);
   for (const station of arch.stations) {
     if (station.row === 0) rects.set(station.id, inputRect);
     else if (station.row > cfg.n_layer) rects.set(station.id, outputRect);
-    else rects.set(station.id, rect(0, rowY(station.row), width - 1.2, ROW_CONTENT - 0.6)); // fascia del blocco attivo
+    else rects.set(station.id, transformerRect); // un solo rettangolo: la fascia di un blocco taglierebbe il testo
   }
   const info = { width, yBottom: input.position.y - ioHeight / 2, yTop: output.position.y + ioHeight / 2, transformer: { y0: yBottom, y1: yTop }, input: rectOf(input), output: rectOf(output), counts: { input: inInput, blocks: inBlocks, output: inOutput } };
   return { group, rects, info };

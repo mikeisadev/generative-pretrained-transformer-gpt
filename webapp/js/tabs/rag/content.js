@@ -227,7 +227,7 @@ arrivare ovunque.</p>`,
 <li>dal punto di ingresso scende in modo goloso fino al suo livello;</li>
 <li>da lì in giù cerca i candidati più vicini (lista di ampiezza <code>ef_construction</code>) e si collega a
 <code>M</code> di loro, scelti con un'euristica che preferisce direzioni diverse;</li>
-<li>se un vicino supera il massimo di collegamenti, i suoi archi vengono ripotati.</li></ol>
+<li>se un vicino supera il massimo di collegamenti, i suoi archi in eccesso vengono potati.</li></ol>
 <p>Se il nuovo nodo ha il livello più alto di tutti diventa il nuovo punto di ingresso. Nell'azione
 "Indicizzazione" vedi ogni inserimento con il livello estratto e i collegamenti creati.</p>`,
         math: [{ tex: String.raw`\ell=\left\lfloor -\ln(U)\cdot m_L\right\rfloor,\quad U\sim\mathcal U(0,1],\quad m_L=\frac{1}{\ln M}\;\Rightarrow\;P(\ell\ge l)=M^{-l}`, note: "Ogni livello ha in media M volte meno nodi di quello sotto: è la piramide del grafico \"Nodi per livello\"." }],

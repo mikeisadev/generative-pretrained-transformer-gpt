@@ -8,9 +8,12 @@ import * as THREE from "three";
 import { label } from "../../core/visuals.js";
 import { WHISPER } from "./dsp.js";
 import { SLOT } from "./layout3d.js";
-import { canvasPanel, disposeTree, placeLabel, rampColor, slab } from "./widgets.js";
+import { canvasPanel, disposeTree, placeLabel, rampColor, setBaseOpacity, slab } from "./widgets.js";
 
 /** Token d'uscita d'esempio: i primi quattro sono quelli veri del formato di Whisper. */
+/** Opacità di riposo delle linee della cross-attention (pulse("cross", 0) ci ritorna). */
+const CROSS_REST = 0.25;
+
 export const WHISPER_TOKENS = ["<|startoftranscript|>", "<|it|>", "<|transcribe|>", "<|notimestamps|>", " Ciao", " a", " tutti", "<|endoftext|>"];
 
 export function buildWhisper(lab, initialStyle) {
@@ -122,7 +125,7 @@ export function buildWhisper(lab, initialStyle) {
       s++;
     }
   }
-  const cross = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(pos, 3)), new THREE.LineBasicMaterial({ color: 0xa78bfa, transparent: true, opacity: 0.3 }));
+  const cross = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(pos, 3)), new THREE.LineBasicMaterial({ color: 0xa78bfa, transparent: true, opacity: CROSS_REST }));
   cross.userData.noBounds = true;
   group.add(cross);
 
@@ -130,20 +133,20 @@ export function buildWhisper(lab, initialStyle) {
   const tstate = { shown: WHISPER_TOKENS.length };
   const text = canvasPanel(SLOT.wText.w, SLOT.wText.h, (ctx, cw, ch) => {
     // font senza legature: in alcuni monospace "<|" diventerebbe un simbolo unico
-    ctx.font = "600 40px Inter, system-ui, sans-serif";
+    ctx.font = "600 46px Inter, system-ui, sans-serif";
     ctx.textBaseline = "middle";
     let x = 10;
-    let y = 60;
+    let y = 64;
     WHISPER_TOKENS.forEach((tok, i) => {
       const wd = ctx.measureText(tok).width + 22;
-      if (x + wd > cw - 10) (x = 10), (y += 96);
+      if (x + wd > cw - 10) (x = 10), (y += 104);
       const on = i < tstate.shown;
       const special = tok.startsWith("<|");
       ctx.fillStyle = on ? (special ? "#3b1f5e" : "#123b33") : "#111827";
       ctx.strokeStyle = on ? (special ? "#a78bfa" : "#34d399") : "#1e293b";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.roundRect(x, y - 38, wd, 76, 12);
+      ctx.roundRect(x, y - 42, wd, 84, 12);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = on ? "#f1f5f9" : "#334155";
@@ -152,7 +155,8 @@ export function buildWhisper(lab, initialStyle) {
     });
     ctx.font = "500 32px Inter, system-ui, sans-serif";
     ctx.fillStyle = "#94a3b8";
-    ctx.fillText("viola = token speciali (formato vero) · verde = testo d'esempio", 10, ch - 30);
+    // legenda subito sotto l'ultima riga di token (non in fondo al pannello)
+    ctx.fillText("viola = token speciali (formato vero) · verde = testo d'esempio", 10, Math.min(ch - 30, y + 100));
   });
   text.position.set(SLOT.wText.x, SLOT.wText.y, 0);
   const textTitle = label("Testo trascritto", { size: 0.5, sub: "esempio del formato: qui Whisper non viene eseguito" });
@@ -174,13 +178,17 @@ export function buildWhisper(lab, initialStyle) {
     },
     /** Quanti token d'uscita mostrare. */
     showTokens(n) {
+      if (n === tstate.shown) return; // chiamata a ogni frame: il pannello si ridisegna solo se cambia
       tstate.shown = n;
       text.userData.redraw();
     },
     pulse(part, v) {
       const list = part === "enc" ? [...convs, ...encBlocks] : part === "dec" ? decBlocks : [];
-      list.forEach((b, i) => (b.material.emissiveIntensity = 0.25 + 0.9 * v * (0.5 + 0.5 * Math.sin(v * 8 - i))));
-      if (part === "cross") cross.material.opacity = 0.2 + 0.7 * v;
+      list.forEach((b, i) => {
+        b.userData.restGlow ??= b.material.emissiveIntensity; // pulse(part, 0) torna esattamente a riposo
+        b.material.emissiveIntensity = b.userData.restGlow + 0.9 * v * (0.5 + 0.5 * Math.sin(v * 8 - i));
+      });
+      if (part === "cross") setBaseOpacity(cross, CROSS_REST + 0.7 * v);
     },
   };
 }

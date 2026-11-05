@@ -2,6 +2,9 @@
  * Testi del tab "LLM moderni": percorso didattico (Menu del nucleo), schede dei modelli aperti
  * e fonti. Ogni numero qui ha una fonte nel pannello "Fonti"; ciò che non è pubblico è dichiarato.
  *
+ * I numeri del nostro GPT sono segnaposto {{chiave}} riempiti da index.js con i dati di
+ * data/model.json (vedi ourModel.js).
+ *
  * Campi extra dei sottopunti del percorso (letti da index.js):
  *   focus   id della regione da inquadrare        code    chiave dello snippet (snippets.js)
  *   action  id dell'azione animata suggerita      charts  id della sezione di grafici da aprire
@@ -18,7 +21,7 @@ export const PATH = [
         focus: "compare",
         code: "ours:block",
         action: "compare",
-        text: `<p>Il GPT di questa lezione ha 209.729 parametri, legge 32 caratteri e conosce 65 simboli. Un modello aperto come Llama 3 8B ha circa 8 miliardi di parametri, legge migliaia di token e ne conosce 128.256.</p>
+        text: `<p>Il GPT di questa lezione ha {{params}} parametri, legge {{block}} caratteri e conosce {{vocab}} simboli. Un modello aperto come Llama 3 8B ha circa 8 miliardi di parametri, legge migliaia di token e ne conosce 128.256.</p>
 <p>Eppure l'ossatura è la stessa: una pila di blocchi decoder, ognuno con <em>attention</em> (i token si parlano) e <em>MLP</em> (ogni token rielabora da solo), con normalizzazione prima e connessioni residue dopo. È come passare dalla cucina di casa a quella di un ristorante: le ricette di base non cambiano, cambiano gli attrezzi, le quantità e l'organizzazione.</p>
 <p>Nella scena a sinistra c'è il nostro blocco, a destra uno moderno: ogni riga con la freccia è un pezzo sostituito. Avvia l'animazione per vederli cambiare uno alla volta.</p>`,
       },
@@ -44,7 +47,7 @@ export const PATH = [
         action: "bpe",
         text: `<p>Il nostro GPT legge un carattere alla volta. I modelli moderni usano un <strong>BPE a byte</strong> (Byte Pair Encoding): il testo diventa la sequenza dei suoi byte UTF-8 (256 simboli possibili) e poi, durante l'addestramento del tokenizer, si fonde ripetutamente la coppia di simboli vicini più frequente in un simbolo nuovo.</p>
 <p>Analogia: chi scrive spesso «per favore» finisce per abbreviarlo in «pf». Le parole e i pezzi di parola comuni diventano un solo token, quelli rari restano spezzati. Partendo dai byte nessun testo è mai «sconosciuto»: anche un'emoji o un carattere cinese si scrivono con i byte di partenza.</p>
-<p>Il vocabolario finale è 256 + numero di fusioni: 50.257 token per GPT-2, 128.256 per Llama 3. Meno token per frase significa più testo nello stesso contesto.</p>`,
+<p>Il vocabolario finale è 256 byte + una voce per ogni fusione, più pochi token speciali (come il segnale di «fine testo»): GPT-2 ha 50.257 token (256 + 50.000 fusioni + 1 speciale), Llama 3 ne ha 128.256 (128.000 normali + 256 riservati a usi speciali). Meno token per frase significa più testo nello stesso contesto.</p>`,
       },
       {
         id: "arch.rmsnorm",
@@ -64,7 +67,7 @@ export const PATH = [
         focus: "rope",
         code: "llama.rope",
         action: "rope",
-        text: `<p>Nel nostro GPT la posizione è una tabella appresa (32 righe) sommata all'embedding: oltre la riga 32 il modello non sa cosa fare. <strong>RoPE</strong> (Su et al., 2021) invece prende query e key, le divide in coppie di numeri e <em>ruota</em> ogni coppia di un angolo proporzionale alla posizione.</p>
+        text: `<p>Nel nostro GPT la posizione è una tabella appresa ({{block}} righe) sommata all'embedding: oltre la riga {{block}} il modello non sa cosa fare. <strong>RoPE</strong> (Su et al., 2021) invece prende query e key, le divide in coppie di numeri e <em>ruota</em> ogni coppia di un angolo proporzionale alla posizione.</p>
 <p>Analogia: due lancette che girano alla stessa velocità. Se una parte alla posizione 3 e l'altra alla 7, l'angolo tra loro dipende solo dalla differenza 7 − 3, non da dove sono sull'orologio. Così il prodotto q·k dell'attention «sente» la <strong>distanza</strong> tra i token. Coppie diverse girano a velocità diverse: le veloci distinguono vicini, le lente le distanze grandi.</p>
 <p>Llama 3 usa una base θ = 500.000 (il paper originale 10.000): rotazioni più lente aiutano i contesti lunghi.</p>`,
         math: [
@@ -79,7 +82,7 @@ export const PATH = [
         code: "llama.repeat_kv",
         action: "gqa",
         charts: "kv",
-        text: `<p>Nel nostro GPT ogni head ha le sue matrici K e V (multi-head attention, MHA). Durante la generazione K e V di tutti i token passati vanno tenuti in memoria (la KV cache, prossimo capitolo) e riletti a ogni token: è il vero collo di bottiglia, più del calcolo.</p>
+        text: `<p>Nel nostro GPT ogni head ha le sue matrici K e V (multi-head attention, MHA). Durante la generazione K e V di tutti i token passati vanno tenuti in memoria (la KV cache, prossimo capitolo) e riletti a ogni token: con contesti lunghi spesso è proprio questa lettura dalla memoria, più dei calcoli, a limitare la velocità.</p>
 <p><strong>Multi-query attention</strong> (Shazeer, 2019): tutte le head di query condividono UNA sola coppia K/V. <strong>Grouped-query attention</strong> (Ainslie et al., 2023) è la via di mezzo: le query sono divise in gruppi e ogni gruppo condivide una coppia K/V. Analogia: invece di una fotocopia degli appunti per ogni studente, una per banco.</p>
 <p>Llama 3 8B ha 32 head di query e 8 head K/V: la cache è 4 volte più piccola che con MHA. Il paper GQA mostra anche che un modello MHA si può convertire con circa il 5% del calcolo del pre-training.</p>`,
         math: [{ tex: "\\text{KV cache} = 2 \\cdot L \\cdot n_{kv} \\cdot d_{head} \\cdot \\text{byte} \\cdot T", note: "Llama 3 8B in bf16: 2 · 32 · 8 · 128 · 2 = 131.072 byte = 128 KiB per token; a 8.192 token fa 1 GiB." }],
@@ -90,7 +93,7 @@ export const PATH = [
         focus: "compare",
         code: "llama.ffn",
         text: `<p>La nostra MLP è Linear → ReLU → Linear. <strong>SwiGLU</strong> (Shazeer, 2020) usa tre matrici: una produce il segnale, un'altra un «cancello» che passa per la funzione SiLU (detta anche Swish), e i due si moltiplicano elemento per elemento prima della proiezione finale.</p>
-<p>Analogia: invece di un interruttore acceso/spento (ReLU), un variatore di luce comandato dal contenuto stesso. Nel paper le varianti GLU danno perplessità migliori a parità di costo. Per non aumentare i parametri, lo strato nascosto si riduce a circa 2/3 di 4·d: nel codice di Llama si vede <code>int(2 * hidden_dim / 3)</code>, e per Llama 3 8B diventa 14.336.</p>`,
+<p>Analogia: invece di un interruttore acceso/spento (ReLU), un variatore di luce comandato dal contenuto stesso. Nel paper le varianti GLU danno perplessità migliori a parità di costo. Per non aumentare i parametri, lo strato nascosto si riduce a circa 2/3 di 4·d: nel codice di Llama si vede <code>int(2 * hidden_dim / 3)</code>. Llama 3 8B poi lo moltiplica per 1,3 (<code>ffn_dim_multiplier</code>) e lo arrotonda a un multiplo di 1024: 4·4096 → 10.922 → 14.198 → <strong>14.336</strong>.</p>`,
         math: [{ tex: "\\text{SwiGLU}(x) = W_2\\big(\\text{SiLU}(W_1x)\\odot W_3x\\big),\\qquad \\text{SiLU}(z)=z\\,\\sigma(z)", note: "Nel codice: w2(F.silu(w1(x)) * w3(x))." }],
       },
       {
@@ -129,9 +132,9 @@ export const PATH = [
         title: "FlashAttention, finestre e contesti lunghi",
         focus: "flash",
         action: "flash",
-        text: `<p><strong>FlashAttention</strong> (Dao et al., 2022) calcola l'attention <em>esatta</em>, ma a blocchi: carica pezzi di Q, K, V nella memoria veloce sul chip (SRAM), calcola, accumula, e non scrive mai l'intera matrice T × T nella memoria grande e lenta (HBM). Analogia: cucinare sul piano di lavoro prendendo dal frigo solo gli ingredienti del passo corrente. Il paper riporta fino a 3× di velocità rispetto all'implementazione standard.</p>
+        text: `<p><strong>FlashAttention</strong> (Dao et al., 2022) calcola l'attention <em>esatta</em>, ma a blocchi: carica pezzi di Q, K, V nella memoria veloce sul chip (SRAM), calcola, accumula, e non scrive mai l'intera matrice T × T nella memoria grande e lenta (HBM). Analogia: cucinare sul piano di lavoro prendendo dal frigo solo gli ingredienti del passo corrente. Il paper riporta, per esempio, un addestramento di GPT-2 (contesto 1K) 3 volte più veloce rispetto alle implementazioni di riferimento.</p>
 <p>L'<strong>attention a finestra scorrevole</strong> di Mistral 7B limita ogni layer agli ultimi W = 4096 token; impilando i layer l'informazione può comunque viaggiare più lontano. Oggi diversi modelli aperti dichiarano contesti fino a 128K token (Llama 3.1, DeepSeek-V3).</p>`,
-        math: [{ tex: "\\text{accessi HBM: } \\Theta\\!\\left(\\tfrac{N^2 d^2}{M}\\right)\\ \\text{(FlashAttention)}\\quad\\text{contro}\\quad \\Omega(Nd + N^2)\\ \\text{(standard)}", note: "N = lunghezza, d = dimensione della head, M = dimensione della SRAM (dal paper)." }],
+        math: [{ tex: "\\text{accessi HBM: } \\Theta\\!\\left(\\tfrac{N^2 d^2}{M}\\right)\\ \\text{(FlashAttention)}\\quad\\text{contro}\\quad \\Theta(Nd + N^2)\\ \\text{(standard)}", note: "N = lunghezza, d = dimensione della head, M = dimensione della SRAM (dal paper)." }],
       },
       {
         id: "inf.spec",
@@ -158,7 +161,8 @@ export const PATH = [
         action: "scaling",
         charts: "scala",
         text: `<p>Le <strong>leggi di scala</strong> dicono come scende la loss quando crescono parametri (N), dati (D) e calcolo (C ≈ 6·N·D FLOP). Hoffmann et al. (2022) hanno addestrato centinaia di modelli e adattato una formula: la loss è una costante irriducibile più un termine che cala con N e uno che cala con D.</p>
-<p>La conseguenza: con un budget fissato conviene far crescere N e D <em>insieme</em> (circa in proporzione). Chinchilla, 70B parametri e 1,4 trilioni di token, con lo stesso calcolo di Gopher (280B) lo supera su quasi tutti i test. Analogia: uno studente brillante con pochi libri impara meno di uno normale con una biblioteca. Nota: una replica (Besiroglu et al., 2024) ottiene coefficienti diversi; qui usiamo quelli pubblicati da Hoffmann et al.</p>`,
+<p>La conseguenza: con un budget fissato conviene far crescere N e D <em>insieme</em> (circa in proporzione). Chinchilla, 70B parametri e 1,4 trilioni di token, con lo stesso calcolo di Gopher (280B) lo supera su quasi tutti i test. Analogia: uno studente brillante con pochi libri impara meno di uno normale con una biblioteca.</p>
+<p>Attenzione ai numeri esatti: il paper usa tre metodi. La formula qui sotto (il terzo, un fit parametrico) suggerisce modelli più piccoli degli altri due, che per il budget di Gopher indicano circa 63-67B parametri: da lì viene la scelta di 70B. Una replica (Besiroglu et al., 2024) ottiene coefficienti diversi; qui usiamo quelli pubblicati da Hoffmann et al. e li prendiamo come tendenza, non come ricetta.</p>`,
         math: [
           { tex: "L(N,D) = E + \\frac{A}{N^{\\alpha}} + \\frac{B}{D^{\\beta}},\\quad E=1{,}69,\\ A=406{,}4,\\ B=410{,}7,\\ \\alpha=0{,}34,\\ \\beta=0{,}28" },
           { tex: "N_{opt} \\propto C^{\\beta/(\\alpha+\\beta)} \\approx C^{0{,}45},\\qquad D_{opt} \\propto C^{\\alpha/(\\alpha+\\beta)} \\approx C^{0{,}55}", note: "Minimizzando L con il vincolo C = 6·N·D." },
@@ -255,6 +259,7 @@ export const PATH = [
         id: "beyond.emergent",
         title: "Capacità emergenti o miraggio?",
         focus: "scaling",
+        action: "emergence",
         charts: "emergenza",
         text: `<p>Wei et al. (2022) chiamano <strong>emergente</strong> una capacità assente nei modelli piccoli e presente nei grandi, non prevedibile estrapolando. Schaeffer, Miranda e Koyejo (2023) obiettano: spesso il salto dipende dalla <strong>metrica</strong>. Se si misura «risposta esattamente giusta» su una risposta di molti token, un miglioramento graduale per token appare come un'improvvisa accensione; con una metrica continua la stessa crescita è dolce.</p>
 <p>Analogia: un ponte di 10 assi che reggono ognuna con probabilità p. La probabilità di attraversarlo è p¹⁰: resta quasi zero e poi sale di colpo, anche se ogni asse migliora piano. Il grafico «Emergenza» lo mostra con una curva illustrativa.</p>`,
@@ -266,7 +271,7 @@ export const PATH = [
         focus: "interp",
         action: "interp",
         text: `<p>Le <strong>induction head</strong> (Olsson et al., 2022, Anthropic) sono head di attention che completano lo schema [A][B] … [A] → [B]: cercano la volta precedente in cui compariva il token attuale e copiano quello che lo seguiva. Si formano durante l'addestramento insieme a un salto della capacità di imparare dal contesto.</p>
-<p>I singoli neuroni spesso mescolano più concetti. Con il <strong>dictionary learning</strong> (un autoencoder sparso addestrato sulle attivazioni) Anthropic ha trovato direzioni più leggibili, le «feature»: oltre 4.000 da un layer di 512 neuroni in un piccolo modello (2023), fino a 34 milioni in Claude 3 Sonnet (2024).</p>`,
+<p>I singoli neuroni spesso mescolano più concetti. Con il <strong>dictionary learning</strong> (un autoencoder sparso addestrato sulle attivazioni) Anthropic ha trovato direzioni più leggibili, le «feature»: oltre 4.000 da un layer di 512 neuroni in un piccolo modello a un solo layer (2023), fino a 34 milioni in Claude 3 Sonnet (2024).</p>`,
         math: [{ tex: "f = \\operatorname{ReLU}(W_e x + b_e),\\quad \\hat{x} = W_d f + b_d,\\quad \\mathcal{L} = \\|x-\\hat{x}\\|^2 + \\lambda\\|f\\|_1", note: "Ricostruire x usando poche feature accese (il termine λ‖f‖₁ premia la sparsità)." }],
       },
     ],
@@ -317,7 +322,7 @@ export const SOURCES = [
     title: "Architettura",
     items: [
       { title: "Neural Machine Translation of Rare Words with Subword Units (BPE)", who: "Sennrich et al. · 2015", url: "https://arxiv.org/abs/1508.07909", note: "BPE applicato alle sotto-parole." },
-      { title: "karpathy/minbpe", who: "codice", url: "https://github.com/karpathy/minbpe", note: "BPE a byte minimale; stesso algoritmo dell'animazione del tab. GPT-2: 50.257 token (tiktoken)." },
+      { title: "karpathy/minbpe", who: "codice", url: "https://github.com/karpathy/minbpe", note: "BPE a byte minimale; stesso algoritmo dell'animazione del tab. GPT-2: 50.257 token = 256 byte + 50.000 fusioni + 1 speciale (tiktoken)." },
       { title: "Root Mean Square Layer Normalization", who: "Zhang, Sennrich · NeurIPS 2019", url: "https://arxiv.org/abs/1910.07467", note: "RMSNorm: niente ricentramento, tempo ridotto del 7-64%." },
       { title: "RoFormer: Enhanced Transformer with Rotary Position Embedding", who: "Su et al. · 2021", url: "https://arxiv.org/abs/2104.09864", note: "RoPE: rotazione di q e k, dipendenza dalla posizione relativa." },
       { title: "GLU Variants Improve Transformer", who: "Shazeer · 2020", url: "https://arxiv.org/abs/2002.05202", note: "SwiGLU, GEGLU, ReGLU nella MLP del transformer." },
@@ -333,18 +338,18 @@ export const SOURCES = [
   {
     title: "Inferenza",
     items: [
-      { title: "FlashAttention", who: "Dao et al. · NeurIPS 2022", url: "https://arxiv.org/abs/2205.14135", note: "Attention esatta a blocchi, consapevole dell'IO; fino a 3× più veloce." },
+      { title: "FlashAttention", who: "Dao et al. · NeurIPS 2022", url: "https://arxiv.org/abs/2205.14135", note: "Attention esatta a blocchi, consapevole dell'IO; 3× nell'addestramento di GPT-2 (contesto 1K)." },
       { title: "Mistral 7B", who: "Jiang et al. · 2023", url: "https://arxiv.org/abs/2310.06825", note: "GQA e sliding window attention (W = 4096), rolling buffer cache." },
       { title: "Fast Inference from Transformers via Speculative Decoding", who: "Leviathan, Kalman, Matias · ICML 2023", url: "https://arxiv.org/abs/2211.17192", note: "Stesse uscite del modello grande, 2-3× su T5-XXL; formula dei token attesi." },
       { title: "meta-llama/llama3: llama/model.py", who: "codice ufficiale", url: "https://github.com/meta-llama/llama3/blob/main/llama/model.py", note: "RMSNorm, RoPE, repeat_kv, KV cache, SwiGLU: il codice nel pannello." },
-      { title: "meta-llama/llama-models: sku_list.py e model card", who: "configurazioni ufficiali", url: "https://github.com/meta-llama/llama-models", note: "Llama 3 8B: dim 4096, 32 layer, 32 head, 8 head K/V, vocab 128.256, rope θ 500.000; 3.1 a 128K." },
+      { title: "meta-llama/llama-models: sku_list.py e model card", who: "configurazioni ufficiali", url: "https://github.com/meta-llama/llama-models", note: "Llama 3 8B: dim 4096, 32 layer, 32 head, 8 head K/V, vocab 128.256, rope θ 500.000, ffn_dim_multiplier 1,3, multiple_of 1024; 3.1 a 128K." },
       { title: "mistralai/mistral-inference: moe.py", who: "codice ufficiale", url: "https://github.com/mistralai/mistral-inference", note: "MoeLayer: topk sui logit del gate e softmax sui pesi scelti." },
     ],
   },
   {
     title: "Addestramento e allineamento",
     items: [
-      { title: "Training Compute-Optimal Large Language Models (Chinchilla)", who: "Hoffmann et al. · 2022", url: "https://arxiv.org/abs/2203.15556", note: "Fit L(N,D) = 1,69 + 406,4/N^0,34 + 410,7/D^0,28; Chinchilla 70B, 1,4T token." },
+      { title: "Training Compute-Optimal Large Language Models (Chinchilla)", who: "Hoffmann et al. · 2022", url: "https://arxiv.org/abs/2203.15556", note: "Tre metodi; il fit parametrico L(N,D) = 1,69 + 406,4/N^0,34 + 410,7/D^0,28. Chinchilla 70B, 1,4T token." },
       { title: "Chinchilla Scaling: A replication attempt", who: "Besiroglu et al. · 2024", url: "https://arxiv.org/abs/2404.10102", note: "Ricostruisce i dati e ottiene coefficienti diversi: i numeri esatti sono discussi." },
       { title: "Training language models to follow instructions with human feedback (InstructGPT)", who: "Ouyang et al. · NeurIPS 2022", url: "https://arxiv.org/abs/2203.02155", note: "SFT + reward model + PPO; 1,3B preferito a GPT-3 175B." },
       { title: "Direct Preference Optimization", who: "Rafailov et al. · NeurIPS 2023", url: "https://arxiv.org/abs/2305.18290", note: "Loss di classificazione sulle preferenze, senza reward model né RL. Codice: eric-mitchell/direct-preference-optimization." },

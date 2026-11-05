@@ -2,9 +2,21 @@
  * Regione "Mixture of Experts": token → router → 8 esperti (+ esperto condiviso alla DeepSeek).
  * Le probabilità del router sono barre (InstancedMesh), i collegamenti un solo LineSegments.
  */
+import { RouterSim } from "./sim.js";
 import { card, Cells, Links, PALETTE, Plate, text, TokenStrip } from "./shapes.js";
 
 export const MOE_TOKENS = ["Il", "gatto", "dorme", "sul", "divano", "."];
+/** Token mostrato quando la regione è a riposo (un esempio completo di instradamento). */
+const REST_TOKEN = 1;
+
+/**
+ * SIMULAZIONE DIDATTICA: scelte del router (pesi casuali, seme fisso) per i token di esempio.
+ * Calcolate una volta sola e condivise con l'azione «Mixture of Experts».
+ */
+function exampleRoutes() {
+  const router = new RouterSim({ seed: 11 });
+  return MOE_TOKENS.map(() => router.route(router.token(), 2));
+}
 const N_EXPERTS = 8;
 const X_TOKENS = -14.2;
 const X_ROUTER = -7.6;
@@ -42,6 +54,7 @@ export function buildMoe(group) {
 
   const state = { token: -1, route: undefined, shown: null };
   const api = {
+    routes: exampleRoutes(),
     tokens,
     experts,
     shared,
@@ -52,7 +65,8 @@ export function buildMoe(group) {
       state.token = i;
       tokens.forEach((s, k) => s.set([{ text: MOE_TOKENS[k], fill: k === i ? "#4c1d95" : "#1e293b", stroke: k === i ? "#c4b5fd" : "#475569" }]));
       if (i >= 0) links.set(0, X_TOKENS + 2.1, tokenY(i), 0.2, X_ROUTER - 2.7, 0.4, 0.2);
-      links.color(0, i >= 0 ? "#c4b5fd" : "#000000");
+      else links.hide(0);
+      links.color(0, "#c4b5fd");
       router.set(i >= 0 ? 0.6 : 0);
     },
     /**
@@ -63,8 +77,9 @@ export function buildMoe(group) {
       const chosen = route?.chosen ?? [];
       for (let e = 0; e < N_EXPERTS; e++) {
         const p = route ? route.probs[e] : 0;
-        const len = Math.max(0.0001, p * BAR_MAX * t);
-        bars.place(e, X_BAR + len / 2, expertY(e), 0, len, 1, 1);
+        const len = p * BAR_MAX * t;
+        if (len > 0) bars.place(e, X_BAR + len / 2, expertY(e), 0, len, 1, 1);
+        else bars.hide(e);
         const on = chosen.includes(e);
         bars.color(e, on ? "#c4b5fd" : "#475569");
         experts[e].set(on ? Math.min(1, t * 1.5) : 0);
@@ -75,21 +90,31 @@ export function buildMoe(group) {
       state.route = route;
       state.shown = shown;
       percents.forEach((plate, e) => plate.set([{ text: route ? `${(route.probs[e] * 100).toFixed(0)}%` : "", color: chosen.includes(e) ? "#ede9fe" : "#64748b", bold: chosen.includes(e) }]));
-      chosen.forEach((e, k) => {
-        links.set(1 + N_EXPERTS + k, X_EXPERT - 2.8, expertY(e), 0.25, X_ROUTER + 3.1, -8.2, 0.25);
-        links.color(1 + N_EXPERTS + k, t > 0.6 ? "#4ade80" : "#000000");
-      });
-      if (!chosen.length) for (let k = 0; k < 2; k++) links.color(1 + N_EXPERTS + k, "#000000");
+      // collegamenti esperti scelti → somma pesata: visibili solo a decisione presa
+      for (let k = 0; k < 2; k++) {
+        const e = chosen[k];
+        if (shown && e !== undefined) {
+          links.set(1 + N_EXPERTS + k, X_EXPERT - 2.8, expertY(e), 0.25, X_ROUTER + 3.1, -8.2, 0.25);
+          links.color(1 + N_EXPERTS + k, "#4ade80");
+        } else links.hide(1 + N_EXPERTS + k);
+      }
       output.set(t > 0.6 && chosen.length ? 0.7 : 0);
     },
     setShared(on) {
       shared.mesh.visible = shared.label.visible = on;
       shared.set(on ? 0.7 : 0);
     },
-    reset() {
+    /** Nessun token, nessuna scelta: il layer "spento". */
+    clear() {
       api.setToken(-1);
       api.setRoute(null, 0);
       api.setShared(false);
+    },
+    /** Stato di riposo: un esempio completo (un token instradato ai suoi 2 esperti). */
+    reset() {
+      api.setShared(false);
+      api.setToken(REST_TOKEN);
+      api.setRoute(api.routes[REST_TOKEN], 1);
     },
   };
   api.reset();

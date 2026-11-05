@@ -37,7 +37,7 @@ import { CORPUS, EXAMPLE_QUESTIONS } from "../../shared/rag/index.js";
 
 /** Riquadri delle viste d'insieme (larghezza e altezza in unità di scena) e soglie del LOD. */
 const SCENE_CENTER = new THREE.Vector3(2, (ROW_TOP + ROW_BOTTOM) / 2 - 2, 0);
-const VIEWS = { overview: { w: 318, h: 96, min: 230 }, macro: { w: 430, h: 130, min: 480 } };
+const VIEWS = { overview: { w: 318, h: 96, min: 230 }, macro: { w: 430, h: 130 } };
 const LOD_DETAIL = 200;
 const LOD_BLOCKS = 440;
 const FRONT = new THREE.Vector3(0, 0.06, 1).normalize();
@@ -77,9 +77,28 @@ export async function createTab(root, app) {
     },
   });
   function flyToLevel(id) {
-    if (id === "detail") return tab.focus(tab.lastStation ?? "hnsw");
+    if (id === "detail") return tab.focus(tab.lastStation ?? "upload"); // all'inizio: la prima stazione
     return tab.focus(id === "macro" ? "macro" : "overview");
   }
+
+  /** Distanza a cui la vista d'insieme `name` sta tutta nella parte visibile dello stage. */
+  function fitDistance(name) {
+    const v = VIEWS[name];
+    const tan = Math.tan(THREE.MathUtils.degToRad(host.camera.fov / 2));
+    return Math.max(v.h / 2 / tan, v.w / 2 / (tan * host.visibleAspect())) * 1.04;
+  }
+
+  /**
+   * Soglia tra Blocchi e Panoramica. Sugli schermi stretti (telefono in verticale) lo schema a
+   * blocchi intero sta nello schermo solo da più lontano: alziamo la soglia quanto serve, così il
+   * livello Blocchi resta attivo anche lì. Su schermi larghi resta LOD_BLOCKS.
+   */
+  function updateBlocksLimit() {
+    const limit = Math.max(LOD_BLOCKS, fitDistance("overview") * 1.12);
+    lod.levels[1].maxDistance = limit;
+    return limit;
+  }
+  new ResizeObserver(() => updateBlocksLimit()).observe(stage);
 
   // --- stato: configurazione, base di conoscenza, ricerca corrente
   const settings = { splitter: "didactic", hnsw: "didactic", question: EXAMPLE_QUESTIONS[2].question, topK: 5, threshold: 0.5 };
@@ -100,11 +119,9 @@ export async function createTab(root, app) {
     focus(target, options = {}) {
       return Promise.resolve().then(() => {
         if (target === "overview" || target === "macro") {
-          // distanza che fa stare tutto nella parte visibile (il pannello del codice ne copre un pezzo)
-          const v = VIEWS[target];
-          const tan = Math.tan(THREE.MathUtils.degToRad(host.camera.fov / 2));
-          const fit = Math.max(v.h / 2 / tan, v.w / 2 / (tan * host.visibleAspect())) * 1.04;
-          const d = target === "macro" ? Math.max(fit, LOD_BLOCKS * 1.15) : Math.min(Math.max(fit, v.min), LOD_BLOCKS * 0.92);
+          const limit = updateBlocksLimit();
+          const fit = fitDistance(target);
+          const d = target === "macro" ? Math.max(fit, limit * 1.15) : Math.min(Math.max(fit, VIEWS.overview.min), limit * 0.92);
           director.hideFrame();
           return director.flyTo(SCENE_CENTER.clone().addScaledVector(FRONT, d), SCENE_CENTER, options.duration ?? 1.2);
         }
@@ -134,13 +151,13 @@ export async function createTab(root, app) {
       if (key.startsWith("lib:")) {
         const spec = LIBRARY[key.slice(4)];
         librarySnippet(spec.file, spec.start, spec.end)
-          .then((s) => token === codeToken && codePanel.show({ title: spec.title, file: s.file, startLine: s.startLine, code: s.code, language: "javascript", highlight }))
+          .then((s) => token === codeToken && showCode({ title: spec.title, file: s.file, startLine: s.startLine, code: s.code, language: "javascript", highlight }))
           .catch((err) => console.warn("codice della libreria non disponibile:", err.message));
         return;
       }
       const s = SNIPPETS[key];
       const language = s.language === "sql" || s.language === "properties" ? "bash" : s.language;
-      codePanel.show({ title: s.source, file: s.file, startLine: s.startLine ?? 1, code: s.code, language, highlight });
+      showCode({ title: s.source, file: s.file, startLine: s.startLine ?? 1, code: s.code, language, highlight });
     },
 
     /** Nasconde il codice (e annulla un frammento della libreria ancora in caricamento). */
@@ -180,13 +197,45 @@ export async function createTab(root, app) {
     /** Prima di ogni azione: zoom automatico (le azioni inquadrano i dettagli). */
     prepareAction() {
       if (lod.mode !== "auto") lod.setMode("auto");
+      codeExpandedByUser = false;
       ui.caption.textContent = ""; // durante le azioni parla la didascalia del player
+    },
+
+    /** Stato della scena da ripristinare se un'azione viene interrotta. */
+    snapshot() {
+      return { indexed: world.indexed >= tab.kb.inserts.length, search: world.search };
+    },
+
+    /** Riporta scena e grafici allo stato `snap` (vedi snapshot) e toglie il codice dell'azione. */
+    restore(snap) {
+      const kb = tab.kb;
+      if (snap.indexed) world.showIndexed();
+      else world.reset();
+      if (snap.search) world.showSearch(snap.search.run, snap.search.answer);
+      else world.clearSearch();
+      tab.plots.setIndexed(kb, snap.indexed ? kb.inserts.length : 0);
+      tab.plots.setProjection(kb, snap.indexed ? kb.inserts.length : 0, snap.search?.run ?? null);
+      tab.plots.setSearch(kb, snap.search?.run ?? null);
+      tab.hideCode();
+      tab.setCaption("Azione interrotta: la scena è tornata com'era prima. Puoi riavviarla dal pannello Azioni.");
     },
 
     setCaption(text) {
       ui.caption.textContent = text;
     },
   };
+
+  // --- pannello del codice: sui telefoni, durante le azioni, parte ridotto alla sola intestazione
+  // (altrimenti copre la scena); se lo studente lo espande, resta espanso fino alla fine dell'azione.
+  const phone = window.matchMedia("(max-width: 900px)");
+  let codeExpandedByUser = false;
+  codePanel.root.querySelector("header button")?.addEventListener("click", () => {
+    codeExpandedByUser = !codePanel.root.classList.contains("minimized");
+  });
+  function showCode(spec) {
+    codePanel.show(spec);
+    if (phone.matches && player.action && !codeExpandedByUser) codePanel.root.classList.add("minimized");
+  }
 
   // --- costruzione (e ricostruzione quando cambia la configurazione)
   function rebuild() {

@@ -12,6 +12,8 @@ import { Board } from "./board.js";
 import { SceneTextures } from "./sceneTextures.js";
 
 const GAP = 0.8;
+/** Pulsanti fluttuanti in alto nello stage (layout.js, lod.js, index.js del tab). */
+const TOP_OVERLAYS = ".sidebar-toggle, .lod-switch, .stage-toolbar, .charts-fab";
 
 export class Stage {
   constructor(tab) {
@@ -34,6 +36,7 @@ export class Stage {
     // la lavagna guarda sempre la camera: il testo resta dritto e leggibile da ogni angolazione
     this.host.onFrame(() => {
       if (this.board.mesh.visible) this.board.mesh.quaternion.copy(this.host.camera.quaternion);
+      this.followLod();
     });
   }
 
@@ -54,16 +57,26 @@ export class Stage {
 
   /**
    * Area dello stage davvero libera, in pixel: tolti i pannelli a destra (codice, grafici), la
-   * barra degli strumenti in alto e la barra del player in basso.
+   * barra degli strumenti in alto, la barra del player in basso e, su schermi stretti, il codice.
    */
   freeArea() {
     const container = this.host.container;
     const width = Math.max(200, container.clientWidth - this.host.coveredRight());
     const height = Math.max(200, container.clientHeight);
-    const top = 64;
+    const { top: ceiling, bottom: floor } = container.getBoundingClientRect();
+    // in alto: i pulsanti fluttuanti dello stage (su schermi stretti vanno su due righe)
+    let top = 64;
+    for (const element of this.tab.ui.root.querySelectorAll(TOP_OVERLAYS)) {
+      const rect = element.getBoundingClientRect();
+      if (rect.height && rect.top - ceiling < 160) top = Math.max(top, rect.bottom - ceiling + 8);
+    }
     let bottom = 16;
-    const bar = this.tab.ui.player?.bar;
-    if (bar && !bar.hidden) bottom = Math.max(bottom, container.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 10);
+    const cover = (element) => {
+      if (element && !element.hidden) bottom = Math.max(bottom, floor - element.getBoundingClientRect().top + 10);
+    };
+    cover(this.tab.ui.player?.bar);
+    // su schermi stretti anche il codice sta in basso (sopra la barra del player)
+    if (window.matchMedia("(max-width: 900px)").matches) cover(this.tab.ui.codePanel?.root);
     return { width, height, top, bottom, free: Math.max(120, height - top - bottom) };
   }
 
@@ -73,12 +86,22 @@ export class Stage {
    * o sopra, scegliendo la disposizione che la fa apparire più grande nell'area libera.
    * @param {object} [o]
    * @param {"auto"|"left"|"right"|"above"} [o.side="auto"]
-   * @param {number} [o.scale=1.5] altezza della lavagna rispetto al componente
+   * @param {number} [o.scale=2] altezza della lavagna rispetto al componente
    * @param {Array<THREE.Object3D|THREE.Box3|string>} [o.extra] altro da includere nell'inquadratura
+   *
+   * Se l'utente ha scelto il livello "Panoramica" durante l'azione, si inquadra tutto il modello
+   * (il rettangolo della stazione corrente è illuminato) con la lavagna accanto; il riquadro
+   * pulsante resta comunque sul componente del passo.
    */
-  show(target, draw, { side = "auto", scale = 2, extra = [], duration = 1.1 } = {}) {
-    const box = this.bounds(target);
-    for (const o of extra) box.union(this.bounds(o));
+  show(target, draw, options = {}) {
+    this.lastShow = { target, draw, options };
+    const { side = "auto", extra = [], duration = 1.1 } = options;
+    const component = this.bounds(target);
+    for (const o of extra) component.union(this.bounds(o));
+    this.shownLevel = this.lodLevel();
+    const macro = this.shownLevel === "macro";
+    const box = macro ? (this.overviewBox ??= this.bounds("overview")).clone() : component; // il modello non si sposta: basta calcolarlo una volta
+    const scale = macro ? 0.7 : (options.scale ?? 2);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     const area = this.freeArea();
@@ -117,13 +140,31 @@ export class Stage {
     frame.min.y -= area.bottom / ppu;
     const done = this.director.focus(frame, { showFrame: false, margin: 1.06, duration, minDistance: 2 });
     // il riquadro pulsante resta sul componente, non sulla lavagna
-    if (!box.isEmpty()) {
+    if (!component.isEmpty()) {
       const hl = this.director.highlight;
+      const c = component.getCenter(new THREE.Vector3());
+      const s = component.getSize(new THREE.Vector3());
       hl.visible = true;
-      hl.position.copy(center);
-      hl.scale.set(size.x + 0.25, size.y + 0.25, Math.max(size.z, 0.1) + 0.25);
+      hl.position.copy(c);
+      hl.scale.set(s.x + 0.25, s.y + 0.25, Math.max(s.z, 0.1) + 0.25);
     }
     return done;
+  }
+
+  /** Livello dello zoom semantico attualmente mostrato ("detail" | "blocks" | "macro"). */
+  lodLevel() {
+    return this.tab.lod?.controller.current ?? "detail";
+  }
+
+  /** Se durante un'azione l'utente cambia livello di zoom, il passo corrente si reinquadra. */
+  followLod() {
+    const level = this.lodLevel();
+    if (level === this.shownLevel) return;
+    this.shownLevel = level;
+    if (this.flowState && this.lastShow) {
+      const { target, draw, options } = this.lastShow;
+      this.show(target, draw, options);
+    }
   }
 
   /** Ridisegna la lavagna senza muovere la camera. */
@@ -146,6 +187,7 @@ export class Stage {
     flow.playing = false;
     flow.setPulse(flow.current, false);
     flow.current = null;
+    this.tab.setCaption(""); // la didascalia del giro automatico non vale più
   }
 
   /** Distanza lungo il binario di una stazione (id del registro). */
@@ -163,7 +205,8 @@ export class Stage {
       flow.setPulse(this.pulsed, false);
       flow.setPulse(station, true);
       this.pulsed = station;
-      if (station && caption) this.tab.setCaption(station.caption); // la didascalia in basso segue il pacchetto
+      // la didascalia in basso segue il pacchetto; senza stazione si svuota (non resta quella vecchia)
+      if (caption) this.tab.setCaption(station?.caption ?? "");
     }
     flow.current = station; // il LOD (livelli Blocchi/Panoramica) illumina il rettangolo della stazione corrente
   }
@@ -187,14 +230,16 @@ export class Stage {
   }
 
   /**
-   * Blocca lo zoom semantico sul livello "Dettaglio" finché l'azione è attiva: le azioni mostrano
-   * matrici e pattern veri, che esistono solo a quel livello. A fine azione torna com'era.
+   * All'avvio dell'azione porta lo zoom semantico sul livello "Dettaglio": le azioni mostrano
+   * matrici e pattern veri, che esistono solo lì. Se poi l'utente sceglie un altro livello dal
+   * selettore, la sua scelta resta (Blocchi e Panoramica illuminano la stazione del pacchetto).
+   * A fine azione il selettore torna com'era prima.
    */
   lockDetail() {
     const controller = this.tab.lod?.controller;
-    if (!controller) return;
-    this.lodMode ??= controller.mode;
-    if (controller.mode !== "detail") controller.setMode("detail");
+    if (!controller || this.lodMode) return;
+    this.lodMode = controller.mode;
+    controller.setMode("detail");
   }
 
   /* --------------------------------------------------------------- oggetti della scena */
@@ -220,7 +265,9 @@ export class Stage {
         mesh: b,
         scale: b.scale.x,
         x: b.position.x,
-        color: b.material.color.clone(),
+        // se la stazione "logits" è illuminata dal pacchetto, il colore attuale è quello acceso:
+        // il colore vero da ripristinare è baseColor (vedi DataFlow.setPulse)
+        color: (b.userData.baseColor ?? b.material.color).clone(),
         emissive: b.material.emissive?.clone(),
         base: b.userData.baseColor?.clone(),
         len: b.geometry.parameters.width,
@@ -272,6 +319,7 @@ export class Stage {
       this.flowState = null;
     }
     this.board.mesh.visible = false;
+    this.lastShow = null;
     this.director.hideFrame();
   }
 }

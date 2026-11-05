@@ -9,7 +9,11 @@
  */
 import { CODEC, TokenModel, bitrate, decodeFeatures, encodeFeatures, nearest, pca2, rvqDecode, rvqEncode, tokenCounts, trainRvq } from "./codec.js";
 import { applyMel, hzToMel, melFilterbank, melToHz, powerToDb, seededRandom, stft, whisperLogMel } from "./dsp.js";
+import { fmt } from "../../core/dom.js";
 import { SAMPLE_RATE, STYLES, synthesize } from "./song.js";
+
+/** Errore relativo (0…1) come percentuale leggibile: 2 decimali sotto l'1 %. */
+export const formatPercent = (v) => `${fmt(v * 100, v < 0.01 ? 2 : 1)} %`;
 
 const nextTick = () => new Promise((resolve) => setTimeout(resolve, 0));
 

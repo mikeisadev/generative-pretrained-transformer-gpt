@@ -65,7 +65,7 @@ export function buildVideoScene() {
   const vaeItems = [0, 1, 2].map((i) => ({ x: -29.5 + i * 2.2, y: 1, z: 0, sx: 1.2, sy: 6 - i * 1.5, sz: 5 - i * 1.2, color: PALETTE.vae }));
   const vaeGroup = new THREE.Group();
   vaeGroup.add(instancedBoxes(vaeItems));
-  placeLabel(vaeGroup, "VAE 3D causale", -27.3, 7.4, 0, { size: 0.95, color: "#7dd3fc", sub: "4× tempo, 8× spazio" });
+  placeLabel(vaeGroup, "VAE 3D causale", -27.3, 7.4, 0, { size: 0.95, color: "#7dd3fc", sub: "encoder: 4× tempo, 8× spazio" });
   group.add(vaeGroup);
   registry.set("videoVae", vaeGroup);
 

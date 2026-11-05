@@ -8,6 +8,16 @@ import { phase } from "./shapes.js";
 
 const CATEGORY = "Ragionamento e agenti";
 
+/** Passi visibili per catena, riusato a ogni frame (niente array nuovi in update). */
+const shownSteps = [0, 0, 0, 0];
+const setShown = (a, b, c, d) => {
+  shownSteps[0] = a;
+  shownSteps[1] = b;
+  shownSteps[2] = c;
+  shownSteps[3] = d;
+  return shownSteps;
+};
+
 function cotAction(tab) {
   const r = tab.regions.reasoning;
   const all = CHAINS.map((c) => c.steps.length);
@@ -45,7 +55,7 @@ function cotAction(tab) {
           r.setChains([0, 0, 0, 0], false);
         },
         update(p) {
-          r.setChains([Math.ceil(phase(p, 0.05, 0.8) * 3), 0, 0, 0], false);
+          r.setChains(setShown(Math.ceil(phase(p, 0.05, 0.8) * 3), 0, 0, 0), false);
         },
       },
       {
@@ -56,7 +66,7 @@ function cotAction(tab) {
           r.setChains([3, 0, 0, 0], false);
         },
         update(p) {
-          r.setChains([3, Math.ceil(phase(p, 0, 0.4) * 3), Math.ceil(phase(p, 0.3, 0.7) * 3), Math.ceil(phase(p, 0.6, 0.9) * 1)], false);
+          r.setChains(setShown(3, Math.ceil(phase(p, 0, 0.4) * 3), Math.ceil(phase(p, 0.3, 0.7) * 3), Math.ceil(phase(p, 0.6, 0.9) * 1)), false);
         },
       },
       {
@@ -75,7 +85,7 @@ function cotAction(tab) {
         enter() {
           r.setChains(all, true);
           r.verdict(0);
-          tab.ui.charts.open();
+          tab.openCharts();
           tab.plots.passN.setHighlight({ x: 4 });
         },
         update(p) {
@@ -169,7 +179,7 @@ function grpoAction(tab) {
           r.verdict(1);
           r.grpo(1);
           showAdv(1);
-          tab.ui.charts.open();
+          tab.openCharts();
         },
       },
       {

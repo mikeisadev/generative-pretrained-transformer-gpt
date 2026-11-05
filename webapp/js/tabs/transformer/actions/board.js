@@ -136,22 +136,26 @@ export class Board {
   matrix(x, y, w, h, values, rows, cols, { kind = "signed", scale, rowLabels, highlightRow = -1, title, caption, mask = false, square = false } = {}) {
     const g = this.ctx;
     const { signed, attention, masked } = colormaps();
-    if (title) {
-      this.label(title, x, y, { size: 34, weight: 600, maxWidth: w + 60 });
-      y += 44;
-      h -= 44;
-    }
-    if (caption) h -= 46;
+    const titleH = title ? 44 : 0;
+    h -= titleH + (caption ? 46 : 0);
     const labelW = rowLabels ? 34 : 0;
     let showLabels = rowLabels && h / rows >= 13;
     let mx = x + (showLabels ? labelW : 0);
     let mw = w - (showLabels ? labelW : 0);
     if (square) {
-      // celle quadrate (es. attention T × T): la matrice si restringe nel lato più lungo
+      // celle quadrate (es. attention T × T): la matrice si restringe nel lato più lungo e si
+      // centra nello spazio che aveva, insieme al titolo
       const cell = Math.min(mw / cols, h / rows);
+      showLabels = rowLabels && cell >= 13;
+      const shift = (mw - cell * cols) / 2;
+      x += shift;
+      mx += shift;
       mw = cell * cols;
       h = cell * rows;
-      showLabels = rowLabels && cell >= 13;
+    }
+    if (title) {
+      this.label(title, x, y, { size: 34, weight: 600, maxWidth: w + 60 });
+      y += titleH;
     }
     const cellH = h / rows;
 

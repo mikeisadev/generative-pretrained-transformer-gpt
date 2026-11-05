@@ -3,7 +3,7 @@
  * Regola di tutte le azioni: `enter` ricostruisce lo stato di inizio passo (il passo indietro
  * funziona sempre), `update(p)` anima da lì; niente allocazioni in update.
  */
-import { COMPARE_ROWS } from "./regionCompare.js";
+import { fillTemplate } from "../../core/dom.js";
 import { MOE_TOKENS } from "./regionMoe.js";
 import { RouterSim } from "./sim.js";
 import { phase } from "./shapes.js";
@@ -13,12 +13,12 @@ const CATEGORY = "Architettura";
 function compareAction(tab) {
   const r = tab.regions.compare;
   const captions = {
-    pos: "Posizioni: il nostro GPT somma una tabella appresa di 32 posizioni. RoPE invece ruota query e key in base alla posizione: niente tabella, e conta la distanza tra i token.",
+    pos: "Posizioni: il nostro GPT somma una tabella appresa di {{block}} posizioni. RoPE invece ruota query e key in base alla posizione: niente tabella, e conta la distanza tra i token.",
     norm: "Normalizzazione: LayerNorm toglie la media e divide per la deviazione standard. RMSNorm divide solo per la radice della media dei quadrati: più semplice, qualità simile.",
     attn: "Attention: nel nostro GPT ogni head ha i suoi K e V. Con GQA più head di query condividono K e V (Llama 3 8B: 32 query, 8 K/V), e una KV cache evita di ricalcolarli.",
     res: "Le connessioni residue e la struttura pre-norm restano identiche: x + attention(norm(x)), poi x + MLP(norm(x)).",
     ffn: "MLP: al posto di Linear-ReLU-Linear, SwiGLU (tre matrici e un cancello SiLU). Nei modelli MoE la MLP diventa un router con tanti esperti.",
-    out: "Vocabolario e contesto: da 65 caratteri e 32 posizioni a 128.256 token BPE e migliaia di posizioni (8K in Llama 3, 128K in Llama 3.1).",
+    out: "Vocabolario e contesto: da {{vocab}} caratteri e {{block}} posizioni a 128.256 token BPE e migliaia di posizioni (8K in Llama 3, 128K in Llama 3.1).",
   };
   const code = { pos: "llama.rope", norm: "llama.rmsnorm", attn: "llama.init_kv", res: "llama.block", ffn: "llama.ffn", out: "minbpe.train" };
   return {
@@ -44,9 +44,9 @@ function compareAction(tab) {
           tab.showCode("ours:block");
         },
       },
-      ...COMPARE_ROWS.map((row, i) => ({
+      ...r.rows.map((row, i) => ({
         title: row.modern[0],
-        caption: captions[row.id],
+        caption: fillTemplate(captions[row.id], tab.vars),
         duration: 5,
         enter() {
           r.reveal(i - 1);
@@ -67,7 +67,7 @@ function compareAction(tab) {
         caption: "Ecco il blocco moderno completo. Ossatura identica, pezzi più efficienti: è questo che permette di arrivare a miliardi di parametri e contesti lunghi.",
         duration: 4,
         enter() {
-          r.reveal(COMPARE_ROWS.length);
+          r.reveal(r.rows.length);
           r.highlight(-1);
           tab.showCode("llama.block");
         },
@@ -79,7 +79,7 @@ function compareAction(tab) {
 function moeAction(tab) {
   const r = tab.regions.moe;
   const labels = Array.from({ length: 8 }, (_, e) => `E${e + 1}`);
-  let routes = [];
+  const routes = r.routes; // stesse scelte del router mostrate nella regione a riposo
   let balance = [];
   let lastKey = "";
   const showLoad = (values, highlight) => {
@@ -100,8 +100,6 @@ function moeAction(tab) {
     summary: "Ogni token va a 2 esperti su 8 (come Mixtral); poi il problema del bilanciamento e l'esperto condiviso di DeepSeek-V3.",
     onStart() {
       tab.prepare("moe", { charts: "moe" });
-      const router = new RouterSim({ seed: 11 });
-      routes = MOE_TOKENS.map(() => router.route(router.token(), 2));
       // bilanciamento: 24 istantanee del carico mentre i bias si aggiustano (simulazione)
       const skewed = new RouterSim({ seed: 5, skew: 1.2 });
       balance = [];
@@ -122,7 +120,7 @@ function moeAction(tab) {
         caption: "Simulazione didattica (pesi casuali). Al posto di una sola MLP ci sono 8 esperti e un router: una piccola matrice che dà un punteggio a ogni esperto per ogni token.",
         duration: 4,
         enter() {
-          r.reset();
+          r.clear();
           showLoad(new Array(8).fill(0), undefined);
           tab.showCode("mistral.moe");
         },
@@ -154,7 +152,7 @@ function moeAction(tab) {
         caption: "Grafico «Carico degli esperti»: su 512 token un router sbilanciato manda quasi tutto ai primi esperti. Gli altri non imparano: è il problema del bilanciamento del carico.",
         duration: 5,
         enter() {
-          r.reset();
+          r.clear();
           showLoad(balance[0], 0);
         },
       },
@@ -163,7 +161,7 @@ function moeAction(tab) {
         caption: "Si corregge un piccolo bias per esperto: chi è sovraccarico viene scelto un po' meno, chi è scarico un po' di più (l'idea senza loss ausiliaria di DeepSeek-V3). Il carico si livella.",
         duration: 6,
         enter(ctx) {
-          r.reset();
+          r.clear();
           ctx.data.balanceIndex = 0;
           showLoad(balance[0], undefined);
         },
@@ -248,13 +246,17 @@ function gqaAction(tab) {
         duration: 6,
         enter() {
           r.set("gqa");
-          tab.ui.charts.open();
+          tab.openCharts();
           tab.plots.kvMemory.setHighlight({ x: 8 });
         },
       },
     ],
   };
 }
+
+/** Posizioni evidenziate nella regione RoPE (costanti: niente array nuovi a ogni frame). */
+const NO_POSITIONS = [];
+const POSITIONS_1_3 = [1, 3];
 
 function ropeAction(tab) {
   const r = tab.regions.rope;
@@ -273,7 +275,7 @@ function ropeAction(tab) {
       tab.prepare("rope");
     },
     onStop() {
-      r.set(0, []);
+      r.set(0, NO_POSITIONS);
       r.note([{ text: "Ogni coppia di dimensioni di q e k ruota di (posizione × θ).", bold: true }, { text: "Riga lenta disegnata con angoli × 10 per renderla visibile.", color: "#94a3b8" }]);
     },
     steps: [
@@ -282,7 +284,7 @@ function ropeAction(tab) {
         caption: "Prendiamo la stessa coppia di numeri di una query in 6 posizioni. Senza RoPE le frecce sarebbero tutte uguali: il vettore non sa dove si trova.",
         duration: 4,
         enter() {
-          r.set(0, [], 0);
+          r.set(0, NO_POSITIONS, 0);
           r.note([{ text: "Senza RoPE: stesso vettore, stessa direzione, in ogni posizione.", bold: true }]);
           tab.showCode("ours:model.init");
         },
@@ -292,12 +294,12 @@ function ropeAction(tab) {
         caption: "RoPE ruota la coppia di un angolo m · θ, dove m è la posizione. Riga in alto: coppia veloce (θ = 1 radiante). Riga in basso: coppia lenta (θ = 0,01, disegnata 10 volte più ampia).",
         duration: 5,
         enter() {
-          r.set(0, [], 0);
+          r.set(0, NO_POSITIONS, 0);
           tab.showCode("llama.rope");
           r.note([{ text: "θ_i = 10000^(−2i/d): coppie diverse girano a velocità diverse.", bold: true }, { text: "Llama 3 usa una base di 500.000 invece di 10.000.", color: "#94a3b8" }]);
         },
         update(p) {
-          r.set(0, [], phase(p, 0.1, 0.8));
+          r.set(0, NO_POSITIONS, phase(p, 0.1, 0.8));
         },
       },
       {
@@ -305,12 +307,12 @@ function ropeAction(tab) {
         caption: "Guardiamo le posizioni 1 e 3. Spostiamo tutta la frase avanti di 2: entrambe le frecce girano dello stesso angolo e la differenza tra loro (2θ) non cambia.",
         duration: 6,
         enter() {
-          r.set(0, [1, 3]);
+          r.set(0, POSITIONS_1_3);
           r.note(angleNote(0));
         },
         update(p) {
           const shift = phase(p, 0.2, 0.8) * 2;
-          r.set(shift, [1, 3]);
+          r.set(shift, POSITIONS_1_3);
           r.note(angleNote(Math.round(shift)));
         },
       },
@@ -319,7 +321,7 @@ function ropeAction(tab) {
         caption: "Il punteggio di attention è un prodotto scalare: ruotare q di mθ e k di nθ equivale a ruotare k di (n − m)θ. Il modello vede la posizione relativa, senza una tabella di posizioni.",
         duration: 5,
         enter() {
-          r.set(0, [1, 3]);
+          r.set(0, POSITIONS_1_3);
           r.note([{ text: "⟨R_m q, R_n k⟩ = ⟨q, R_(n−m) k⟩", bold: true }, { text: "Vedi «Approfondimento» nel percorso.", color: "#94a3b8" }]);
         },
       },

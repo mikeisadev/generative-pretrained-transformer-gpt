@@ -6,6 +6,9 @@
 import * as THREE from "three";
 import { ChannelTexture, DynamicLabel } from "./textures.js";
 
+/** Direzione della camera sul banco: quasi di fronte, così testi e immagini restano leggibili. */
+const LAB_DIR = new THREE.Vector3(0.06, 0.08, 1).normalize();
+
 export class Lab {
   /** @param {number} textScale moltiplica tutte le altezze dei testi (leggibilità da lontano) */
   constructor({ textScale = 1 } = {}) {
@@ -122,4 +125,3 @@ export function ensureLab(tab, ctx) {
   ctx.data.view = "lab";
   focusLab(tab);
 }
-const LAB_DIR = new THREE.Vector3(0.06, 0.08, 1).normalize();

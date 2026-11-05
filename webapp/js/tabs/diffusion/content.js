@@ -2,7 +2,7 @@
  * Contenuti didattici del tab "Immagini e video": percorso (menu a fisarmonica) e fonti.
  *
  * Ogni sottopunto può indicare:
- *   focus     id del registro su cui volare (pipeline.js / videoScene.js)
+ *   focus     id (o array di id) del registro su cui volare (pipeline.js / videoScene.js)
  *   code      chiave di SNIPPETS (codice vero, a commit fissati) + highlight
  *   denoiser  "unet" | "dit" per cambiare il denoiser mostrato
  *   math      formule per il riquadro "Approfondimento" (KaTeX)
@@ -84,8 +84,8 @@ ${note(`<strong>"Diffusione lineare"?</strong> Il nome corretto è <em>modelli d
       {
         id: "forward.schedule",
         title: "La schedule di β (T = 1000)",
-        focus: "timestep",
-        margin: 3,
+        focus: ["latent", "timestep"],
+        margin: 1.5,
         code: "ddpm_beta",
         codeTitle: "DDPM: get_beta_schedule",
         highlight: ["linear"],
@@ -240,8 +240,8 @@ ${sim("Zoom: avvicinati per vedere ogni blocco, allontanati per lo schema. L'azi
         id: "arch.timestep",
         title: "Il passo t dentro la rete",
         denoiser: "unet",
-        focus: "timestep",
-        margin: 3,
+        focus: ["timestep", "unet"],
+        margin: 1.1,
         code: "ddpm_resnet",
         codeTitle: "DDPM: ResNet block con il passo t",
         highlight: ["temb_proj", "add in timestep embedding"],
@@ -371,7 +371,7 @@ ${sim("Guarda il confronto nella scena e il grafico 'Differenza tra frame consec
 <ul><li><strong>fattorizzata</strong>: attention spaziale dentro ogni frame + attention temporale tra frame (Video Diffusion Models). Costa meno;</li>
 <li><strong>completa 3D</strong>: ogni token guarda tutti gli altri (HunyuanVideo). Più potente, più costosa.</li></ul>
 <p>L'azione "Video" mostra le tre varianti con linee che partono da un token di esempio.</p>`,
-        math: [{ tex: "\\underbrace{F\\,(HW)^2 + HW\\,F^2}_{\\text{fattorizzata}} \\ \\ll\\ \\underbrace{(F\\,HW)^2}_{\\text{completa}}", note: "F frame (latenti), H×W token per frame. Esempio: F = 4, HW = 16 → 1.088 contro 4.096 confronti." }],
+        math: [{ tex: "\\underbrace{F\\,(HW)^2 + HW\\,F^2}_{\\text{fattorizzata}} \\ \\ll\\ \\underbrace{(F\\,HW)^2}_{\\text{completa}}", note: "F frame (latenti), H×W token per frame. Esempio: F = 4, HW = 16 → 4·256 + 16·16 = 1.280 contro 64² = 4.096 confronti." }],
       },
     ],
   },

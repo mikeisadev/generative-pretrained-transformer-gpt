@@ -16,11 +16,14 @@ import { BackwardParticles } from "./particles.js";
 import { TrainingData, batchLoss, groupOfStation, metricIndex, sampleBatch } from "./trainingData.js";
 import { TRAINING_EXCERPT } from "./excerpt.js";
 import { ContextColumn, disposeObject } from "./tokens3d.js";
-import { lerpInto, logitsGradient, visibleChar } from "./math.js";
+import { lerpInto, logitsGradient, rateLimiter, visibleChar } from "./math.js";
 import * as THREE from "three";
 
+/** Aggiornamenti al secondo delle heatmap mentre i pesi si animano (scrivere tutte le texture costa ~5 ms). */
 const UPLOADS_PER_SECOND = 12;
-const it = (v) => v.toFixed(3).replace(".", ","); // numeri all'italiana nelle didascalie // aggiornamenti delle heatmap durante le animazioni dei pesi
+const OPTIMIZER_SECONDS = 7;
+/** Numeri all'italiana nelle didascalie. */
+const it = (v) => v.toFixed(3).replace(".", ",");
 
 export function createTrainingStepAction({ tab, stage, charts, data, getStartStep }) {
   let scene = null;
@@ -112,7 +115,7 @@ export function createTrainingStepAction({ tab, stage, charts, data, getStartSte
   }
 
   function steps(m) {
-    let lastUpload = 0;
+    const uploads = rateLimiter(UPLOADS_PER_SECOND);
     return [
       {
         title: `Step ${m.s0}: il punto di partenza`,
@@ -152,7 +155,7 @@ export function createTrainingStepAction({ tab, stage, charts, data, getStartSte
       },
       {
         title: "Forward",
-        caption: `Forward: il batch attraversa tutto il modello con i pesi dello step ${m.s0}. Escono 16 × 32 distribuzioni di 65 logits.`,
+        caption: `Forward: il batch attraversa tutto il modello con i pesi dello step ${m.s0}. Escono ${m.windows.length} × ${m.blockSize} distribuzioni di ${m.vocab.length} logits.`,
         duration: 5,
         enter: () => {
           base(m);
@@ -167,7 +170,7 @@ export function createTrainingStepAction({ tab, stage, charts, data, getStartSte
       },
       {
         title: "Loss",
-        caption: `Cross-entropy: −ln della probabilità data al carattere giusto, in media su 512 previsioni. Su questo batch vale ${it(m.lossA.mean)}.`,
+        caption: `Cross-entropy: −ln della probabilità data al carattere giusto, in media su ${m.windows.length * m.blockSize} previsioni. Su questo batch vale ${it(m.lossA.mean)}.`,
         duration: 6,
         enter: () => {
           base(m);
@@ -209,19 +212,17 @@ export function createTrainingStepAction({ tab, stage, charts, data, getStartSte
       {
         title: "AdamW: i pesi cambiano",
         caption: `optimizer.step(): ogni peso si sposta un poco contro il suo gradiente. Un passo solo non si vedrebbe: la scena anima i ${m.s1 - m.s0} passi veri fino allo snapshot ${m.s1}.`,
-        duration: 7,
+        duration: OPTIMIZER_SECONDS,
         enter: () => {
           base(m);
-          lastUpload = -1;
+          uploads.reset();
           stage.packetAt(0, null);
           stage.show("blocks.0", (b) => T.drawOptimizer(b, m));
           tab.showCode("train", "train(): passo dell'ottimizzatore", ["optimizer.step()", "torch.optim.AdamW"]);
         },
         update: (p) => {
           const t = Math.min(1, Math.max(0, (p - 0.1) / 0.75));
-          const slot = Math.floor(p * 7 * UPLOADS_PER_SECOND);
-          if (slot === lastUpload && p < 1) return;
-          lastUpload = slot;
+          if (!uploads.ready(p >= 1)) return;
           lerpInto(m.mix, m.wA, m.wB, t);
           stage.textures.writeWeights(m.mixViews);
           charts.highlight(Math.round(m.s0 + (m.s1 - m.s0) * t));
@@ -229,7 +230,7 @@ export function createTrainingStepAction({ tab, stage, charts, data, getStartSte
       },
       {
         title: "Di nuovo la loss",
-        caption: `Stesso batch, pesi dello step ${m.s1}: loss ${it(m.lossB.mean)} (prima ${it(m.lossA.mean)}). Questo, ripetuto 5000 volte, è il training.`,
+        caption: `Stesso batch, pesi dello step ${m.s1}: loss ${it(m.lossB.mean)} (prima ${it(m.lossA.mean)}). Questo, ripetuto ${m.trace.train_config.max_iters} volte, è il training.`,
         duration: 7,
         enter: () => {
           base(m, "B");
@@ -253,9 +254,10 @@ export function createTrainingStepAction({ tab, stage, charts, data, getStartSte
     category: "Training",
     summary: "Batch, forward, loss, backward e AdamW con i numeri veri del training registrato. Scegli sotto lo step di partenza.",
     async build(ctx) {
-      cleanup();
       await tab.views.activate("architettura");
       const m = await prepare();
+      if (ctx.isStale?.()) return [];
+      cleanup();
       m.mixViews = TrainingData.views(m.engine, m.mix);
       ctx.data.m = m;
       scene = buildScene(m);
@@ -263,7 +265,10 @@ export function createTrainingStepAction({ tab, stage, charts, data, getStartSte
       return steps(m);
     },
     // a fine azione la scena torna ai pesi addestrati; "Ricomincia" la riprepara dal primo passo
-    onEnd: () => stage.restore(),
+    onEnd: () => {
+      stage.restore();
+      if (scene) scene.column.group.visible = scene.particles.points.visible = false;
+    },
     onStop: cleanup,
   };
 }

@@ -29,7 +29,7 @@ export function createPlots(charts, lab) {
     type: "heatmap",
     title: "Spettrogramma log-Mel",
     description: "A cosa serve: mostra quali frequenze suonano in ogni istante (64 bande Mel, decibel). Le righe orizzontali sono le note e le loro armoniche.",
-    xLabel: "frame (20 ms)",
+    xLabel: "frame (uno ogni 20 ms)",
     yLabel: "banda Mel",
   });
   const bank = sound.chart("mel-bank", {
@@ -72,7 +72,7 @@ export function createPlots(charts, lab) {
     type: "heatmap",
     title: "log-Mel di Whisper (30 s × 80 bande)",
     description: "A cosa serve: è esattamente ciò che entra nell'encoder di Whisper. A destra il silenzio di riempimento: Whisper lavora sempre su blocchi da 30 secondi.",
-    xLabel: "frame (10 ms)",
+    xLabel: "frame (uno ogni 10 ms)",
     yLabel: "banda Mel",
   });
 
@@ -104,6 +104,9 @@ export function createPlots(charts, lab) {
 
   const relErr = lab.relativeError();
   const errPoints = (upTo) => relErr.slice(0, upTo + 1).map((v, l) => [l, v]).filter(([l]) => l >= 1);
+
+  const tokenLabels = Array.from({ length: lab.rvq.k }, (_, i) => String(i));
+  const lastTokens = { codes: null, n: -1 };
 
   let style = anyStyle;
   return {
@@ -146,11 +149,14 @@ export function createPlots(charts, lab) {
     },
     /** Conteggio dei token del codebook 1 nei primi n frame. */
     tokens(codes, n) {
+      if (codes === lastTokens.codes && n === lastTokens.n) return; // durante le azioni arriva a ogni frame
+      lastTokens.codes = codes;
+      lastTokens.n = n;
       const counts = new Array(lab.rvq.k).fill(0);
       for (let t = 0; t < n; t++) counts[codes[t]]++;
       let best = 0;
       counts.forEach((c, i) => c > counts[best] && (best = i));
-      dist.setData({ labels: counts.map((_, i) => String(i)), values: counts, highlight: n > 0 ? best : undefined });
+      dist.setData({ labels: tokenLabels, values: counts, highlight: n > 0 ? best : undefined });
     },
     /** Distribuzione del prossimo token: i 10 più probabili, evidenziato quello scelto. */
     nextToken(p, chosen) {

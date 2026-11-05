@@ -74,6 +74,23 @@ export function logitsGradient(logits, offset, V, target, count = 1) {
   return grad;
 }
 
+/**
+ * Punteggi di attention q·kᵀ/√hs per TUTTE le coppie (i, j), anche quelle future (j > i) che il
+ * motore non calcola (le mette subito a −∞). Servono a mostrare i punteggi "prima della maschera".
+ * q e k sono (T × hs) riga per riga; il risultato è (T × T).
+ */
+export function scaledScores(q, k, T, hs, out = new Float32Array(T * T)) {
+  const scale = 1 / Math.sqrt(hs);
+  for (let i = 0; i < T; i++) {
+    for (let j = 0; j < T; j++) {
+      let dot = 0;
+      for (let c = 0; c < hs; c++) dot += q[i * hs + c] * k[j * hs + c];
+      out[i * T + j] = dot * scale;
+    }
+  }
+  return out;
+}
+
 /** Somma cumulativa nell'ordine dato (è la "ruota" di sample() in engine/sampling.js). */
 export function cumulative(probs) {
   const out = new Float32Array(probs.length + 1);
@@ -90,13 +107,6 @@ export function rowNorms(matrix, rows, cols) {
     out[r] = Math.sqrt(s);
   }
   return out;
-}
-
-/** Media di un array numerico. */
-export function mean(values) {
-  let s = 0;
-  for (let i = 0; i < values.length; i++) s += values[i];
-  return values.length ? s / values.length : NaN;
 }
 
 /** Massimo valore assoluto (finito) di un array: la scala delle heatmap divergenti. */
@@ -182,3 +192,26 @@ export function segmentIndex(sortedPoints, x) {
 
 /** Curva di easing per i movimenti (morbida in partenza e in arrivo). */
 export const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+/**
+ * Limitatore di frequenza in tempo REALE: `ready()` è vero al massimo `perSecond` volte al secondo.
+ * Serve agli aggiornamenti costosi (texture, grafici) dentro `update`: contare in base al
+ * progresso del passo li moltiplicherebbe con la velocità del player (4× = 4 volte tanti).
+ * @param {number} perSecond
+ * @param {() => number} [now] orologio in millisecondi (iniettabile nei test)
+ */
+export function rateLimiter(perSecond, now = () => performance.now()) {
+  const interval = 1000 / perSecond;
+  let last = -Infinity;
+  return {
+    ready(force = false) {
+      const t = now();
+      if (!force && t - last < interval) return false;
+      last = t;
+      return true;
+    },
+    reset() {
+      last = -Infinity;
+    },
+  };
+}

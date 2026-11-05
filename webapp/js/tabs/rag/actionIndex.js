@@ -11,6 +11,11 @@ import { phase } from "./scene3d.js";
 // Fasi in ordine: baseline(s) = tutte le fasi < s completate, le altre allo stato iniziale.
 const S = { EMPTY: 0, SEND: 1, EXTRACT: 2, CLEAN: 3, CHUNK: 4, EMBED: 5, TABLE: 6, GRAPH: 7, RESPONSE: 8, BATCH: 9, READY: 10 };
 
+/** Vero se il player ha completato l'ultimo passo dell'azione corrente. */
+export function isFinished(player) {
+  return player.index >= player.steps.length - 1 && player.t >= 1;
+}
+
 export function indexAction(tab) {
   const baseline = (stage) => {
     const { kb, world } = tab;
@@ -33,6 +38,8 @@ export function indexAction(tab) {
     plotIndexed(stage > S.CHUNK ? Math.max(nodes, F) : 0);
   };
 
+  let before = null; // stato della scena prima dell'azione: si ripristina se viene interrotta
+
   /** Aggiorna i grafici solo quando il numero di nodi cambia (non a ogni frame). */
   let plotted = -1;
   const plotIndexed = (k) => {
@@ -47,11 +54,16 @@ export function indexAction(tab) {
     category: "Indicizzazione",
     summary: "Database vuoto → upload → estrazione → pulizia → chunk → embedding → vector_store → indice HNSW nodo per nodo.",
     onStart() {
+      before = tab.snapshot();
       tab.prepareAction();
       plotted = -1;
     },
     onEnd() {
       tab.world.indexed = tab.kb.inserts.length;
+    },
+    onStop({ player }) {
+      // chiusa dopo l'ultimo passo: il database pieno resta; interrotta a metà: com'era prima
+      if (!isFinished(player)) tab.restore(before);
     },
     build() {
       const { kb } = tab;

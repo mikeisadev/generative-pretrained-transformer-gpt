@@ -44,7 +44,12 @@ export function createTabLayout(root, { code = false, charts = false, player = f
     "☰",
   );
   stage.append(toggle);
-  if (window.matchMedia("(max-width: 900px)").matches) root.classList.add("sidebar-collapsed");
+  // Su schermi stretti la sidebar è un cassetto sopra lo stage: parte chiusa e si chiude toccando la scena.
+  const narrow = window.matchMedia("(max-width: 900px)");
+  if (narrow.matches) root.classList.add("sidebar-collapsed");
+  host.renderer.domElement.addEventListener("pointerdown", () => {
+    if (narrow.matches) root.classList.add("sidebar-collapsed");
+  });
   new ResizeObserver(() => host.resize()).observe(root);
 
   return { root, sidebar, stage, caption, host, director, codePanel, charts: chartsPanel, player: actions };

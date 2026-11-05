@@ -28,7 +28,9 @@ export class SceneTextures {
    * quanto i pesi crescono o si restringono durante il training.
    */
   writeWeights(views) {
-    const { signed } = colormaps();
+    // Un texel RGBA = un Uint32: si copia il colore della LUT con una sola scrittura. Durante il
+    // training completo questa funzione gira 12 volte al secondo su ~210.000 texel.
+    const lut = this.signed32 ??= new Uint32Array(colormaps().signed.slice().buffer);
     for (const [name, meshes] of this.tab.arch.tensorMeshes) {
       const values = views.get(name);
       const info = this.tab.spec.tensors[name];
@@ -37,20 +39,28 @@ export class SceneTextures {
         const texture = mesh.material?.map;
         if (!texture?.image?.data) continue;
         this.save(texture);
-        const { width: cols, height: rows, data } = texture.image;
+        const { width: cols, height: rows } = texture.image;
+        const texels = this.texels(texture);
         for (let r = 0; r < rows; r++) {
           const base = (rows - 1 - r) * cols; // DataTexture parte dal basso
-          for (let c = 0; c < cols; c++) {
-            const q = quantizeSigned(values[r * cols + c], info.scale) * 4;
-            const o = (base + c) * 4;
-            data[o] = signed[q];
-            data[o + 1] = signed[q + 1];
-            data[o + 2] = signed[q + 2];
-          }
+          const row = r * cols;
+          for (let c = 0; c < cols; c++) texels[base + c] = lut[quantizeSigned(values[row + c], info.scale)];
         }
         texture.needsUpdate = true;
       }
     }
+  }
+
+  /** Vista Uint32 (un elemento per texel RGBA) dei byte di una DataTexture, creata una volta. */
+  texels(texture) {
+    this.views ??= new WeakMap();
+    let view = this.views.get(texture);
+    if (!view) {
+      const data = texture.image.data;
+      view = new Uint32Array(data.buffer, data.byteOffset, data.length >> 2);
+      this.views.set(texture, view);
+    }
+    return view;
   }
 
   /** Mesh del pattern di attention di una head (registro di architecture.js). */

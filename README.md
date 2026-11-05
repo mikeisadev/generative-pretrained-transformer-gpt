@@ -15,11 +15,11 @@ pip install -r requirements.txt
 ```bash
 python train.py                    # ~3 minuti su CPU, salva checkpoints/gpt.pt
 python generate.py --prompt "ROMEO:" --max-new-tokens 300
-python scripts/serve_webapp.py     # poi apri http://localhost:8000
+python scripts/serve_webapp.py     # web app 3D: poi apri http://localhost:8000
 python scripts/record_training.py  # rifà il training registrandolo per i grafici della web app (~4 min)
 ```
 
-Prova veloce del training: `python train.py --max-iters 500`. Test: `pytest`.
+Prova veloce del training: `python train.py --max-iters 500`. Test: `pytest` e `node --test webapp/tests/*.test.mjs`.
 
 Il dataset Tiny Shakespeare si scarica da solo al primo avvio (in `data/`). La web app funziona anche offline: le librerie sono in `webapp/vendor/`.
 
@@ -44,8 +44,9 @@ gpt/                    il modello, un file per ogni step della lezione
 experiments/            script da proiettare in aula, nell'ordine del video
   01_data_and_tokenization.py … 06_edit_a_weight.py
 tests/                  pytest: forme, maschera causale, loss, generazione, overfitting, bug
-webapp/                 web app 3D (Three.js, KaTeX, highlight.js inclusi)
+webapp/                 web app 3D a tab (Three.js, KaTeX, highlight.js inclusi; vedi webapp/ARCHITECTURE.md)
 scripts/serve_webapp.py esporta i dati del modello e avvia la web app
+scripts/record_training.py rifà il training registrandone la storia (webapp/data/training/)
 train.py, generate.py   punti di ingresso
 reference/              notebook ed export originali di Karpathy, non modificati
 ```
@@ -54,14 +55,43 @@ Gli esperimenti si lanciano dalla radice, per esempio `python experiments/03_att
 
 ## Web app
 
-`python scripts/serve_webapp.py` rigenera `webapp/data/model.json` dal codice Python e dal checkpoint (se esiste), poi serve la cartella `webapp/` solo su `localhost`.
+```bash
+python scripts/serve_webapp.py                 # riesporta i dati dal checkpoint e apre http://localhost:8000
+python scripts/serve_webapp.py --no-export --port 8765   # usa i dati già presenti
+python scripts/record_training.py              # rifà il training registrandolo (loss, metriche, snapshot) per i grafici
+```
 
-- **Menu a sinistra**: gli step in ordine di flusso, con spiegazione, tabella dei pesi e riquadro "Approfondimento" con le formule.
-- **Scena 3D**: ogni cella colorata è un peso vero (arancione positivo, blu negativo). I pattern di attention sono calcolati dal modello su un prompt d'esempio. Il flusso dei dati è animato.
-- **Finestra a destra**: il codice Python dello step, preso dal sorgente del pacchetto.
-- Frecce ↑ ↓ per passare da uno step all'altro.
+Il server ascolta solo su `localhost`. La web app non ha bisogno di internet né di installare nulla
+(Three.js, KaTeX e highlight.js sono in `webapp/vendor/`). Un test (`tests/test_webapp_data.py`)
+fallisce se `webapp/data/` non è allineato al codice: dopo aver modificato il pacchetto `gpt`, rilancia lo script.
 
-Un test (`tests/test_webapp_data.py`) fallisce se `model.json` non è allineato al codice: dopo aver modificato il pacchetto `gpt`, rilancia lo script.
+### I tab
+
+| Tab | Cosa mostra |
+|---|---|
+| **Transformer** | Il GPT del corso in 3D: ogni cella colorata è un peso vero (arancione positivo, blu negativo). Viste: *Architettura*, *Pesi* (dove stanno i 209.729 parametri), *Rete neurale* (tutti i neuroni, le connessioni e i calcoli, con un clic su un neurone), *Contesto* (domanda → database vettoriale → system prompt e tool → richiesta all'LLM, collegata al tab RAG). Azioni *Prompt* (dalla scrittura del prompt ai token, dentro i blocchi, fino al token estratto, calcolato dal motore JS con i pesi veri) e *Training* (uno step al microscopio e il training completo registrato) |
+| **Database vettoriale (RAG)** | La pipeline delle lezioni L16-L18 (Spring Boot + Spring AI + pgvector): database vuoto, upload, pulizia, chunking, embedding, tabella `vector_store`, indice HNSW; poi ricerca HNSW, prompt e risposta in streaming |
+| **Immagini e video** | Modelli di diffusione: processo diretto e training, generazione (text encoder, U-Net o DiT, scheduler, VAE), video con VAE 3D e patch spazio-temporali |
+| **Audio e musica** | Dal suono ai numeri (STFT, scala Mel), codec neurale con RVQ, generazione di musica a token, Whisper; laboratorio con suono vero |
+| **LLM moderni** | Cosa cambia rispetto al nostro GPT: RoPE, GQA, MoE, KV cache, FlashAttention, BPE, leggi di scala, post-training, ragionamento, agenti, coding, capacità emergenti, multimodalità, modelli 3D |
+
+### Come si usa
+
+- **Sidebar a sinistra**: *Percorso* (gli step in ordine, con spiegazione, formule e tabella dei pesi), *Azioni* (panoramica delle animazioni, divise per categoria: prompt, training…), *Viste*, *Fonti*. Con la tastiera: ↑ ↓ cambiano step, lo spazio mette in pausa l'azione.
+- **Zoom semantico**: rotellina per avvicinarsi o allontanarsi, oppure il selettore in alto a sinistra. *Dettaglio* mostra ogni elemento, *Blocchi* un rettangolo con titolo e descrizione per componente, *Panoramica* il diagramma a blocchi (nel Transformer un unico rettangolo con input sotto e output sopra).
+- **Azioni**: barra in basso con play/pausa, passo avanti/indietro, ricomincia, velocità e chiudi. Chiudendo un'azione la scena torna com'era.
+- **Grafici**: il pulsante in alto a destra apre i grafici che usano AI engineer e data scientist (loss, learning rate, norma dei gradienti, distribuzioni, attention…), che si riempiono mentre le azioni avanzano.
+- **Codice**: la finestra a destra mostra il codice vero dello step (Python del pacchetto `gpt`, Java delle lezioni Spring AI); "▁" la riduce.
+
+### Test della web app
+
+```bash
+node --test webapp/tests/*.test.mjs            # motore GPT in JS, libreria RAG, HNSW, grafici, azioni
+NODE_PATH=$(npm root -g) node webapp/tests/screenshot.mjs http://127.0.0.1:8765/ /tmp/shots --lod
+```
+
+Lo script di screenshot (Playwright con Chromium) apre tutti i tab e i livelli dello zoom e termina con
+errore se la console ne segnala. L'architettura del codice è descritta in `webapp/ARCHITECTURE.md`.
 
 ## Bug corretti rispetto al notebook
 

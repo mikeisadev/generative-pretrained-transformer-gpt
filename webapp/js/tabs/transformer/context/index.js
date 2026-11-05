@@ -20,7 +20,7 @@ import * as THREE from "three";
 import { sleep } from "../../../core/dom.js";
 import { registerContextAction } from "./action.js";
 import { ContextCharts } from "./contextCharts.js";
-import { CONTEXT_DISTANCES, DIAGRAM_IDS, overviewBox, slotsBox } from "./layout.js";
+import { CONTEXT_DISTANCES, DIAGRAM_IDS, STACK, overviewBox, slotsBox } from "./layout.js";
 import { ContextPane } from "./pane.js";
 import { DEMO_QUESTION, createContextModel } from "./pipeline.js";
 import { ContextScene, FULL_STATE } from "./scene.js";
@@ -30,6 +30,15 @@ import { STAGE } from "./texts.js";
 const VIEW_ID = "contesto";
 const FRONT = new THREE.Vector3(0.03, 0.07, 1).normalize(); // quasi di fronte: le schede restano leggibili
 const RAG_WAIT_MS = 10000;
+/**
+ * Rapporto larghezza/altezza della parte visibile dello stage per cui sono tarate le soglie del LOD
+ * (1600×900 con il pannello del codice aperto). Su uno stage più stretto la camera deve stare più
+ * lontana per inquadrare la stessa scheda: le soglie crescono in proporzione, così cliccare una fase
+ * porta al Dettaglio anche su un telefono.
+ */
+const REFERENCE_ASPECT = 0.76;
+/** Margine oltre la soglia dei Blocchi per la vista d'insieme (l'isteresi del LOD è dell'8%). */
+const MACRO_MARGIN = 1.12;
 
 export function installContext(tab) {
   const { ui } = tab;
@@ -42,13 +51,43 @@ export function installContext(tab) {
   let model = null; // vector store del corso: costruito alla prima apertura (~30 ms)
   let offFrame = null;
   let flowSaved = null;
+  let leaving = false; // true mentre la vista si chiude: l'azione interrotta non tocca la didascalia
+  let lodScale = 0;
+
+  /** Soglie del LOD scalate sulla forma dello stage (vedi REFERENCE_ASPECT); ricalcolate solo se cambia. */
+  const fitLodDistances = () => {
+    const scale = THREE.MathUtils.clamp(REFERENCE_ASPECT / host.visibleAspect(), 1, 3);
+    if (Math.abs(scale - lodScale) < 0.01) return;
+    lodScale = scale;
+    tab.lod.setDistances({ detail: CONTEXT_DISTANCES.detail * scale, blocks: CONTEXT_DISTANCES.blocks * scale });
+  };
+
+  /** Pixel coperti in basso nello stage da un elemento (0 se nascosto o assente). */
+  const coveredBelow = (element, stageRect) => {
+    if (!element || element.hidden) return 0;
+    const r = element.getBoundingClientRect();
+    return r.height > 0 ? THREE.MathUtils.clamp(stageRect.bottom - r.top, 0, stageRect.height * 0.7) : 0;
+  };
 
   /**
-   * Durante un'azione la barra del player copre il fondo dello stage: allunghiamo il riquadro da
-   * inquadrare verso il basso, così la scheda resta nella parte alta, visibile.
+   * La barra del player (durante un'azione) e, su schermi stretti, il pannello del codice coprono il
+   * fondo dello stage. Allunghiamo il riquadro da inquadrare verso il basso della quantità giusta
+   * perché il soggetto resti nella parte alta, quella visibile.
+   *   altezza inquadrata nel mondo  H = max(h · S/(S − c), w / aspetto)   (S, c: pixel dello stage e coperti)
+   *   allungamento                  e = H · c / S
    */
-  const roomForPlayer = (box) => {
-    if (ui.player?.action) box.min.y -= (box.max.y - box.min.y) * 0.32;
+  const roomForOverlays = (box) => {
+    const stageRect = host.container.getBoundingClientRect();
+    // su schermi larghi il pannello del codice sta a destra (ne tiene conto il view offset della camera)
+    const narrow = window.matchMedia("(max-width: 900px)").matches;
+    const code = ui.codePanel?.root;
+    const codeBelow = narrow && code && !code.classList.contains("minimized") ? code : null;
+    const covered = Math.max(coveredBelow(ui.player?.action ? ui.player.bar : null, stageRect), coveredBelow(codeBelow, stageRect));
+    if (covered <= 0 || stageRect.height <= covered) return box;
+    const w = box.max.x - box.min.x;
+    const h = box.max.y - box.min.y;
+    const span = Math.max((h * stageRect.height) / (stageRect.height - covered), w / host.visibleAspect());
+    box.min.y -= (span * covered) / stageRect.height;
     return box;
   };
 
@@ -70,18 +109,22 @@ export function installContext(tab) {
     },
 
     focus(ids, { duration = 1.2, margin = 1.12 } = {}) {
-      return director.focus(roomForPlayer(slotsBox(ids)), { showFrame: false, margin, direction: FRONT, duration, minDistance: 8 });
+      return director.focus(roomForOverlays(slotsBox(ids)), { showFrame: false, margin, direction: FRONT, duration, minDistance: 8 });
     },
 
-    /** Inquadra la scheda dei token, il riquadro LLM e la parte bassa della pila (dove entrano i token). */
+    /** Inquadra la scheda dei token, il riquadro LLM e la metà bassa della pila (dove entrano i token). */
     focusLlm() {
       const box = slotsBox(["tokenize", "llm"]);
-      box.expandByPoint(new THREE.Vector3(14, -46, 0)).expandByPoint(new THREE.Vector3(14, 0, 0));
-      return director.focus(roomForPlayer(box), { showFrame: false, margin: 1.05, direction: FRONT, duration: 1.3 });
+      box.expandByPoint(new THREE.Vector3(STACK.rightX, -46, 0)).expandByPoint(new THREE.Vector3(STACK.rightX, 0, 0));
+      return director.focus(roomForOverlays(box), { showFrame: false, margin: 1.05, direction: FRONT, duration: 1.3 });
     },
 
+    /** Contesto → pila → Risposta, abbastanza da lontano da essere sempre nel livello Panoramica. */
     overview() {
-      return director.focus(roomForPlayer(overviewBox()), { showFrame: false, margin: 1.02, direction: FRONT, duration: 1.6 });
+      fitLodDistances();
+      const margin = 1.02;
+      const minDistance = (tab.lod.controller.levels[1].maxDistance * MACRO_MARGIN) / margin;
+      return director.focus(roomForOverlays(overviewBox()), { showFrame: false, margin, minDistance, direction: FRONT, duration: 1.6 });
     },
 
     showCode(key) {
@@ -104,6 +147,11 @@ export function installContext(tab) {
 
     moveArchFlow(p) {
       tab.flow.moveTo(p * tab.flow.length);
+    },
+
+    /** true mentre la vista si sta chiudendo (l'azione interrotta non deve riscrivere la didascalia). */
+    get leaving() {
+      return leaving;
     },
   };
 
@@ -136,7 +184,8 @@ export function installContext(tab) {
     description: "Dal messaggio dell'utente al contesto dell'LLM: guardrail, RAG con pgvector, prompt, strumenti e streaming.",
     order: 30,
     enter: async () => {
-      tab.lod.setDistances(CONTEXT_DISTANCES);
+      lodScale = 0;
+      fitLodDistances();
       director.hideFrame();
       pane.setVisible(true);
       // l'architettura resta visibile: la pila del transformer è l'LLM del diagramma
@@ -159,7 +208,9 @@ export function installContext(tab) {
       }
     },
     exit: () => {
+      leaving = true;
       if (ui.player?.action?.id === "context-pipeline") ui.player.stop();
+      leaving = false;
       pane.setVisible(false);
       scene.setVisible(false);
       scene.setActive(null);
@@ -169,8 +220,20 @@ export function installContext(tab) {
       offFrame = null;
       view.lockFlow(false);
       tab.lod.resetDistances();
+      tab.setCaption(""); // le didascalie del Contesto non valgono per la vista successiva
+      // la camera guardava il diagramma a sinistra della pila, ora nascosto: torna sulla pila
+      // (se la vista successiva sceglie un'inquadratura sua, il suo volo sostituisce questo)
+      tab.focus("overview");
     },
   });
+
+  // Le soglie del LOD seguono la forma dello stage: finestra ridimensionata, pannelli aperti o chiusi.
+  const refitLod = () => {
+    if (tab.views.current === VIEW_ID) fitLodDistances();
+  };
+  new ResizeObserver(refitLod).observe(host.container);
+  ui.codePanel?.onResize(refitLod);
+  ui.charts?.onResize?.(refitLod);
 
   // Il tab RAG (o un altro tab) può passarci la sua domanda prima di aprire questa vista:
   // app.bus.dispatchEvent(new CustomEvent("context:question", { detail: { question } }))

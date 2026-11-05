@@ -45,7 +45,9 @@ export function buildReasoning(group) {
     advantages,
     /** shown[r] = quanti passi della catena r sono visibili; answers = mostra le risposte. */
     setChains(shown, showAnswers = false) {
-      const key = shown.join(",") + (showAnswers ? "+" : "-");
+      // chiave numerica (al massimo 3 passi per catena): niente stringhe nuove a ogni frame
+      let key = showAnswers ? 1 : 0;
+      for (let r = 0; r < CHAINS.length; r++) key = key * 4 + Math.min(3, shown[r] ?? 0);
       if (key === api.chainsKey) return;
       api.chainsKey = key;
       api.verdictOn = undefined; // le risposte vengono riscritte: il verdetto va riapplicato

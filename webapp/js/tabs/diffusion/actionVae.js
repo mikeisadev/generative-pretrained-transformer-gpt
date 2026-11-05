@@ -1,29 +1,13 @@
 /**
  * Azione "Dal latente ai pixel (VAE)": il decoder porta 4 × 64 × 64 numeri a 512 × 512 × 3 pixel.
  */
+import { avgPool } from "./imagery.js";
 import { ensureLab, focusLab, latentGrid } from "./lab.js";
 import { RGBTexture } from "./textures.js";
 
 export function vaeAction(tab) {
   const { lab, vae, reference } = tab;
   let stages;
-
-  /** Immagine ridotta di un fattore f (media dei blocchi) e riportata a 256 per il disegno. */
-  function stageImage(f) {
-    const size = 256;
-    const out = new Float32Array(size * size * 3);
-    for (let j = 0; j < size; j++)
-      for (let i = 0; i < size; i++) {
-        const bj = Math.floor(j / f) * f;
-        const bi = Math.floor(i / f) * f;
-        for (let c = 0; c < 3; c++) {
-          let s = 0;
-          for (let y = 0; y < f; y++) for (let x = 0; x < f; x++) s += reference[((bj + y) * size + bi + x) * 3 + c];
-          out[(j * size + i) * 3 + c] = s / (f * f);
-        }
-      }
-    return out;
-  }
 
   const reveal = (k, p = 1) =>
     stages.forEach((s, i) => {
@@ -35,7 +19,7 @@ export function vaeAction(tab) {
   return {
     id: "vae",
     title: "Dal latente ai pixel (VAE)",
-    category: "Immagini",
+    category: "Generazione (prompt)",
     summary: "Il decoder del VAE: 4 × 64 × 64 numeri diventano 512 × 512 × 3 pixel. Perché si lavora nel latente.",
     onStart(ctx) {
       lab.clear();
@@ -48,7 +32,8 @@ export function vaeAction(tab) {
         { f: 1, w: 10.5, x: 15, title: "512 × 512 × 3\nimmagine" },
       ];
       stages = defs.map((d, i) => {
-        const tex = lab.own(new RGBTexture(256, { nearest: d.f > 1 }).set(stageImage(d.f)));
+        // l'immagine alla risoluzione dello stadio (media dei blocchi f × f), disegnata a pixel netti
+        const tex = lab.own(new RGBTexture(vae.size / d.f, { nearest: d.f > 1 }).set(avgPool(reference, vae.size, d.f)));
         return lab.panel(`s${i}`, { texture: tex.texture, x: d.x, y: 0, w: d.w, title: d.title, titleHeight: 0.8 });
       });
       lab.text("title", "VAE decoder: la risoluzione sale, i canali scendono", -4.5, 12.5, { height: 1.3, color: "#7dd3fc" });
@@ -60,6 +45,7 @@ export function vaeAction(tab) {
     },
     onStop() {
       lab.clear();
+      tab.hideCode();
     },
     steps: [
       {
@@ -79,6 +65,7 @@ export function vaeAction(tab) {
         enter(ctx) {
           ensureLab(tab, ctx);
           reveal(k, 0);
+          tab.showCode("sd_config", "Stable Diffusion 1.x: configurazione dell'autoencoder", ["z_channels: 4", "ch_mult", "embed_dim: 4"]);
         },
         update(p) {
           reveal(k, Math.min(1, p * 2));
@@ -111,7 +98,8 @@ export function vaeAction(tab) {
         enter(ctx) {
           ctx.data.view = "vae";
           reveal(3, 1);
-          tab.focus("vae", { margin: 1.8 });
+          tab.focus(["vae", "image"], { margin: 1.4 });
+          tab.showCode("sd_config", "Stable Diffusion 1.x: l'autoencoder (encoder e decoder)", ["first_stage_config", "AutoencoderKL"]);
         },
       },
     ],

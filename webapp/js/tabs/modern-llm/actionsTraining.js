@@ -2,6 +2,7 @@
  * Azioni "Addestramento": leggi di scala (Chinchilla) e pipeline pre-training → SFT → preferenze.
  */
 import { BUDGETS } from "./regionScaling.js";
+import { emergenceIllustration } from "./sim.js";
 import { phase } from "./shapes.js";
 
 const CATEGORY = "Addestramento";
@@ -47,11 +48,11 @@ function scalingAction(tab) {
       })),
       {
         title: "La lezione di Chinchilla",
-        caption: "Grafico «Loss prevista»: a parametri fissi la loss si appiattisce (mancano parametri), mentre crescendo insieme N e D continua a scendere. Chinchilla (70B, 1,4T token) ha battuto Gopher (280B) con lo stesso calcolo.",
+        caption: "Grafico «Loss prevista»: a parametri fissi la loss si appiattisce (mancano parametri), mentre crescendo insieme N e D continua a scendere. Chinchilla (70B, 1,4T token) ha battuto Gopher (280B) con lo stesso calcolo; questo fit indicherebbe un modello più piccolo, gli altri metodi del paper circa 63-67B.",
         duration: 6,
         enter() {
           r.set(1, -1);
-          tab.ui.charts.open();
+          tab.openCharts();
           tab.plots.chinchilla.setHighlight({ x: Math.log10(5.76e23) });
         },
       },
@@ -120,6 +121,80 @@ function pipelineAction(tab) {
   };
 }
 
+/**
+ * Capacità «emergenti» o effetto della metrica? ILLUSTRAZIONE dichiarata dell'argomento di
+ * Schaeffer et al. (2023): la curva per token è inventata, la relazione p^10 è esatta.
+ */
+function emergenceAction(tab) {
+  const r = tab.regions.scaling;
+  const X_MIN = 7;
+  const X_MAX = 13;
+  const LEVELS = 60; // il grafico e il testo cambiano a scatti di 0,1 sull'asse, non a ogni frame
+  const pct = (v) => `${(v * 100).toFixed(v < 0.1 ? 1 : 0).replace(".", ",")}%`;
+  /** Sposta il «siamo qui» al livello k (0..LEVELS) e scrive i due punteggi sotto le barre. */
+  const showAt = (k, ctx) => {
+    if (ctx.data.level === k) return;
+    ctx.data.level = k;
+    const x = X_MIN + ((X_MAX - X_MIN) * k) / LEVELS;
+    const { perToken, exactMatch } = emergenceIllustration(x);
+    tab.plots.emergence.setHighlight({ x });
+    r.note([
+      { text: `scala (illustrativa) 10^${x.toFixed(1).replace(".", ",")} parametri`, bold: true },
+      { text: `per token: ${pct(perToken)}   ·   risposta esatta su 10 token: ${pct(exactMatch)}`, color: "#fde68a", bold: true },
+      { text: "Curva per token inventata (illustrazione); p^10 è il calcolo esatto.", color: "#94a3b8" },
+    ]);
+  };
+  const sweep = (title, caption, from, to, duration = 7) => ({
+    title,
+    caption,
+    duration,
+    enter(ctx) {
+      ctx.data.level = -1;
+      showAt(Math.round(from * LEVELS), ctx);
+    },
+    update(p, dt, ctx) {
+      showAt(Math.round((from + (to - from) * phase(p, 0.05, 0.9)) * LEVELS), ctx);
+    },
+  });
+  return {
+    id: "emergence",
+    title: "Capacità emergenti o miraggio?",
+    category: CATEGORY,
+    summary: "Un salto improvviso con la scala può dipendere dalla metrica: per token la crescita è dolce, la risposta esatta sembra «accendersi».",
+    onStart() {
+      tab.prepare("scaling", { charts: "emergenza" });
+    },
+    onStop() {
+      r.note();
+      tab.plots.emergence.setHighlight(null);
+    },
+    steps: [
+      {
+        title: "La definizione",
+        caption: "Wei et al. (2022) chiamano «emergente» una capacità assente nei modelli piccoli e presente nei grandi, che non si poteva prevedere guardando i piccoli. Esempi citati: aritmetica a più cifre, alcune prove di ragionamento.",
+        duration: 5.5,
+        enter(ctx) {
+          ctx.data.level = -1;
+          tab.hideCode();
+          r.note([{ text: "Emergente = assente nei piccoli, presente nei grandi, non prevedibile.", bold: true }, { text: "Ma è la capacità a saltare, o il modo in cui la misuriamo?", color: "#94a3b8" }]);
+          tab.plots.emergence.setHighlight(null);
+        },
+      },
+      sweep("Per token: crescita dolce", "Illustrazione. Facciamo crescere la scala: la probabilità di azzeccare OGNI singolo token sale piano, senza salti (curva «per token» nel grafico «Stessa capacità, due metriche»).", 0, 0.5),
+      sweep("Risposta esatta: il salto", "La risposta conta come giusta solo se TUTTI i 10 token sono giusti: p^10. Resta quasi a zero e poi sale di colpo, anche se p è cresciuta piano. Come un ponte di 10 assi: si attraversa solo se reggono tutte.", 0.5, 1),
+      {
+        title: "Cosa ne concludiamo",
+        caption: "Schaeffer, Miranda e Koyejo (2023): con metriche continue molti salti spariscono. Non vuol dire che i modelli grandi non sappiano fare cose nuove, ma che prima di parlare di emergenza conviene guardare come si misura.",
+        duration: 6,
+        enter(ctx) {
+          ctx.data.level = -1;
+          showAt(LEVELS / 2 + 5, ctx);
+        },
+      },
+    ],
+  };
+}
+
 export function trainingActions(tab) {
-  return [scalingAction(tab), pipelineAction(tab)];
+  return [scalingAction(tab), pipelineAction(tab), emergenceAction(tab)];
 }

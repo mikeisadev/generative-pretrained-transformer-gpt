@@ -1,6 +1,7 @@
 /**
  * Azione "Processo diretto: aggiungere rumore": la formula di DDPM applicata a un'immagine vera
- * (generata nel browser), per vari t, con le miniature e l'istogramma dei pixel.
+ * (generata nel browser), per vari t, con le miniature e l'istogramma dei pixel; poi come lo
+ * stesso calcolo diventa un passo di training (categoria "Training" della panoramica).
  */
 import { fmt } from "../../core/dom.js";
 import { focusLab } from "./lab.js";
@@ -8,6 +9,14 @@ import { fillGaussian, mulberry32, qSample, SCHEDULES } from "./math.js";
 import { RGBTexture } from "./textures.js";
 
 const f2 = (x) => fmt(x, 2);
+
+/** Formula in alto nel banco: il processo diretto, oppure la loss nel passo di training. */
+const FORMULA = {
+  forward: ["x_t = √ᾱ_t · x_0 + √(1 − ᾱ_t) · ε", "DDPM: β lineare da 0,0001 a 0,02 · T = 1000"],
+  training: ["loss = media di (ε − ε̂)²,   ε̂ = rete(x_t, t)", "la rete vede x_t e t; la risposta giusta è ε (il pannello centrale)"],
+};
+/** Passo "estratto a caso" per l'esempio di training (fisso, così l'animazione è ripetibile). */
+const TRAIN_T = 640;
 
 export function forwardAction(tab) {
   const { lab, reference } = tab;
@@ -30,9 +39,9 @@ export function forwardAction(tab) {
 
   return {
     id: "forward",
-    title: "Processo diretto: aggiungere rumore",
-    category: "Immagini",
-    summary: "La formula vera di DDPM applicata a un'immagine: x_t = √ᾱ·x_0 + √(1−ᾱ)·ε, per vari t.",
+    title: "Processo diretto e training",
+    category: "Training",
+    summary: "La formula vera di DDPM applicata a un'immagine (x_t = √ᾱ·x_0 + √(1−ᾱ)·ε, per vari t) e come diventa un passo di training.",
     onStart(ctx) {
       lab.clear();
       xt = new Float32Array(N);
@@ -40,8 +49,8 @@ export function forwardAction(tab) {
       texX0 = lab.own(new RGBTexture(256).set(reference));
       texEps = lab.own(new RGBTexture(256).set(eps.map((v) => v / 3)));
       texXt = lab.own(new RGBTexture(256));
-      lab.text("formula", "x_t = √ᾱ_t · x_0 + √(1 − ᾱ_t) · ε", -4, 15.6, { height: 1.6, color: "#fde68a" });
-      lab.text("formula-sub", "DDPM: β lineare da 0,0001 a 0,02 · T = 1000", -4, 13.4, { height: 0.9, color: "#94a3b8" });
+      lab.text("formula", FORMULA.forward[0], -4, 15.6, { height: 1.6, color: "#fde68a" });
+      lab.text("formula-sub", FORMULA.forward[1], -4, 13.4, { height: 0.9, color: "#94a3b8" });
       lab.panel("x0", { texture: texX0.texture, x: -22, y: 2.5, w: 9, title: "x_0", titleHeight: 0.9 });
       lab.text("plus", "+", -15, 2.5, { height: 2, color: "#e2e8f0" });
       lab.panel("eps", { texture: texEps.texture, x: -8, y: 2.5, w: 9, title: "ε", titleHeight: 0.9 });
@@ -56,13 +65,20 @@ export function forwardAction(tab) {
       last = undefined;
       show(-1);
       tab.plots.histogram(reference);
+      tab.plots.reveal("schedule");
       ctx.data.view = "lab";
       focusLab(tab);
     },
     onStop() {
       lab.clear();
+      tab.hideCode();
     },
     build: () => {
+      const setFormula = ([main, sub]) => {
+        lab.get("formula").label.set(main);
+        lab.get("formula-sub").label.set(sub);
+      };
+      const showQSample = () => tab.showCode("ddpm_qsample", "DDPM: q_sample (processo diretto)", ["sqrt_alphas_cumprod", "noise"]);
       const showThumbs = (k) => thumbs.forEach((th, i) => (th.mesh.visible = th.title.sprite.visible = i < k));
       const steps = [
         {
@@ -73,7 +89,7 @@ export function forwardAction(tab) {
             show(-1);
             showThumbs(0);
             tab.plots.histogram(reference);
-            tab.showCode("ddpm_qsample", "DDPM: q_sample (processo diretto)", ["sqrt_alphas_cumprod", "noise"]);
+            showQSample();
           },
         },
         {
@@ -84,6 +100,7 @@ export function forwardAction(tab) {
             show(-1);
             showThumbs(0);
             tab.plots.histogram(eps);
+            showQSample();
           },
         },
         ...TS.map((t, i) => {
@@ -102,6 +119,7 @@ export function forwardAction(tab) {
             enter() {
               showThumbs(i);
               show(from);
+              showQSample();
             },
             update(p, dt, ctx) {
               // t scorre con continuità; l'istogramma si ricalcola solo ogni tanto (è il pezzo costoso)
@@ -117,12 +135,13 @@ export function forwardAction(tab) {
           };
         }),
         {
-          title: "Come si addestra la rete",
-          caption: "Training: si sceglie un t a caso, si crea x_t con questa formula e si chiede alla rete di indovinare ε. La loss è l'errore quadratico tra ε vero e ε previsto.",
-          duration: 5,
+          title: "Un passo di training",
+          caption: `Training: si sceglie un t a caso (qui t = ${TRAIN_T}) e un rumore ε, si crea x_t con la formula e la rete, guardando solo x_t e t, deve indovinare ε. La loss è la media dei quadrati di (ε − ε̂); poi la discesa del gradiente corregge i pesi, come nel nostro GPT.`,
+          duration: 7,
+          formula: FORMULA.training,
           enter() {
             showThumbs(TS.length);
-            show(TS.at(-1));
+            show(TRAIN_T);
             tab.showCode("ddpm_config", "DDPM: iperparametri del training (CIFAR-10)", ["num_diffusion_timesteps", "model_mean_type"]);
           },
         },
@@ -132,11 +151,19 @@ export function forwardAction(tab) {
           duration: 5,
           enter() {
             showThumbs(TS.length);
+            show(TS.at(-1));
             tab.showCode("sd_config", "Stable Diffusion 1.x: v1-inference.yaml", ["linear_start", "linear_end", "timesteps", "channels: 4"]);
           },
         },
       ];
-      return steps;
+      // ogni passo rimette la formula giusta in alto (così "passo indietro" funziona sempre)
+      return steps.map((step) => ({
+        ...step,
+        enter(ctx) {
+          setFormula(step.formula ?? FORMULA.forward);
+          step.enter(ctx);
+        },
+      }));
     },
   };
 }

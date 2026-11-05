@@ -1,5 +1,5 @@
 /**
- * Vista "Pesi": DOVE stanno i 209.729 parametri del modello.
+ * Vista "Pesi": DOVE stanno i parametri del modello (209.729 per il GPT del corso).
  *
  * È una sovrapposizione sulla scena dell'architettura:
  *   - ogni tensore appreso resta acceso, con il bordo color ambra e un'etichetta per componente
@@ -24,6 +24,8 @@ import { componentOf, componentTotals, countParams, partsSummary, shapeText } fr
 
 const DIM = 0.12; // opacità relativa di ciò che non è un peso
 const AMBER = 0xf59e0b;
+/** Intero con il punto delle migliaia dentro KaTeX (il punto va protetto con {.}). */
+const texInt = (n) => fmt(n).replace(/\./g, "{.}");
 const pct = (n, total) => `${((n / total) * 100).toLocaleString("it-IT", { maximumFractionDigits: n / total < 0.01 ? 2 : 1 })}%`;
 
 /** Maschera tril (T×T): 1 sotto e sulla diagonale (grigio), 0 sopra (tratteggio scuro). */
@@ -105,7 +107,7 @@ export function installWeightsView(tab) {
         detail.add(plane);
         trils.push(plane);
         if (h === cfg.n_head - 1) {
-          const tag = label("tril (32, 32): buffer, NON appreso", { sub: "0 parametri · 1 = può guardare, tratteggio = futuro", size: 0.13, color: "#cbd5e1" });
+          const tag = label(`tril (${cfg.block_size}, ${cfg.block_size}): buffer, NON appreso`, { sub: "0 parametri · 1 = può guardare, tratteggio = futuro", size: 0.13, color: "#cbd5e1" });
           tag.position.set(plane.position.x, plane.position.y - 1.0, 0.9);
           detail.add(tag);
         }
@@ -286,7 +288,9 @@ export function installWeightsView(tab) {
   let partsChart = null;
 
   /** @param {boolean} [openCharts] apre il pannello dei grafici (solo su clic dell'utente, non durante l'azione) */
+  let selectToken = 0; // solo l'ultima selezione aggiorna la scheda (i clic rapidi non si sovrascrivono a vicenda)
   async function selectTensor(name, openCharts = false) {
+    const token = ++selectToken;
     const p = spec.params.find((x) => x.name === name);
     const component = componentOf(name);
     card.hidden = false;
@@ -300,7 +304,7 @@ export function installWeightsView(tab) {
     partsChart?.setData({ labels: parts.map((x) => x.short), values: parts.map((x) => x.count), highlight, highlightLabel: parts[highlight]?.label });
     const engine = await tab.getEngine();
     const view = engine.paramViews.get(name);
-    if (!view) return;
+    if (!view || token !== selectToken) return;
     const v = view.data;
     let min = Infinity;
     let max = -Infinity;
@@ -383,6 +387,8 @@ export function installWeightsView(tab) {
       ),
     );
     const block = countParams(spec.params, "blocks.0.");
+    const ffwd0 = countParams(spec.params, "blocks.0.ffwd.");
+    const { vocab_size: V, block_size: T, n_embd: C, n_layer: L } = cfg;
     info.replaceChildren(
       el("h3", {}, "Dove stanno i parametri"),
       el("p", {}, `I ${fmt(total)} numeri che il modello ha imparato sono tutti in queste matrici e barre colorate: una cella per numero. Il resto della scena (token, somme, pattern di attention) non contiene niente di appreso: sono dati che cambiano a ogni prompt, per questo ora è opaco.`),
@@ -396,14 +402,16 @@ export function installWeightsView(tab) {
       card,
       el("h4", {}, "Parametri per parte del modello"),
       bars,
-      el("p", { className: "hint" }, `Le barre sono in scala ×4 rispetto al totale. Ogni blocco ha ${fmt(block)} parametri: il 66% sta nella feed-forward, che ha due matrici 64×256.`),
+      el("p", { className: "hint" }, `Le barre sono in scala ×4 rispetto al totale. Ogni blocco ha ${fmt(block)} parametri: il ${pct(ffwd0, block)} sta nella feed-forward, che ha due matrici ${C}×${4 * C}.`),
       deepBox(
         "Approfondimento: contare i parametri",
-        el("p", {}, "Con V = 65 caratteri, T = 32 posizioni, C = 64 numeri per vettore e L = 4 blocchi:"),
-        formula(String.raw`N = \underbrace{VC}_{\text{token emb.}} + \underbrace{TC}_{\text{pos. emb.}} + L\,(12C^2 + 10C) + \underbrace{2C}_{\text{ln\_f}} + \underbrace{VC + V}_{\text{lm\_head}}`),
-        formula(String.raw`N = 4160 + 2048 + 4 \cdot 49792 + 128 + 4225 = ${fmt(total).replace(/\./g, "{.}")}`),
+        el("p", {}, `Con V = ${V} caratteri, T = ${T} posizioni, C = ${C} numeri per vettore e L = ${L} blocchi:`),
+        // Su due righe (aligned): nella sidebar stretta una riga sola uscirebbe dal riquadro.
+        formula(String.raw`\begin{aligned} N ={}& \underbrace{VC}_{\text{token emb.}} + \underbrace{TC}_{\text{pos. emb.}} + L\,(12C^2 + 10C) \\ &+ \underbrace{2C}_{\text{ln\_f}} + \underbrace{VC + V}_{\text{lm\_head}} \end{aligned}`),
+        formula(String.raw`N = ${V * C} + ${T * C} + ${L} \cdot ${12 * C * C + 10 * C} + ${2 * C} + ${V * C + V} = ${texInt(V * C + T * C + L * (12 * C * C + 10 * C) + 2 * C + V * C + V)}`),
+        el("p", { className: "hint" }, `Il risultato coincide con il totale contato da PyTorch sui tensori veri: ${fmt(total)}.`),
         el("p", { className: "hint" }, "In un blocco: 3C² per query, key e value (le 4 head insieme), C² + C per la proiezione, 4C per le due LayerNorm (γ e β), 4C² + 4C e 4C² + C per le due matrici della feed-forward."),
-        formula(String.raw`\text{nn.Linear}(n_{in}, n_{out}):\; y = x W^{\top} + b,\quad W \in \mathbb{R}^{n_{out}\times n_{in}},\; b \in \mathbb{R}^{n_{out}}`),
+        formula(String.raw`\begin{aligned} &\text{nn.Linear}(n_{in}, n_{out}):\; y = x W^{\top} + b \\ &W \in \mathbb{R}^{n_{out}\times n_{in}},\quad b \in \mathbb{R}^{n_{out}} \end{aligned}`),
         el("p", { className: "hint" }, "Query, key e value sono nn.Linear con bias=False: niente bias. La maschera tril è registrata con register_buffer: viaggia col modello ma non compare tra i parametri e l'ottimizzatore non la tocca."),
         el("p", { className: "hint" }, "Nei GPT più grandi (per esempio nanoGPT) lm_head condivide la matrice con la token embedding (weight tying); in questo modello sono due matrici separate, come nel codice della lezione."),
       ),
@@ -433,6 +441,8 @@ export function installWeightsView(tab) {
       setOverlayVisible(true);
       applyDim();
       ensureCharts();
+      // Il codice che CREA i parametri: ogni nn.Embedding / nn.Linear / nn.LayerNorm porta i suoi tensori.
+      tab.showCode("model.init", "Vista Pesi: dove nascono i parametri", ["nn.Embedding", "nn.Linear", "nn.LayerNorm"]);
       canvas.addEventListener("pointermove", onMove);
       canvas.addEventListener("pointerdown", onDown);
       canvas.addEventListener("pointerup", onUp);
@@ -440,6 +450,7 @@ export function installWeightsView(tab) {
       host.controls.addEventListener("start", hideTooltip);
     },
     exit: () => {
+      if (ui.player?.action?.id === "weights-tour") ui.player.stop(); // il giro dei pesi ha senso solo in questa vista
       info.hidden = true;
       card.hidden = true;
       tooltip.hidden = true;
@@ -458,25 +469,28 @@ export function installWeightsView(tab) {
 
 /**
  * Azione "Dove sono i parametri": visita i componenti in ordine di flusso, li conta e
- * fa crescere il grafico del totale cumulato fino a 209.729.
+ * fa crescere il grafico del totale cumulato fino al totale di PyTorch (spec.total_params).
  */
 function registerWeightsAction(tab, { selectTensor, hideTooltip }) {
   const { ui, spec } = tab;
   if (!ui.player) return;
   const cfg = spec.config;
+  const { vocab_size: V, block_size: T, n_embd: C, n_head: H, n_layer: L } = cfg;
+  const hs = C / H;
   const total = spec.total_params;
   const c = (prefix) => countParams(spec.params, prefix);
+  const otherLayers = [...Array(L).keys()].slice(1); // i blocchi oltre il primo, contati insieme
   const visits = [
-    { focus: "tok_emb", label: "token_embedding_table", n: c("token_embedding_table."), code: "model.init", hl: ["token_embedding_table"], tensor: "token_embedding_table.weight", caption: (n) => `Token embedding: 65 righe × 64 colonne = ${fmt(n)} parametri. Ogni carattere ha la sua riga di 64 numeri.` },
-    { focus: "pos_emb", label: "position_embedding_table", n: c("position_embedding_table."), code: "model.init", hl: ["position_embedding_table"], tensor: "position_embedding_table.weight", caption: (n) => `Position embedding: 32 posizioni × 64 = ${fmt(n)} parametri. Una riga per ogni posto nel contesto.` },
-    { focus: "blocks.0.heads", label: "blocco 0: query, key, value", n: c("blocks.0.sa.heads."), code: "head", hl: ["self.key", "self.query", "self.value"], tensor: "blocks.0.sa.heads.0.query.weight", caption: (n) => `Blocco 0, attention: 4 head × 3 matrici (query, key, value) da 16×64 = ${fmt(n)} parametri, senza bias.` },
-    { focus: "blocks.0.proj", label: "blocco 0: proiezione", n: c("blocks.0.sa.proj."), code: "mha", hl: ["self.proj"], tensor: "blocks.0.sa.proj.weight", caption: (n) => `Proiezione dopo le head: matrice 64×64 più 64 bias = ${fmt(n)} parametri.` },
-    { focus: "blocks.0.ln1", label: "blocco 0: LayerNorm", n: c("blocks.0.ln1.") + c("blocks.0.ln2."), code: "block", hl: ["self.ln1", "self.ln2"], tensor: "blocks.0.ln1.weight", caption: (n) => `Le due LayerNorm del blocco: γ e β da 64 numeri ciascuna, ${fmt(n)} parametri in tutto. Poche, ma indispensabili per un training stabile.` },
-    { focus: "blocks.0.ffwd", label: "blocco 0: feed-forward", n: c("blocks.0.ffwd."), code: "ffwd", hl: ["nn.Linear(config.n_embd, hidden)", "nn.Linear(hidden, config.n_embd)"], tensor: "blocks.0.ffwd.net.0.weight", caption: (n) => `Feed-forward: 64→256 e 256→64 con i bias = ${fmt(n)} parametri. È la parte più pesante di ogni blocco.` },
-    { focus: "blocks", label: "blocchi 1, 2, 3", n: c("blocks.1.") + c("blocks.2.") + c("blocks.3."), code: "model.init", hl: ["self.blocks"], tensor: null, caption: (n) => `Gli altri ${cfg.n_layer - 1} blocchi sono identici nella forma (ma con numeri diversi): altri ${fmt(n)} parametri.` },
+    { focus: "tok_emb", label: "token_embedding_table", n: c("token_embedding_table."), code: "model.init", hl: ["token_embedding_table"], tensor: "token_embedding_table.weight", caption: (n) => `Token embedding: ${V} righe × ${C} colonne = ${fmt(n)} parametri. Ogni carattere ha la sua riga di ${C} numeri.` },
+    { focus: "pos_emb", label: "position_embedding_table", n: c("position_embedding_table."), code: "model.init", hl: ["position_embedding_table"], tensor: "position_embedding_table.weight", caption: (n) => `Position embedding: ${T} posizioni × ${C} = ${fmt(n)} parametri. Una riga per ogni posto nel contesto.` },
+    { focus: "blocks.0.heads", label: "blocco 0: query, key, value", n: c("blocks.0.sa.heads."), code: "head", hl: ["self.key", "self.query", "self.value"], tensor: "blocks.0.sa.heads.0.query.weight", caption: (n) => `Blocco 0, attention: ${H} head × 3 matrici (query, key, value) da ${hs}×${C} = ${fmt(n)} parametri, senza bias.` },
+    { focus: "blocks.0.proj", label: "blocco 0: proiezione", n: c("blocks.0.sa.proj."), code: "mha", hl: ["self.proj"], tensor: "blocks.0.sa.proj.weight", caption: (n) => `Proiezione dopo le head: matrice ${C}×${C} più ${C} bias = ${fmt(n)} parametri.` },
+    { focus: "blocks.0.ln1", label: "blocco 0: LayerNorm", n: c("blocks.0.ln1.") + c("blocks.0.ln2."), code: "block", hl: ["self.ln1", "self.ln2"], tensor: "blocks.0.ln1.weight", caption: (n) => `Le due LayerNorm del blocco: γ e β da ${C} numeri ciascuna, ${fmt(n)} parametri in tutto. Poche, ma indispensabili per un training stabile.` },
+    { focus: "blocks.0.ffwd", label: "blocco 0: feed-forward", n: c("blocks.0.ffwd."), code: "ffwd", hl: ["nn.Linear(config.n_embd, hidden)", "nn.Linear(hidden, config.n_embd)"], tensor: "blocks.0.ffwd.net.0.weight", caption: (n) => `Feed-forward: ${C}→${4 * C} e ${4 * C}→${C} con i bias = ${fmt(n)} parametri. È la parte più pesante di ogni blocco.` },
+    { focus: "blocks", label: `blocchi ${otherLayers.join(", ")}`, n: otherLayers.reduce((a, l) => a + c(`blocks.${l}.`), 0), code: "model.init", hl: ["self.blocks"], tensor: null, caption: (n) => `Gli altri ${L - 1} blocchi sono identici nella forma (ma con numeri diversi): altri ${fmt(n)} parametri.` },
     { focus: "ln_f", label: "ln_f", n: c("ln_f."), code: "model.init", hl: ["self.ln_f"], tensor: "ln_f.weight", caption: (n) => `LayerNorm finale: ${fmt(n)} parametri.` },
-    { focus: "lm_head", label: "lm_head", n: c("lm_head."), code: "model.init", hl: ["self.lm_head"], tensor: "lm_head.weight", caption: (n) => `lm_head: 65×64 più 65 bias = ${fmt(n)} parametri. Da qui escono i 65 punteggi.` },
-    { focus: "blocks.0.heads.0.pattern", label: "maschere tril", n: 0, code: "head", hl: ["register_buffer", "tril"], tensor: null, caption: () => `Le ${spec.buffers.length} maschere tril (32×32) non sono parametri: sono buffer fissi, il training non le cambia. Contano 0.` },
+    { focus: "lm_head", label: "lm_head", n: c("lm_head."), code: "model.init", hl: ["self.lm_head"], tensor: "lm_head.weight", caption: (n) => `lm_head: ${V}×${C} più ${V} bias = ${fmt(n)} parametri. Da qui escono i ${V} punteggi.` },
+    { focus: "blocks.0.heads.0.pattern", label: "maschere tril", n: 0, code: "head", hl: ["register_buffer", "tril"], tensor: null, caption: () => `Le ${spec.buffers.length} maschere tril (${T}×${T}) non sono parametri: sono buffer fissi, il training non le cambia. Contano 0.` },
   ];
   let chart = null;
   const series = (upto) => {
@@ -500,7 +514,7 @@ function registerWeightsAction(tab, { selectTensor, hideTooltip }) {
 
   ui.player.register({
     id: "weights-tour",
-    title: "Dove sono i 209.729 parametri",
+    title: `Dove sono i ${fmt(total)} parametri`,
     category: "Viste",
     summary: "Visita ogni componente, conta i suoi pesi e verifica che il totale torni con quello di PyTorch.",
     onStart: async () => {

@@ -11,7 +11,7 @@ import { addNode, label } from "../../core/visuals.js";
 import { CODEC } from "./codec.js";
 import { envelope } from "./dsp.js";
 import { SLOT } from "./layout3d.js";
-import { canvasPanel, placeLabel, slab, tokenCss, tokenGrid, waveformMesh } from "./widgets.js";
+import { canvasPanel, placeLabel, setBaseOpacity, slab, tokenCss, tokenGrid, waveformMesh } from "./widgets.js";
 
 const CB_COLORS = [0x38bdf8, 0xa78bfa, 0xf472b6, 0xfbbf24]; // un colore per codebook (righe della scala)
 const CB_CSS = ["#38bdf8", "#a78bfa", "#f472b6", "#fbbf24"];
@@ -86,6 +86,7 @@ export function buildConditioning(lab, initialStyle) {
     },
     /** Evidenzia le parole fino a i (−1 = tutte normali). */
     highlightWord(i) {
+      if (i === state.active) return; // chiamata a ogni frame: si ridisegna solo quando cambia parola
       state.active = i;
       text.userData.redraw();
     },
@@ -163,7 +164,7 @@ export function buildCrossAttention(transformer, nWords = 8) {
       s++;
     }
   });
-  lines.userData.setStrength = (v) => (lines.material.opacity = 0.12 + 0.75 * v);
+  lines.userData.setStrength = (v) => setBaseOpacity(lines, 0.12 + 0.75 * v);
   return lines;
 }
 
@@ -178,6 +179,7 @@ export function buildDelay(lab) {
   const group = new THREE.Group();
   group.position.set(SLOT.delay.x, SLOT.delay.y, 0);
   const state = { gen: null, step: -1, start: 0 };
+  const revealed = new Array(Q).fill(0); // frame visibili per codebook (riusato, niente allocazioni)
 
   // lente: colonne = passi di generazione, righe = codebook; la cella (k, s) è il frame s − k
   const lens = canvasPanel(w, 5.2, (ctx, cw, ch) => {
@@ -259,14 +261,15 @@ export function buildDelay(lab) {
     grid,
     /** Imposta la generazione da mostrare e il passo corrente (le celle fino a quel passo sono piene). */
     show(gen, step) {
+      if (gen && gen !== state.gen) grid.setCodes(gen.codes, T); // i colori cambiano solo con una generazione nuova
       state.gen = gen;
       state.step = step;
       state.start = Math.max(0, Math.min(step - Math.floor(LENS_STEPS / 2), (gen ? gen.steps.length : LENS_STEPS) - LENS_STEPS));
       if (step < LENS_STEPS - 2) state.start = 0;
       lens.userData.redraw();
       if (gen) {
-        grid.setCodes(gen.codes, T);
-        grid.reveal(0, [0, 1, 2, 3].map((k) => Math.max(0, Math.min(T, step - k + 1))));
+        for (let k = 0; k < Q; k++) revealed[k] = Math.max(0, Math.min(T, step - k + 1));
+        grid.reveal(0, revealed);
       } else grid.reveal(0);
     },
   };

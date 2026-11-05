@@ -20,6 +20,21 @@ const FAST = 1.9;
 
 export function createPromptAction({ tab, stage, charts, getOptions, onOutput }) {
   let scene = null; // oggetti 3D dell'azione, creati in build e distrutti a fine azione
+  let patternsKey = ""; // quali pattern di attention del prompt sono ora nella scena
+
+  /**
+   * Pattern di attention nella scena: quelli VERI del token k per i primi `blocks` blocchi,
+   * quelli d'esempio di model.json per gli altri. Ogni passo dichiara il suo stato, così anche
+   * saltando avanti e indietro la scena mostra solo i blocchi che il forward ha già attraversato.
+   */
+  function scenePatterns(run, k, blocks) {
+    const key = `${k}:${blocks}`;
+    if (key === patternsKey) return;
+    patternsKey = key;
+    stage.textures.restore(); // in questa azione le uniche texture toccate sono i pattern
+    const s = run.steps[k];
+    for (let l = 0; l < Math.min(blocks, s.attention.length); l++) s.attention[l].forEach((att, h) => stage.textures.writePattern(l, h, att, s.T));
+  }
 
   /** Crea gli oggetti 3D e li posiziona rispetto alla colonna dei token di architecture.js. */
   function buildScene(run) {
@@ -92,15 +107,17 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
   }
 
   /** Passo generico "componente + lavagna + codice + pacchetto". */
-  function componentStep({ title, caption, duration, focus, station, draw, code, side = "auto", onEnter }) {
+  function componentStep({ title, caption, duration, focus, station, draw, code, side = "auto", patterns, onEnter }) {
     return {
       title,
       caption,
       duration,
+      patterns: [0, patterns ?? Infinity],
       enter: (ctx) => {
         const run = ctx.data.run;
         clearLookup();
         stage.hideBoard();
+        charts.showToken(0, { appendSeries: false }); // il forward del primo token: nessuna estrazione ancora
         if (station) stage.packetAt(stage.distanceOf(station), station);
         onEnter?.(run, ctx);
         stage.show(focus, draw ? (board) => draw(board, run) : null, { side });
@@ -113,26 +130,28 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
     const p = `blocks.${l}`;
     const d = l === 0 ? SLOW : MEDIUM;
     const name = `Blocco ${l}`;
+    const before = { patterns: l }; // la softmax di questo blocco non è ancora avvenuta
+    const after = { patterns: l + 1 };
     const steps = [
-      componentStep({ title: `${name}: LayerNorm 1`, caption: `${name}. LayerNorm 1: ogni vettore viene normalizzato (media 0, varianza 1) prima dell'attention.`, duration: d, focus: `${p}.ln1`, station: `${p}.ln1`, draw: (b, r) => B.drawLayerNorm(b, r, l, 1), code: ["block", "Block.forward: LayerNorm 1", ["self.ln1(x)"]], onEnter: () => charts.setBlock(l) }),
-      componentStep({ title: `${name}: Q, K, V`, caption: `${name}. Ogni head calcola query, key e value con le sue tre matrici 64 → 16.`, duration: d, focus: `${p}.heads`, station: `${p}.heads`, draw: (b, r) => B.drawQKV(b, r, l), code: ["head", "Head: key, query, value", ["self.key(x)", "self.query(x)"]] }),
-      componentStep({ title: `${name}: punteggi q·k`, caption: `${name}. Punteggi di affinità: query · key, divisi per √16 = 4.`, duration: d, focus: `${p}.heads`, draw: (b, r) => B.drawScores(b, r, l, false), code: ["head", "Head: punteggi scalati", ["wei = q @ k.transpose"]] }),
-      componentStep({ title: `${name}: maschera causale`, caption: `${name}. Maschera causale: il futuro vale −∞ e non può essere guardato.`, duration: d, focus: `${p}.heads`, draw: (b, r) => B.drawScores(b, r, l, true), code: ["head", "Head: maschera causale", ["masked_fill"]] }),
+      componentStep({ ...before, title: `${name}: LayerNorm 1`, caption: `${name}. LayerNorm 1: ogni vettore viene normalizzato (media 0, varianza 1) prima dell'attention.`, duration: d, focus: `${p}.ln1`, station: `${p}.ln1`, draw: (b, r) => B.drawLayerNorm(b, r, l, 1), code: ["block", "Block.forward: LayerNorm 1", ["self.ln1(x)"]], onEnter: () => charts.setBlock(l) }),
+      componentStep({ ...before, title: `${name}: Q, K, V`, caption: `${name}. Ogni head calcola query, key e value con le sue tre matrici 64 → 16.`, duration: d, focus: `${p}.heads`, station: `${p}.heads`, draw: (b, r) => B.drawQKV(b, r, l), code: ["head", "Head: key, query, value", ["self.key(x)", "self.query(x)"]] }),
+      componentStep({ ...before, title: `${name}: punteggi q·k`, caption: `${name}. Punteggi di affinità: query · key, divisi per √16 = 4.`, duration: d, focus: `${p}.heads`, draw: (b, r) => B.drawScores(b, r, l, false), code: ["head", "Head: punteggi scalati", ["wei = q @ k.transpose"]] }),
+      componentStep({ ...before, title: `${name}: maschera causale`, caption: `${name}. Maschera causale: il futuro vale −∞ e non può essere guardato.`, duration: d, focus: `${p}.heads`, draw: (b, r) => B.drawScores(b, r, l, true), code: ["head", "Head: maschera causale", ["masked_fill"]] }),
       componentStep({
+        ...after,
         title: `${name}: softmax`,
         caption: `${name}. Softmax: ogni riga diventa un insieme di pesi che sommano a 1. I pattern nella scena ora sono quelli VERI del tuo prompt.`,
         duration: d,
         focus: `${p}.heads`,
         draw: (b, r) => B.drawSoftmax(b, r, l),
         code: ["head", "Head: softmax", ["F.softmax(wei"]],
-        onEnter: (r) => r.steps[0].attention[l].forEach((att, h) => stage.textures.writePattern(l, h, att, r.steps[0].T)),
       }),
-      componentStep({ title: `${name}: media dei value`, caption: `${name}. Ogni token raccoglie i value dei token che ascolta: out = att · V.`, duration: d, focus: `${p}.heads`, draw: (b, r) => B.drawWeighted(b, r, l), code: ["head", "Head: media pesata dei value", ["return wei @ v"]] }),
-      componentStep({ title: `${name}: concat e proiezione`, caption: `${name}. Le 4 head si concatenano (4 × 16 = 64) e la proiezione le rimescola.`, duration: d, focus: `${p}.proj`, station: `${p}.proj`, draw: (b, r) => B.drawProjection(b, r, l), code: ["mha", "MultiHeadAttention.forward", ["torch.cat", "self.proj(out)"]] }),
-      componentStep({ title: `${name}: residuo 1`, caption: `${name}. Connessione residua: x = x + attention.`, duration: d, focus: `${p}.add1`, station: `${p}.add1`, draw: (b, r) => B.drawResidual(b, r, l, 1), code: ["block", "Block.forward: residuo", ["x = x + self.sa"]] }),
-      componentStep({ title: `${name}: LayerNorm 2`, caption: `${name}. LayerNorm 2 prima del feed-forward.`, duration: d * 0.8, focus: `${p}.ln2`, station: `${p}.ln2`, draw: (b, r) => B.drawLayerNorm(b, r, l, 2), code: ["block", "Block.forward: LayerNorm 2", ["self.ln2(x)"]] }),
-      componentStep({ title: `${name}: feed-forward`, caption: `${name}. Feed-forward: 64 → 256 neuroni (ReLU) → 64, per ogni token separatamente.`, duration: d, focus: `${p}.ffwd`, station: `${p}.ffwd`, draw: (b, r) => B.drawFeedForward(b, r, l), code: ["ffwd", "FeedForward", ["nn.Linear(config.n_embd, hidden)", "nn.ReLU()", "nn.Linear(hidden, config.n_embd)"]] }),
-      componentStep({ title: `${name}: residuo 2`, caption: `${name}. x = x + feed-forward: è l'uscita del blocco.`, duration: d * 0.8, focus: `${p}.add2`, station: `${p}.add2`, draw: (b, r) => B.drawResidual(b, r, l, 2), code: ["block", "Block.forward: residuo", ["x = x + self.ffwd"]] }),
+      componentStep({ ...after, title: `${name}: media dei value`, caption: `${name}. Ogni token raccoglie i value dei token che ascolta: out = att · V.`, duration: d, focus: `${p}.heads`, draw: (b, r) => B.drawWeighted(b, r, l), code: ["head", "Head: media pesata dei value", ["return wei @ v"]] }),
+      componentStep({ ...after, title: `${name}: concat e proiezione`, caption: `${name}. Le 4 head si concatenano (4 × 16 = 64) e la proiezione le rimescola.`, duration: d, focus: `${p}.proj`, station: `${p}.proj`, draw: (b, r) => B.drawProjection(b, r, l), code: ["mha", "MultiHeadAttention.forward", ["torch.cat", "self.proj(out)"]] }),
+      componentStep({ ...after, title: `${name}: residuo 1`, caption: `${name}. Connessione residua: x = x + attention.`, duration: d, focus: `${p}.add1`, station: `${p}.add1`, draw: (b, r) => B.drawResidual(b, r, l, 1), code: ["block", "Block.forward: residuo", ["x = x + self.sa"]] }),
+      componentStep({ ...after, title: `${name}: LayerNorm 2`, caption: `${name}. LayerNorm 2 prima del feed-forward.`, duration: d * 0.8, focus: `${p}.ln2`, station: `${p}.ln2`, draw: (b, r) => B.drawLayerNorm(b, r, l, 2), code: ["block", "Block.forward: LayerNorm 2", ["self.ln2(x)"]] }),
+      componentStep({ ...after, title: `${name}: feed-forward`, caption: `${name}. Feed-forward: 64 → 256 neuroni (ReLU) → 64, per ogni token separatamente.`, duration: d, focus: `${p}.ffwd`, station: `${p}.ffwd`, draw: (b, r) => B.drawFeedForward(b, r, l), code: ["ffwd", "FeedForward", ["nn.Linear(config.n_embd, hidden)", "nn.ReLU()", "nn.Linear(hidden, config.n_embd)"]] }),
+      componentStep({ ...after, title: `${name}: residuo 2`, caption: `${name}. x = x + feed-forward: è l'uscita del blocco.`, duration: d * 0.8, focus: `${p}.add2`, station: `${p}.add2`, draw: (b, r) => B.drawResidual(b, r, l, 2), code: ["block", "Block.forward: residuo", ["x = x + self.ffwd"]] }),
     ];
     return steps;
   }
@@ -143,16 +162,14 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
       title,
       caption,
       duration,
+      patterns: [k, Infinity], // nei passi veloci i pattern seguono il contesto di ogni nuovo token
       enter: (ctx) => {
         clearLookup();
         const s = run.steps[k];
         tapeState(run, k);
         columnState(run, k);
         stage.setSceneProbs(s.probs, s.id);
-        if (fast) {
-          s.attention.forEach((heads, l) => heads.forEach((att, h) => stage.textures.writePattern(l, h, att, s.T)));
-          charts.showToken(k);
-        } else charts.showToken(k);
+        charts.showToken(k);
         onOutput(run, k + 1);
         scene.flyer.group.visible = false;
         stage.show("prediction", (board) => (wheel = fast ? B.drawFastToken(board, run, k) : B.drawWheel(board, run, k)));
@@ -182,6 +199,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
       title: `«${visibleChar(run.steps[k].char)}» entra nel contesto`,
       caption: "Il token estratto si aggiunge al testo e al contesto: al giro successivo il modello ricomincia il forward da capo.",
       duration: 3.2,
+      patterns: [k, Infinity],
       enter: () => {
         clearLookup();
         const s = run.steps[k];
@@ -212,10 +230,10 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
     const steps = [
       {
         title: "Il prompt",
+        patterns: [0, 0],
         caption: "1. Il prompt: per il modello è solo una fila di caratteri. Ognuno diventerà un cubo, cioè un token.",
         duration: Math.min(5, Math.max(3, n * 0.05)),
         enter: () => {
-          stage.textures.restore();
           clearLookup();
           scene.stoi.group.visible = false;
           scene.column.group.visible = false;
@@ -234,6 +252,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
       },
       {
         title: "Tokenizzazione",
+        patterns: [0, 0],
         caption: "2. Tokenizzazione: la tabella stoi assegna a ogni carattere il suo numero (id). Il testo diventa una lista di interi.",
         duration: Math.min(6, Math.max(3.5, n * 0.07)),
         enter: () => {
@@ -244,7 +263,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
           scene.stoi.group.visible = true;
           scene.stoi.draw(new Set());
           stage.show(scene.tape.bounds(n), null, { extra: [scene.stoi.plane.mesh] });
-          tab.showCode("data.tokenizer", "CharTokenizer.encode", ["self.stoi = {ch: i", "return [self.stoi[ch]"]);
+          tab.showCode("data.tokenizer", "CharTokenizer.encode", ["self.stoi: dict[str, int] = {ch: i", "return [self.stoi[ch]"]);
         },
         update: (p) => {
           const k = Math.min(n, Math.floor(p * (n + 1)));
@@ -256,6 +275,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
       },
       {
         title: "Taglio al contesto",
+        patterns: [0, 0],
         caption: n > run.config.blockSize ? `3. Il modello vede al massimo ${run.config.blockSize} token: teniamo gli ultimi ${run.config.blockSize} del prompt.` : "3. Il prompt sta tutto nel contesto di 32 token.",
         duration: 4,
         enter: () => {
@@ -270,6 +290,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
       },
       {
         title: "I token entrano nel modello",
+        patterns: [0, 0],
         caption: "I token del contesto diventano l'ingresso del modello: idx, una colonna di id (B = 1, T ≤ 32).",
         duration: 3,
         enter: () => {
@@ -284,6 +305,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
       },
       {
         title: "Token embedding",
+        patterns: [0, 0],
         caption: "4. Lookup nella token embedding table: ogni id legge la SUA riga (evidenziata). Nessun calcolo, solo una lettura.",
         duration: SLOW,
         enter: () => {
@@ -303,6 +325,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
       },
       {
         title: "Position embedding",
+        patterns: [0, 0],
         caption: "5. Lookup nella position embedding table: la posizione t legge la riga t. Così il modello sa l'ordine dei caratteri.",
         duration: SLOW,
         enter: () => {
@@ -320,7 +343,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
           scene.posMarks.reveal(k, scene.links.total);
         },
       },
-      componentStep({ title: "Somma degli embedding", caption: "6. Somma: x = tok_emb + pos_emb. Questo vettore attraverserà tutti i blocchi.", duration: SLOW, focus: "embed_add", station: "embed_add", draw: (b, r) => B.drawSum(b, r), code: ["model.forward", "forward: somma", ["x = tok_emb + pos_emb"]] }),
+      componentStep({ patterns: 0, title: "Somma degli embedding", caption: "6. Somma: x = tok_emb + pos_emb. Questo vettore attraverserà tutti i blocchi.", duration: SLOW, focus: "embed_add", station: "embed_add", draw: (b, r) => B.drawSum(b, r), code: ["model.forward", "forward: somma", ["x = tok_emb + pos_emb"]] }),
     ];
     for (let l = 0; l < run.config.L; l++) steps.push(...blockSteps(run, l));
     steps.push(
@@ -345,6 +368,7 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
     }
     steps.push({
       title: "Testo finale",
+      patterns: [run.steps.length - 1, Infinity],
       caption: `Fatto: ${run.steps.length} caratteri generati, uno alla volta, ognuno con un forward completo. Il modello non "pianifica" la frase: sceglie solo il prossimo carattere.`,
       duration: 6,
       enter: () => {
@@ -362,26 +386,30 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
   }
 
   /** Stato globale dell'azione: lo riapplica ogni passo (serve anche dopo "Ricomincia" a fine azione). */
-  function activate() {
+  function activate(step, run) {
     stage.takeFlow();
     stage.lockDetail();
     stage.hide("tokens");
     scene.tape.group.visible = true;
+    if (step.patterns) scenePatterns(run, ...step.patterns);
   }
 
   /** Avvolge l'enter di ogni passo con activate(). */
-  const withActivate = (steps) => steps.map((step) => ({ ...step, enter: (ctx) => (activate(), step.enter?.(ctx)) }));
+  const withActivate = (steps) => steps.map((step) => ({ ...step, enter: (ctx) => (activate(step, ctx.data.run), step.enter?.(ctx)) }));
 
   /** Fine azione: la scena di base torna com'era; gli oggetti dell'azione si nascondono (non si distruggono). */
   function finish() {
     stage.restore();
+    patternsKey = "";
     if (!scene) return;
     for (const o of [scene.tape.group, scene.stoi.group, scene.column.group, scene.flyer.group]) o.visible = false;
     clearLookup();
+    stage.board.hideNeedle();
   }
 
   function cleanup() {
     stage.restore();
+    patternsKey = "";
     disposeScene();
   }
 
@@ -393,8 +421,9 @@ export function createPromptAction({ tab, stage, charts, getOptions, onOutput })
     async build(ctx) {
       const options = getOptions();
       const engine = await tab.getEngine();
-      cleanup();
       await tab.views.activate("architettura");
+      if (ctx.isStale?.()) return [];
+      cleanup();
       const run = runPrompt(engine, options.text, options);
       ctx.data.run = run;
       charts.reset(run);

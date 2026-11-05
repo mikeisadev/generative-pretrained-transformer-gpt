@@ -14,13 +14,14 @@ import * as THREE from "three";
 import { fmt } from "../../core/dom.js";
 import { label } from "../../core/visuals.js";
 import { Board, panel, paragraph } from "./board.js";
-import { DOC_COLORS, makeStation } from "./scene3d.js";
+import { DOC_COLORS, STATION_H, makeStation } from "./scene3d.js";
 
 const LW = 28; // larghezza dei piani (x)
 const LD = 17; // profondità dei piani (z)
 const STACK_X = -13;
 const CLOUD_X = 19;
 const CLOUD_R = 8;
+const LABEL_W = 9; // spazio a sinistra dei piani per le etichette "livello …"
 
 const C = {
   visited: new THREE.Color("#64748b"),
@@ -36,6 +37,10 @@ const C = {
 
 export function buildHnsw(kb) {
   const st = makeStation("hnsw");
+  // le etichette dei livelli sporgono a sinistra dei piani: il riquadro per la camera le comprende
+  st.bounds.geometry.dispose();
+  st.bounds.geometry = new THREE.BoxGeometry(st.spec.w + LABEL_W, STATION_H + 4, 2);
+  st.bounds.position.x = -LABEL_W / 2;
   const { inserts, points, graphStates, maxLevel } = kb;
   const n = inserts.length;
   const gap = maxLevel > 0 ? Math.min(6, 19 / maxLevel) : 0;
@@ -76,7 +81,7 @@ export function buildHnsw(kb) {
     copies += r.level + 1;
   }
   copyStart.push(copies);
-  const nodes = new THREE.InstancedMesh(new THREE.SphereGeometry(0.42, 16, 12), new THREE.MeshBasicMaterial({ transparent: true }), copies);
+  const nodes = new THREE.InstancedMesh(new THREE.SphereGeometry(0.42, 10, 7), new THREE.MeshBasicMaterial({ transparent: true }), copies);
   nodes.userData.noBounds = true;
   const dummy = new THREE.Object3D();
   const v = new THREE.Vector3();
@@ -144,7 +149,7 @@ export function buildHnsw(kb) {
   // --- nuvola 3D
   const cloud = new THREE.Group();
   cloud.position.set(CLOUD_X, 0, 0);
-  const cloudPts = new THREE.InstancedMesh(new THREE.SphereGeometry(0.34, 12, 8), new THREE.MeshBasicMaterial({ transparent: true }), n);
+  const cloudPts = new THREE.InstancedMesh(new THREE.SphereGeometry(0.34, 8, 6), new THREE.MeshBasicMaterial({ transparent: true }), n);
   cloudPts.userData.noBounds = true;
   inserts.forEach((r, i) => {
     dummy.position.set(points[i][0] * CLOUD_R, points[i][2] * CLOUD_R, points[i][1] * CLOUD_R);
@@ -401,7 +406,7 @@ export function buildHnsw(kb) {
 
   // registro per la camera
   const parts = {
-    stack: makeFocusBox(STACK_X + 1, (baseY - 1 + layerY(maxLevel) + 10) / 2, LW + 4, layerY(maxLevel) + 10 - baseY + 1, LD),
+    stack: makeFocusBox(STACK_X + 1 - LABEL_W / 2, (baseY - 1 + layerY(maxLevel) + 10) / 2, LW + 4 + LABEL_W, layerY(maxLevel) + 10 - baseY + 1, LD),
     cloud: makeFocusBox(CLOUD_X, 0, CLOUD_R * 2.2, CLOUD_R * 2.2 + 3, CLOUD_R * 2.2),
   };
   st.group.add(parts.stack, parts.cloud);

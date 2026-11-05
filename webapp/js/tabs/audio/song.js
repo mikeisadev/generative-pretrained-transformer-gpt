@@ -3,7 +3,7 @@
  * (fondamentale + armoniche) con un inviluppo di volume. Servono come "dataset" del codec
  * giocattolo e del modello che genera token.
  *
- * Modulo PURO: restituisce Float32Array, la riproduzione è in player.js.
+ * Modulo PURO: restituisce Float32Array, la riproduzione è in audioOut.js.
  */
 import { normalizePeak } from "./dsp.js";
 

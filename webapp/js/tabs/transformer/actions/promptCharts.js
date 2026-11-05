@@ -15,6 +15,7 @@ export class PromptCharts {
     this.block = 0;
     this.run = null;
     this.token = -1;
+    this.shown = ""; // "token:serie" mostrato, per non ridisegnare tutto se non cambia nulla
     const section = panel.section(
       "prompt",
       "Prompt (inferenza)",
@@ -88,6 +89,7 @@ export class PromptCharts {
   reset(run) {
     this.run = run;
     this.token = -1;
+    this.shown = "";
     this.entropy.setData({ series: [{ name: "entropia", points: [] }, { name: "massimo: ln 65", points: [] }] });
     this.chosen.setData({ series: [{ name: "p(token estratto)", points: [] }] });
     this.dist.clear();
@@ -103,11 +105,18 @@ export class PromptCharts {
     if (fromUser || this.token >= 0) this.drawBlock();
   }
 
-  /** Mostra i dati del token k (distribuzione, attention, lens…). `final`: aggiorna anche le serie. */
+  /**
+   * Mostra i dati del token k (distribuzione, attention, lens…). Le serie nel tempo arrivano fino
+   * al token k compreso (`appendSeries`, dopo l'estrazione) o fino al precedente (prima
+   * dell'estrazione): ogni passo imposta lo stato completo, anche saltando avanti e indietro.
+   */
   showToken(k, { appendSeries = true } = {}) {
     const run = this.run;
     const s = run?.steps[k];
     if (!s) return;
+    const key = `${k}:${appendSeries}`;
+    if (key === this.shown) return;
+    this.shown = key;
     this.token = k;
     const vocab = run.vocab;
     const order = Array.from(s.probs.keys()).sort((a, b) => s.probs[b] - s.probs[a]).slice(0, 10);
@@ -117,7 +126,7 @@ export class PromptCharts {
       values: top.map((id) => s.probs[id]),
       highlight: top.indexOf(s.id),
     });
-    if (appendSeries) this.appendUpTo(k);
+    this.appendUpTo(appendSeries ? k : k - 1);
     this.lens.setData({
       rows: s.lens.length,
       cols: order.length,
@@ -135,7 +144,7 @@ export class PromptCharts {
     this.drawBlock();
   }
 
-  /** Serie "nel tempo" fino al token k (compreso), ricostruite: funziona anche col passo indietro. */
+  /** Serie "nel tempo" fino al token k (compreso; −1 = nessuno), ricostruite: funziona anche col passo indietro. */
   appendUpTo(k) {
     const steps = this.run.steps.slice(0, k + 1);
     this.entropy.setData({
@@ -145,8 +154,9 @@ export class PromptCharts {
       ],
     });
     this.chosen.setData({ series: [{ name: "p(token estratto)", points: steps.map((s, i) => [i + 1, s.chosenProb]) }] });
-    this.entropy.setHighlight({ x: k + 1, label: `token ${k + 1}` });
-    this.chosen.setHighlight({ x: k + 1, label: `token ${k + 1}` });
+    const highlight = k >= 0 ? { x: k + 1, label: `token ${k + 1}` } : null;
+    this.entropy.setHighlight(highlight);
+    this.chosen.setHighlight(highlight);
   }
 
   drawBlock() {

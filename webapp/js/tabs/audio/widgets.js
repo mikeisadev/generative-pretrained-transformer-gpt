@@ -163,6 +163,28 @@ export function slab({ width, height, depth = 1.2, color = 0x1e293b, emissive = 
   return mesh;
 }
 
+/**
+ * Cambia l'opacità di un oggetto animato senza litigare con il LOD: core/lod.js sfuma i livelli
+ * moltiplicando `material.userData.baseOpacity` per l'alpha del livello. Se scrivessimo solo
+ * `material.opacity`, la prima sfumatura riporterebbe il valore vecchio (o il nostro valore
+ * resterebbe pieno mentre il livello sta sparendo). Qui aggiorniamo la base e applichiamo l'alpha
+ * corrente del livello che contiene l'oggetto.
+ */
+export function setBaseOpacity(object, opacity) {
+  const m = object.material;
+  let alpha = 1;
+  for (let o = object; o; o = o.parent) {
+    if (o.userData.lodAlpha !== undefined) {
+      alpha = o.userData.lodAlpha;
+      break;
+    }
+  }
+  m.userData.baseOpacity = opacity;
+  m.userData.baseTransparent ??= true;
+  m.transparent = true;
+  m.opacity = opacity * alpha;
+}
+
 /** Etichetta posizionata (comodità). */
 export function placeLabel(parent, text, x, y, z = 0, options = {}) {
   const tag = label(text, options);

@@ -6,8 +6,8 @@
  */
 import { el, fmt } from "../../core/dom.js";
 import { CODEC } from "./codec.js";
+import { formatPercent } from "./lab.js";
 
-const pct = (v) => `${fmt(v * 100, v < 0.01 ? 2 : 1)} %`;
 
 /**
  * @param {HTMLElement} pane
@@ -32,7 +32,7 @@ export function buildLabPane(pane, lab, cb) {
   const qInfo = el("span", { className: "mono" });
   const updateQ = () => {
     const q = Number(qInput.value);
-    qInfo.textContent = `${q} codebook · ${fmt(lab.bitrate(q))} bit/s · errore ${pct(relErr[q])}`;
+    qInfo.textContent = `${q} codebook · ${fmt(lab.bitrate(q))} bit/s · errore ${formatPercent(relErr[q])}`;
   };
   qInput.addEventListener("input", updateQ);
   updateQ();
@@ -95,7 +95,7 @@ export function buildLabPane(pane, lab, cb) {
           "tbody",
           {},
           row("Campioni del brano", fmt(lab.songs[styles[0].id].samples.length)),
-          row("Frame del codec (20 ms)", fmt(lab.frames)),
+          row("Frame del codec (uno ogni 20 ms)", fmt(lab.frames)),
           row("Numeri per frame (feature)", fmt(CODEC.bins)),
           row("Token per secondo", `${fmt(lab.frameRate)} × ${CODEC.used} = ${fmt(lab.frameRate * CODEC.used)}`),
           row("Bit/s con 4 codebook", fmt(lab.bitrate(CODEC.used))),

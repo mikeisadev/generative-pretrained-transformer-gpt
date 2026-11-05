@@ -14,7 +14,8 @@ const BLOCKS = [
   { slot: "encoder", title: "Encoder", subtitle: "un vettore ogni 20 ms", text: "Riassume ogni frame in un vettore di numeri.", color: "#fbbf24" },
   { slot: "rvq", title: "RVQ", subtitle: "4 codebook × 64 voci", text: "Ogni vettore diventa 4 numeri interi: i token.", color: "#f472b6" },
   { slot: "transformer", title: "Transformer", subtitle: "prossimo token + delay pattern", text: "Come il GPT, ma i token sono pezzi di suono.", color: "#38bdf8", spanTo: "delay" },
-  { slot: "decoder", title: "Decoder", subtitle: "→ suono", text: "Dai token alla forma d'onda.", color: "#34d399" },
+  // il componente è stretto: il blocco si allarga di 1,5 unità per lato, così il titolo ci sta
+  { slot: "decoder", title: "Decoder", subtitle: "token → suono", text: "Dai token alla forma d'onda.", color: "#34d399", widen: 1.5 },
   { slot: "output", title: "Audio generato", subtitle: "da ascoltare", text: "Il brano nuovo, token dopo token.", color: "#34d399" },
   { slot: "text", title: "Prompt", subtitle: "\"melodia allegra…\"", text: "Che musica vuoi sentire.", color: "#a78bfa" },
   { slot: "t5", title: "Text encoder", subtitle: "T5", text: "Il testo diventa vettori per la cross-attention.", color: "#a78bfa" },
@@ -43,10 +44,14 @@ const left = (s) => new THREE.Vector3(SLOT[s].x - SLOT[s].w / 2 - 0.3, SLOT[s].y
 export function buildBlocks() {
   const group = new THREE.Group();
   const bySlot = new Map();
+  const extent = new Map(); // slot → [x0, x1] del blocco disegnato (le frecce partono dai bordi veri)
   for (const b of BLOCKS) {
     const s = SLOT[b.slot];
-    const x0 = s.x - s.w / 2;
-    const x1 = b.spanTo ? SLOT[b.spanTo].x + SLOT[b.spanTo].w / 2 : s.x + s.w / 2;
+    const widen = b.widen ?? 0;
+    const x0 = s.x - s.w / 2 - widen;
+    const x1 = (b.spanTo ? SLOT[b.spanTo].x + SLOT[b.spanTo].w / 2 : s.x + s.w / 2) + widen;
+    extent.set(b.slot, [x0, x1]);
+    if (b.spanTo) extent.set(b.spanTo, [x0, x1]);
     const width = x1 - x0;
     const height = b.slot === "text" || b.slot === "t5" ? 5 : b.slot.startsWith("w") ? 6 : 8;
     const block = scaledBlock({ title: b.title, subtitle: b.subtitle, text: b.text, width, height, color: b.color }, 4.2);
@@ -65,7 +70,8 @@ export function buildBlocks() {
     ["wEnc", "wDec"],
     ["wDec", "wText"],
   ];
-  for (const [a, b] of arrows) group.add(makeArrow(right(a), left(b), { color: 0x94a3b8, radius: 0.12, headLength: 0.8 }));
+  const edge = (slot, side) => new THREE.Vector3(extent.get(slot)[side] + (side ? 0.3 : -0.3), SLOT[slot].y, 0);
+  for (const [a, b] of arrows) group.add(makeArrow(edge(a, 1), edge(b, 0), { color: 0x94a3b8, radius: 0.12, headLength: 0.8 }));
   group.add(makeArrow(new THREE.Vector3(SLOT.t5.x, SLOT.t5.y - 2.6, 0), new THREE.Vector3(SLOT.t5.x, SLOT.transformer.y + 4.2, 0), { color: 0xa78bfa, radius: 0.12, headLength: 0.8 }));
   group.add(makeArrow(new THREE.Vector3(SLOT.audio.x, SLOT.audio.y - 4.2, 0), new THREE.Vector3(SLOT.wMel.x - SLOT.wMel.w / 2 + 2, SLOT.wMel.y + 3.2, 0), { color: 0xfbbf24, radius: 0.12, headLength: 0.8 }));
   return { group, bySlot };

@@ -46,6 +46,7 @@ export function registerContextAction(view) {
   });
 }
 
+/** Fine o interruzione dell'azione: la scena torna allo stato completo, senza pacchetto né token. */
 function finish(view) {
   view.scene.flowTokens(null);
   view.scene.hidePacket();
@@ -53,6 +54,7 @@ function finish(view) {
   view.scene.setState(FULL_STATE);
   view.moveArchFlow(0);
   view.tab.lod.controller.setMode("auto");
+  if (view.leaving) return; // si sta passando a un'altra vista: didascalia e grafici sono suoi
   view.tab.setCaption("Contesto: animazione conclusa. Usa la rotellina per esplorare i tre livelli di zoom, o clicca un passo del percorso nel pannello Contesto.");
   if (view.scenario) view.charts.showAll(view.scenario);
 }
@@ -121,7 +123,6 @@ function buildSteps(view, s) {
 
   if (s.blocked) {
     step({
-    done: { embed: 1 },
       title: "Risposta immediata",
       stage: "react",
       code: "llm",
@@ -211,7 +212,7 @@ function buildSteps(view, s) {
     code: "data.tokenizer",
     duration: 4.5,
     state: { segments: segs.length },
-    caption: `Tutto il contesto diventa una sequenza di token: circa ${it(s.prompt.tokens.total)} token BPE per ${PRODUCTION_MODEL}. Il nostro GPT usa un token per carattere e ne legge al massimo 32: ne servirebbero ${it(s.prompt.text.length)}.`,
+    caption: `Tutto il contesto diventa una sequenza di token: circa ${it(s.prompt.tokens.total)} token BPE per ${PRODUCTION_MODEL}. Il nostro GPT usa un token per carattere e ne legge al massimo ${view.tab.spec.config.block_size}: ne servirebbero ${it(s.prompt.text.length)}.`,
   });
 
   // ------------------------------------------------------------ 3. l'LLM (una o due chiamate)
@@ -320,6 +321,7 @@ function summary(view, s, steps) {
       ? "Riepilogo: il guardrail ha fermato la domanda prima di ogni costo. Se passa, il percorso è: Contesto (RAG) → LLM → Risposta."
       : `Riepilogo: il backend prepara il contesto (RAG, system prompt, strumenti, storico), l'LLM lo legge${s.toolCall ? " due volte" : ""} e la risposta torna a React in streaming. In tutto ${it(s.calls.reduce((a, c) => a + c.input, 0))} token in ingresso. Il modello non impara nulla: alla prossima domanda si riparte da capo.`,
     enter: () => {
+      view.tab.setCaption("Animazione · Riepilogo");
       view.scene.setState(FULL_STATE);
       view.scene.setActive(null);
       view.scene.hidePacket();

@@ -14,6 +14,7 @@
  *   audioOut.js                  riproduzione con Web Audio
  */
 import * as THREE from "three";
+import { fetchJson } from "../../core/binary.js";
 import { el, fmt } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
 import { LODController } from "../../core/lod.js";
@@ -22,14 +23,14 @@ import { installActions } from "./actions.js";
 import { AudioOut } from "./audioOut.js";
 import { CODEC } from "./codec.js";
 import { SOURCES, STEPS } from "./content.js";
-import { createLab } from "./lab.js";
+import { createLab, formatPercent } from "./lab.js";
 import { buildLabPane } from "./labPane.js";
 import { FOCUS, LOD_DISTANCES, SCENE_OFFSET } from "./layout3d.js";
 import { createPlots } from "./plots.js";
 import { buildAudio, buildEncoder, buildRvq } from "./sceneCodec.js";
 import { buildConditioning, buildCrossAttention, buildDecoder, buildDelay, buildOutput, buildTransformer } from "./sceneGen.js";
 import { buildBlocks, buildFlows, buildMacro } from "./sceneLod.js";
-import { buildWhisper } from "./sceneWhisper.js";
+import { WHISPER_TOKENS, buildWhisper } from "./sceneWhisper.js";
 import { showSnippet } from "./snippets.js";
 
 
@@ -49,6 +50,10 @@ export async function createTab(root, app) {
   // --- calcoli veri (circa 2 secondi): schermata di attesa con avanzamento
   const loading = el("div", { className: "audio-loading", role: "status" }, el("strong", {}, "Preparo il laboratorio audio"), el("p", {}, "Avvio…"), el("div", { className: "audio-progress" }, el("div")));
   stage.append(loading);
+  // dimensione del vocabolario del GPT del corso: dal dato esportato, non scritta a mano
+  const gptVocab = fetchJson(new URL("../../../data/weights.json", import.meta.url))
+    .then((w) => w.config.vocab_size)
+    .catch(() => null);
   const lab = await createLab({
     onProgress: (text, f) => {
       loading.querySelector("p").textContent = text;
@@ -128,9 +133,12 @@ export async function createTab(root, app) {
      * passo sia comparso (cambia la parte visibile dello stage) e, se un'azione è in corso, lascia
      * spazio in basso per la barra del player.
      */
+    /** Ultimo componente inquadrato (le azioni lo usano per non ripetere un volo inutile). */
+    focusedId: null,
     async focus(id, options = {}) {
       const target = registry.get(id);
       if (!target) return;
+      tab.focusedId = id;
       await Promise.resolve(); // lascia a tab.code(), chiamato subito dopo, il tempo di registrarsi
       await pendingCode;
       const box = new THREE.Box3().setFromObject(target);
@@ -163,7 +171,8 @@ export async function createTab(root, app) {
       P.transformer.pulse(0);
       P.decoder.pulse(0);
       P.whisper.revealMel(null);
-      P.whisper.showTokens(8);
+      P.whisper.showTokens(WHISPER_TOKENS.length);
+      for (const part of ["enc", "dec", "cross"]) P.whisper.pulse(part, 0);
       P.delay.show(state.gen, state.gen ? state.gen.steps.length - 1 : -1);
       plots?.specUpTo(lab.frames, true);
       plots?.errorUpTo(CODEC.levels);
@@ -191,6 +200,8 @@ export async function createTab(root, app) {
     },
     setStyle(id) {
       if (!lab.songs[id] || id === state.style) return;
+      // un'azione in corso ha didascalie e generazione costruite sul brano di prima: la chiudiamo
+      ui.player.stop();
       out.stop();
       state.style = id;
       for (const k of ["audio", "encoder", "rvq", "cond", "whisper"]) P[k].setStyle(id);
@@ -212,8 +223,7 @@ export async function createTab(root, app) {
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Paper originali e codice ufficiale da cui vengono i numeri dei modelli reali." });
 
   const err = lab.relativeError();
-  const pct = (v) => `${fmt(v * 100, v < 0.01 ? 2 : 1)} %`;
-  const vars = {
+    const vars = {
     sampleRate: fmt(lab.sampleRate),
     duration: fmt(lab.songs[state.style].duration, 1),
     samples: fmt(lab.songs[state.style].samples.length),
@@ -223,13 +233,14 @@ export async function createTab(root, app) {
     bins: fmt(CODEC.bins),
     mels: "64",
     k: fmt(lab.rvq.k),
-    err1: pct(err[1]),
-    err4: pct(err[4]),
-    err8: pct(err[8]),
+    err1: formatPercent(err[1]),
+    err4: formatPercent(err[4]),
+    err8: formatPercent(err[8]),
     frameRate: fmt(lab.frameRate),
     bitrate4: fmt(lab.bitrate(4)),
     pcmBitrate: fmt(lab.sampleRate * 16),
     whisperFrames: fmt(lab.whisper(state.style).signalFrames),
+    gptVocab: await gptVocab.then((v) => (v ? fmt(v) : "poche decine di")),
   };
   panePath.append(el("p", { className: "audio-intro" }, "Il GPT della lezione genera caratteri. Qui vediamo come la stessa idea, il prossimo token, genera suono: prima bisogna trasformare l'audio in token e ritorno."));
   new Menu(panePath, STEPS, {
@@ -330,7 +341,7 @@ export async function createTab(root, app) {
       "div",
       { className: "stage-toolbar" },
       el("button", { type: "button", onclick: () => tab.focus("overview") }, "Vista d'insieme"),
-      el("button", { type: "button", onclick: () => play(lab.songs[state.style].samples, "originale", P.audio) }, "▶ Ascolta il brano"),
+      el("button", { type: "button", ariaLabel: "Ascolta il brano", onclick: () => play(lab.songs[state.style].samples, "originale", P.audio) }, "▶ Ascolta", el("span", { className: "audio-wide" }, " il brano")),
     ),
   );
 

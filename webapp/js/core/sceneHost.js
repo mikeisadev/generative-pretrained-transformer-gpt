@@ -11,6 +11,28 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
+let softwareRenderer = null;
+
+/**
+ * true se WebGL gira senza GPU (SwiftShader, llvmpipe…: macchine virtuali, PC senza driver).
+ * Lì l'antialiasing MSAA raddoppia il tempo di ogni frame (misurato: 40 → 22 ms nel tab
+ * Transformer), mentre con una GPU vera costa poco: lo teniamo solo dove non pesa.
+ */
+function isSoftwareRenderer() {
+  if (softwareRenderer !== null) return softwareRenderer;
+  softwareRenderer = false;
+  try {
+    const gl = document.createElement("canvas").getContext("webgl2") ?? document.createElement("canvas").getContext("webgl");
+    const info = gl?.getExtension("WEBGL_debug_renderer_info");
+    const name = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl?.getParameter(gl.RENDERER);
+    softwareRenderer = /swiftshader|llvmpipe|software|softpipe/i.test(String(name ?? ""));
+    gl?.getExtension("WEBGL_lose_context")?.loseContext(); // libera subito il contesto di prova
+  } catch {
+    // nessun WebGL: ci penserà il renderer a segnalarlo
+  }
+  return softwareRenderer;
+}
+
 export class SceneHost {
   /**
    * @param {HTMLElement} container elemento che ospita il canvas
@@ -18,15 +40,16 @@ export class SceneHost {
    * @param {number} [options.background] colore di sfondo
    * @param {() => number} [options.coveredRight] pixel coperti a destra da pannelli fluttuanti
    * @param {number} [options.fov]
+   * @param {boolean} [options.antialias] predefinito: sì con una GPU, no con il rendering software
    */
-  constructor(container, { background = 0x0d1117, coveredRight = () => 0, fov = 45 } = {}) {
+  constructor(container, { background = 0x0d1117, coveredRight = () => 0, fov = 45, antialias = !isSoftwareRenderer() } = {}) {
     this.container = container;
     this.coveredRight = coveredRight;
     this.updaters = new Set();
     this.clock = new THREE.Clock();
     this.running = false;
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.append(this.renderer.domElement);

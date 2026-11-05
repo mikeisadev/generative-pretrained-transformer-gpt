@@ -11,12 +11,13 @@
  * Ogni modulo esporta `install(tab)`; l'oggetto `tab` è descritto in webapp/ARCHITECTURE.md.
  */
 import * as THREE from "three";
-import { el, fillTemplate } from "../../core/dom.js";
+import { meshBounds } from "../../core/director.js";
+import { el } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
 import { Menu } from "../../core/ui/menu.js";
 import { installActions } from "./actions/index.js";
 import { buildArchitecture } from "./architecture.js";
-import { STEPS } from "./content.js";
+import { SOURCES, STEPS } from "./content.js";
 import { loadEngine } from "../../engine/gpt.js";
 import { installContext } from "./context/index.js";
 import { loadModelSpec } from "./data.js";
@@ -89,6 +90,7 @@ export async function createTab(root, app) {
   const panePath = sidebar.addPane({ id: "percorso", title: "Percorso" });
   const paneActions = sidebar.addPane({ id: "azioni", title: "Azioni", hint: "Panoramica delle azioni animate: scegli se seguire un prompt o il training." });
   const paneViews = sidebar.addPane({ id: "viste", title: "Viste", hint: "Cambia il modo di guardare lo stesso modello." });
+  // (il pannello "Contesto" lo aggiunge context/index.js; "Fonti" va in fondo, vedi sotto)
   panePath.append(
     el(
       "p",
@@ -124,7 +126,8 @@ export async function createTab(root, app) {
     /** Vola su un componente per id del registro (vedi architecture.js) o su un oggetto. */
     focus(target, options) {
       const object = typeof target === "string" ? arch.registry.get(target) : target;
-      if (target === "overview") return director.focus(arch.registry.get("overview"), { showFrame: false, margin: 1.12, ...options });
+      // 1.25: la riga di uscita in alto non finisce sotto la barra dei comandi dello stage
+      if (target === "overview") return director.focus(arch.registry.get("overview"), { showFrame: false, margin: 1.25, ...options });
       return object ? director.focus(object, options) : Promise.resolve();
     },
     setCaption(text) {
@@ -161,15 +164,25 @@ export async function createTab(root, app) {
 
   // --- viste
   tab.views = new ViewManager(tab, paneViews);
+  let returning = false; // la prima attivazione è l'avvio del tab: camera e codice li sceglie createTab
   tab.views.register({
     id: "architettura",
     label: "Architettura",
     description: "Il modello come lo descrive il codice: matrici, head, blocchi e flusso dei dati.",
     order: 0,
-    enter: () => {
+    enter: (t) => {
       arch.root.visible = true;
       arch.rail.visible = true;
       flow.packet.visible = true;
+      // Tornando da un'altra vista: camera sulla pila, codice e didascalia dello step scelto nel
+      // Percorso (le altre viste non devono sapere come ripristinare questa).
+      const firstEntry = !returning;
+      returning = true;
+      if (firstEntry || !t.menu?.current) return;
+      const entry = t.menu.items.get(t.menu.current);
+      t.focus("overview");
+      t.showCode(entry.item.code, entry.title, entry.item.highlight ?? []);
+      t.setCaption("");
     },
   });
   tab.views.activate("architettura");
@@ -180,6 +193,7 @@ export async function createTab(root, app) {
   installNeuronsView(tab);
   installActions(tab);
   installContext(tab);
+  sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Da dove vengono codice, architettura e scelte di training." }).append(renderSources(SOURCES));
 
   // --- controlli generali
   const playFlow = el("button", { type: "button", className: "flow-toggle", onclick: () => (playFlow.textContent = flow.toggle() ? "⏸ Flusso" : "▶ Flusso") }, "⏸ Flusso");
@@ -196,14 +210,24 @@ export async function createTab(root, app) {
   });
   root.tabIndex = -1;
 
+  installLevelPicking(tab);
+
   // Altri tab possono chiedere una vista precisa (es. il tab RAG apre la vista "contesto").
+  // detail = id della vista, oppure { view, question } per passare anche la domanda alla vista Contesto.
   app.bus.addEventListener("transformer:view", (e) => {
+    const { view, question } = typeof e.detail === "string" ? { view: e.detail } : e.detail ?? {};
     app.open("transformer");
-    tab.views.activate(e.detail);
+    if (question) app.bus.dispatchEvent(new CustomEvent("context:question", { detail: { question } }));
+    if (view) tab.views.activate(view);
   });
 
   tab.menu.select("data.dataset");
   tab.focus("overview");
+  // Sul telefono il codice è un foglio in basso che coprirebbe metà della pila: all'avvio resta ridotto.
+  if (window.matchMedia("(max-width: 900px)").matches) codePanel.root.classList.add("minimized");
+  // Le azioni di questo tab (actions/, context/) inquadrano la scena sapendo che sul telefono il
+  // codice è un foglio in basso: niente spostamento in alto durante le azioni (regola di core.css).
+  root.classList.add("code-stays-bottom");
   window.__gptApp = tab; // utile per il debug dalla console e per i test automatici
 
   return {
@@ -216,4 +240,46 @@ export async function createTab(root, app) {
   };
 }
 
-export { fillTemplate };
+/**
+ * Scelta di un livello dal selettore dello zoom: la camera inquadra quel livello (senza, scegliere
+ * "Panoramica" da vicino mostrerebbe un rettangolo enorme tagliato). Durante un'azione la regia
+ * della camera è dell'azione, quindi qui non si vola.
+ */
+function installLevelPicking(tab) {
+  const FRONT = new THREE.Vector3(0, 0.08, 1);
+  tab.lod.controller.onPick = (mode) => {
+    if (mode === "auto" || tab.ui.player?.action) return;
+    if (tab.views.current === "architettura") {
+      if (mode === "detail") {
+        const entry = tab.menu.items.get(tab.menu.current);
+        const focus = entry?.item.focus;
+        tab.focus(focus && focus !== "overview" ? focus : "blocks.0");
+      } else {
+        // sul telefono le due file di comandi in alto occupano ~100 px: serve più margine
+        const margin = window.matchMedia("(max-width: 900px)").matches ? 1.45 : 1.25;
+        tab.focus(tab.lod.arch[mode], { showFrame: false, margin, direction: FRONT });
+      }
+      return;
+    }
+    // Altre viste: inquadra ciò che di quel livello è visibile ora (es. il diagramma della vista Contesto).
+    if (mode === "detail") return;
+    const box = meshBounds(tab.lod.levels[mode], { visibleOnly: true });
+    if (!box.isEmpty()) tab.ui.director.focus(box, { showFrame: false, margin: 1.12, direction: FRONT });
+  };
+}
+
+/** Elenco delle fonti raggruppate (stile condiviso .sources-list di core.css). */
+function renderSources(groups) {
+  return el(
+    "div",
+    { className: "sources-list" },
+    ...groups.map((group) =>
+      el(
+        "section",
+        {},
+        el("h3", {}, group.title),
+        el("ul", {}, ...group.items.map((s) => el("li", {}, el("a", { href: s.url, target: "_blank", rel: "noopener" }, s.title), el("p", { className: "hint" }, s.note)))),
+      ),
+    ),
+  );
+}

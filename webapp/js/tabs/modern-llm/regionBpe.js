@@ -16,7 +16,7 @@ export function buildBpe(group) {
   const strip = new TokenStrip({ w: 34, h: 12.5, font: 0.95, gap: 0.24 }).place(group, 0, 1.7);
   const header = new Plate({ w: 34, h: 2.4, size: 0.65, align: "center" }).place(group, 0, -6.6);
   const footer = new Plate({ w: 34, h: 2.2, size: 0.55, align: "center", color: PALETTE.muted }).place(group, 0, -10.4);
-  footer.set("Vocabolario = 256 byte + una voce per ogni fusione.\nGPT-2: 50.257 token · Llama 3: 128.256 token.");
+  footer.set("Vocabolario = 256 byte + una voce per ogni fusione + pochi token speciali.\nGPT-2: 50.257 token · Llama 3: 128.256 token.");
 
   const api = {
     history,
@@ -47,7 +47,7 @@ export function buildBpe(group) {
         const b = shown(tokenText(vocab.get(pair[1])));
         header.set([
           { text: `Fusione ${k}: «${a}» + «${b}» → token ${step.idx} «${shown(tokenText(vocab.get(step.idx)))}» (compare ${step.count} volte)`, bold: true },
-          { text: `token: ${bytes} byte → ${ids.length} token${pending ? "" : ""}`, color: PALETTE.muted },
+          { text: `token: ${bytes} byte → ${ids.length} token`, color: PALETTE.muted },
         ]);
       }
     },

@@ -12,18 +12,24 @@ const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2
  * Bounding box dei soli mesh. Sono esclusi sprite/etichette, gli sfondi dei blocchi
  * (userData.isFrame) e gli oggetti marcati userData.noBounds.
  * Un oggetto con userData.members usa l'unione dei membri (gruppi "virtuali").
+ * Con { visibleOnly: true } conta solo ciò che è visibile (utile per inquadrare un livello LOD).
  */
-export function meshBounds(object) {
+export function meshBounds(object, { visibleOnly = false } = {}) {
   const box = new THREE.Box3();
-  const targets = object.userData?.members ?? [object];
-  targets.forEach((target) => {
-    target.updateWorldMatrix(true, true);
-    target.traverse((child) => {
-      if (!child.isMesh || child.userData.isFrame || child.userData.noBounds) return;
+  const part = new THREE.Box3();
+  const visit = (child, isRoot) => {
+    // visibleOnly: salta i sotto-alberi nascosti (ma non la radice, es. un livello LOD ancora in dissolvenza)
+    if (visibleOnly && !isRoot && !child.visible) return;
+    if (child.isMesh && !child.userData.isFrame && !child.userData.noBounds) {
       if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
-      box.union(child.geometry.boundingBox.clone().applyMatrix4(child.matrixWorld));
-    });
-  });
+      box.union(part.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld));
+    }
+    for (const c of child.children) visit(c, false);
+  };
+  for (const target of object.userData?.members ?? [object]) {
+    target.updateWorldMatrix(true, true);
+    visit(target, true);
+  }
   return box;
 }
 
@@ -89,9 +95,15 @@ export class CameraDirector {
 
   update(dt, elapsed) {
     if (this.highlight.visible) this.highlight.material.opacity = 0.55 + 0.4 * Math.sin(elapsed * 4);
+    // Il volo avanza con il tempo reale: il dt del SceneHost è limitato a 0,05 s, e con frame lenti
+    // (rendering software, macchina carica) un volo di 1,2 s durerebbe 3-4 s. Il limite di 0,25 s
+    // evita un salto alla fine quando il tab torna visibile dopo una pausa.
+    const now = performance.now();
+    const realDt = this.lastUpdate === undefined ? dt : Math.min(0.25, Math.max(dt, (now - this.lastUpdate) / 1000));
+    this.lastUpdate = now;
     if (!this.flight) return;
     const f = this.flight;
-    f.t = Math.min(1, f.t + dt / f.duration);
+    f.t = Math.min(1, f.t + realDt / f.duration);
     const k = easeInOutCubic(f.t);
     this.camera.position.lerpVectors(f.fromPos, f.toPos, k);
     this.controls.target.lerpVectors(f.fromTarget, f.toTarget, k);

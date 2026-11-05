@@ -9,10 +9,10 @@
  */
 import { fmt } from "../../core/dom.js";
 import { CODEC } from "./codec.js";
+import { formatPercent } from "./lab.js";
 import { WHISPER } from "./dsp.js";
 import { WHISPER_TOKENS } from "./sceneWhisper.js";
 
-const pct = (v) => `${fmt(v * 100, v < 0.01 ? 2 : 1)} %`;
 
 /** @param {object} tab vedi index.js */
 export function installActions(tab) {
@@ -20,6 +20,13 @@ export function installActions(tab) {
   const player = ui.player;
   const T = lab.frames;
   const P = parts;
+  /**
+   * Ogni passo dichiara il componente che deve essere inquadrato: così anche "passo indietro"
+   * (o un salto con goTo) riporta la camera nel posto giusto. Se è già lì non riparte il volo.
+   */
+  const frame = (id) => {
+    if (tab.focusedId !== id) tab.focus(id);
+  };
 
   /* ------------------------------------------------------------------ 1. dal suono ai numeri */
   player.register({
@@ -36,7 +43,7 @@ export function installActions(tab) {
         duration: 4.8,
         caption: "Ecco il nostro brano: 4,8 secondi di melodia con accordi, generati qui con la sintesi additiva. La linea bianca scorre nel tempo come una testina.",
         enter: () => {
-          tab.focus("audio");
+          frame("audio");
           tab.code("js:song.js#synthesize", ["addNote(out"]);
           P.encoder.setStage(0);
         },
@@ -55,8 +62,8 @@ export function installActions(tab) {
         duration: 4,
         caption: `Ingrandiamo 3 millisecondi: il computer non conserva la curva, ma ${fmt(lab.sampleRate)} misure al secondo. Ogni punto è un numero tra −1 e 1.`,
         enter: () => {
-          tab.focus("audio.lens");
-          tab.code("js:dsp.js#normalizePeak");
+          frame("audio.lens");
+          tab.code("js:song.js#addNote", ["const w = (2 * Math.PI * f) / sr", "if (f >= sr / 2) break"]);
         },
         update: (p) => P.audio.showLens("samples", 1.25 * lab.sampleRate, Math.min(1, p * 1.6)),
       },
@@ -64,7 +71,10 @@ export function installActions(tab) {
         title: "Una finestra alla volta",
         duration: 4.5,
         caption: `Un frame è un pezzo di ${CODEC.nFft} campioni (64 ms), moltiplicato per la finestra di Hann (in giallo): così i bordi vanno dolcemente a zero. Il frame successivo parte ${CODEC.hop} campioni dopo.`,
-        enter: () => tab.code("js:dsp.js#hannWindow"),
+        enter: () => {
+          frame("audio.lens");
+          tab.code("js:dsp.js#hannWindow");
+        },
         update: (p) => P.audio.showLens("frame", (60 + Math.floor(p * 6)) * CODEC.hop - CODEC.nFft / 2, Math.min(1, p * 2)),
       },
       {
@@ -73,7 +83,7 @@ export function installActions(tab) {
         caption: "La FFT scompone ogni frame nelle sue frequenze. Frame dopo frame nasce lo spettrogramma: tempo in orizzontale, frequenza in verticale, intensità come altezza e colore.",
         enter: () => {
           P.audio.showLens(null);
-          tab.focus("encoder");
+          frame("encoder");
           tab.code("js:dsp.js#stft", ["fft(re, im)", "Math.hypot"]);
           P.encoder.setStage(0);
           P.encoder.reveal(0);
@@ -98,6 +108,7 @@ export function installActions(tab) {
         duration: 4,
         caption: "Ora cambiamo il righello delle frequenze: in scala Mel le basse frequenze (dove stanno le note) si allargano e le alte si stringono, come le sente l'orecchio. Guarda le etichette a sinistra.",
         enter: () => {
+          frame("encoder");
           tab.code("js:dsp.js#hzToMel");
           P.encoder.setStage(0);
         },
@@ -108,6 +119,7 @@ export function installActions(tab) {
         duration: 4,
         caption: "Ogni filtro triangolare somma l'energia delle frequenze vicine: 64 bande invece di 513 bin. I dettagli fini si fondono (vedi il grafico del banco di filtri).",
         enter: () => {
+          frame("encoder");
           tab.code("js:dsp.js#melFilterbank", ["Math.min(up, down)"]);
           P.encoder.setStage(1);
         },
@@ -118,6 +130,7 @@ export function installActions(tab) {
         duration: 4,
         caption: "Infine il logaritmo (decibel): anche i suoni deboli diventano visibili, come per l'orecchio. Questo log-Mel è l'ingresso tipico dei modelli vocali come Whisper.",
         enter: () => {
+          frame("encoder");
           tab.code("js:dsp.js#powerToDb");
           P.encoder.setStage(2);
         },
@@ -128,7 +141,7 @@ export function installActions(tab) {
         duration: 4,
         caption: `Riassunto: ${fmt(lab.songs[tab.state.style].samples.length)} campioni sono diventati ${fmt(T)} frame × 64 bande = ${fmt(T * 64)} numeri, ordinati nel tempo. Ma sono ancora numeri reali, non token.`,
         enter: () => {
-          tab.focus("encoder");
+          frame("encoder");
           tab.code("js:dsp.js#applyMel");
           P.encoder.setStage(3);
         },
@@ -137,20 +150,21 @@ export function installActions(tab) {
   });
 
   /* ---------------------------------------------------------------------------- 2. RVQ */
+  const rows = [0, 0, 0, 0]; // frame visibili per codebook, riusato dai passi RVQ (niente allocazioni per frame)
   const rvqLevel = (k, caption, title) => ({
     title,
     duration: k === 0 ? 7 : 5,
     caption,
     enter: () => {
-      if (k === 0) tab.focus("rvq");
+      frame("rvq");
       tab.code("py:encodec.rvq", ["residual = residual - quantized"]);
-      const rows = [0, 1, 2, 3].map((i) => (i < k ? T : 0));
+      for (let i = 0; i < rows.length; i++) rows[i] = i < k ? T : 0;
       P.rvq.reveal(rows);
       plots?.errorUpTo(k, k || null);
     },
     update: (p) => {
       const n = Math.max(1, Math.round(p * T));
-      const rows = [0, 1, 2, 3].map((i) => (i < k ? T : i === k ? n : 0));
+      for (let i = 0; i < rows.length; i++) rows[i] = i < k ? T : i === k ? n : 0;
       P.rvq.reveal(rows);
       P.rvq.setCursor(k, n - 1);
       P.rvq.setLens(n - 10, n - 1);
@@ -175,9 +189,9 @@ export function installActions(tab) {
       {
         title: "Un vettore per frame",
         duration: 4,
-        caption: `Il nostro encoder (fisso, non una rete) prende per ogni frame da 20 ms lo spettro fino a 4 kHz in scala logaritmica: un vettore di ${CODEC.bins} numeri, ${fmt(lab.frameRate)} volte al secondo. EnCodec fa lo stesso con una rete convoluzionale: 75 vettori al secondo a 24 kHz.`,
+        caption: `Il nostro encoder (fisso, non una rete) ogni 20 ms prende lo spettro di una finestra di 64 ms, fino a 4 kHz e in scala logaritmica: un vettore di ${CODEC.bins} numeri, ${fmt(lab.frameRate)} volte al secondo. EnCodec invece impara il suo vettore con una rete convoluzionale: 75 vettori al secondo a 24 kHz.`,
         enter: () => {
-          tab.focus("encoder");
+          frame("encoder");
           tab.code("js:codec.js#encodeFeatures");
           P.encoder.setStage(0);
           P.rvq.reveal(0);
@@ -188,15 +202,15 @@ export function installActions(tab) {
         exit: () => P.encoder.setSlice(null),
       },
       rvqLevel(0, `Codebook 1: ${lab.rvq.k} vettori tipici trovati con il k-means. Per ogni frame si sceglie il più vicino e si scrive il suo indice: è il token. Nella nuvola, il punto bianco è il frame e l'anello il centroide scelto.`, "Codebook 1: il centroide più vicino"),
-      rvqLevel(1, `Codebook 2: non quantizza il frame ma l'errore rimasto (il residuo). L'errore relativo passa da ${pct(lab.relativeError()[1])} a ${pct(lab.relativeError()[2])}.`, "Codebook 2: il residuo"),
+      rvqLevel(1, `Codebook 2: non quantizza il frame ma l'errore rimasto (il residuo). L'errore relativo passa da ${formatPercent(lab.relativeError()[1])} a ${formatPercent(lab.relativeError()[2])}.`, "Codebook 2: il residuo"),
       rvqLevel(2, `Codebook 3: corregge l'errore lasciato dai primi due. Come pagare con banconote, poi monete, poi spiccioli.`, "Codebook 3"),
-      rvqLevel(3, `Codebook 4: con 4 codebook l'errore è ${pct(lab.relativeError()[4])}. MusicGen usa proprio 4 codebook (da 2048 voci ciascuno).`, "Codebook 4"),
+      rvqLevel(3, `Codebook 4: con 4 codebook l'errore è ${formatPercent(lab.relativeError()[4])}. MusicGen usa proprio 4 codebook (da 2048 voci ciascuno).`, "Codebook 4"),
       {
         title: "Più codebook, meno errore",
         duration: 5,
-        caption: `Ogni frame ora è 4 numeri tra 0 e ${lab.rvq.k - 1}: ${fmt(lab.bitrate(4))} bit al secondo invece di ${fmt(lab.sampleRate * 16)}. Nei grafici (pulsante in alto a destra): con 8 codebook l'errore scende a ${pct(lab.relativeError()[8])}. Più codebook = più bit = più qualità.`,
+        caption: `Ogni frame ora è 4 numeri tra 0 e ${lab.rvq.k - 1}: ${fmt(lab.bitrate(4))} bit al secondo invece di ${fmt(lab.sampleRate * 16)}. Nei grafici (pulsante in alto a destra): con 8 codebook l'errore scende a ${formatPercent(lab.relativeError()[8])}. Più codebook = più bit = più qualità.`,
         enter: () => {
-          tab.focus("rvq");
+          frame("rvq");
           tab.code("js:codec.js#trainRvq", ["kmeans(residual"]);
           P.rvq.reveal(T);
           P.rvq.setLens(0);
@@ -208,7 +222,7 @@ export function installActions(tab) {
         duration: 5,
         caption: "Il decoder somma i centroidi scelti, ottiene uno spettro e ricostruisce le fasi con Griffin-Lim. In SoundStream ed EnCodec il decoder è invece una rete addestrata insieme all'encoder. Ascolta il risultato con «Ricostruito» nel Laboratorio.",
         enter: () => {
-          tab.focus("decoderOut");
+          frame("decoderOut");
           tab.code("js:codec.js#decodeFeatures");
           tab.showReconstruction(CODEC.used);
         },
@@ -238,7 +252,7 @@ export function installActions(tab) {
           duration: 4,
           caption: `Si parte dal testo: "${lab.songs[gen.style].style.prompt}". Un text encoder pre-addestrato (in MusicGen è T5) lo trasforma in una sequenza di vettori, uno per pezzo di parola.`,
           enter: () => {
-            tab.focus("conditioning");
+            frame("conditioning");
             tab.code("py:musicgen.t5", ["model: t5", "name: t5-base", "finetune: false"]);
             P.delay.show(null, -1);
           },
@@ -256,7 +270,7 @@ export function installActions(tab) {
           duration: 4,
           caption: "In ogni blocco del transformer la cross-attention consulta i vettori del testo: le query vengono dall'audio, chiavi e valori dal testo. È l'attention della lezione, ma guarda un'altra sequenza.",
           enter: () => {
-            tab.focus("genCore");
+            frame("genCore");
             tab.code("py:musicgen.lm", ["cross_attention_src", "input_ = sum("]);
           },
           update: (p) => {
@@ -282,7 +296,7 @@ export function installActions(tab) {
                 ? `Passo ${s}: il codebook k scrive il frame ${s} − k, così vede già il codebook sopra dello stesso frame. ${desc}`
                 : `Passo ${s}: ${desc}`,
           enter: () => {
-            if (s === 0) tab.focus("delay");
+            frame("delay");
             tab.code(s === 0 ? "py:musicgen.delay" : "js:codec.js#TokenModel", s === 0 ? ["[S, 1, 2, 3, 4]"] : ["distribution(style", "delayPattern(T"]);
             P.delay.show(gen, s);
             const first = slots[0];
@@ -298,6 +312,7 @@ export function installActions(tab) {
         duration: 6,
         caption: `E così via: ${gen.steps.length} passi per ${T} frame (4,8 s). Con il delay pattern i passi sono circa 50 al secondo di audio invece di 200 (MusicGen fa lo stesso).`,
         enter: () => {
+          frame("delay");
           tab.code("js:codec.js#delayPattern");
           lastShown = -1;
         },
@@ -317,7 +332,7 @@ export function installActions(tab) {
         duration: 5,
         caption: "I token generati passano nel decoder del codec e tornano suono. Premi «Generato» nel Laboratorio per ascoltarlo: è un brano nuovo, ricombinato dai pezzi di suono che il modello conosce.",
         enter: () => {
-          tab.focus("decoderOut");
+          frame("decoderOut");
           tab.code("js:codec.js#decodeFeatures");
           P.delay.show(gen, gen.steps.length - 1);
           tab.showGenerated(gen);
@@ -343,7 +358,7 @@ export function installActions(tab) {
         duration: 4,
         caption: `Whisper lavora sempre su blocchi da 30 secondi di audio a 16 kHz. Il log-Mel si calcola con finestre da ${WHISPER.nFft} campioni (25 ms) ogni ${WHISPER.hop} (10 ms): ${fmt(WHISPER.nFrames)} frame. Il nostro brano ne occupa ${lab.whisper(tab.state.style).signalFrames}, il resto è silenzio.`,
         enter: () => {
-          tab.focus("wMel");
+          frame("wMel");
           tab.code("py:whisper.params", ["N_FFT", "HOP_LENGTH", "CHUNK_LENGTH"]);
           P.whisper.revealMel(0);
         },
@@ -355,7 +370,7 @@ export function installActions(tab) {
         duration: 4,
         caption: "Stessa formula di whisper/audio.py: potenza della STFT, 80 filtri Mel, log10, dinamica limitata a 8 (80 dB) e riscalatura. Il calcolo qui coincide con quello di PyTorch.",
         enter: () => {
-          tab.focus("wMel");
+          frame("wMel");
           tab.code("py:whisper.logmel", ["torch.stft", "filters @ magnitudes", "log_spec.max() - 8.0"]);
         },
       },
@@ -364,7 +379,7 @@ export function installActions(tab) {
         duration: 5,
         caption: "Due convoluzioni 1D (la seconda con passo 2: 3000 frame → 1500 posizioni), una codifica di posizione sinusoidale e una pila di blocchi transformer. L'attention è bidirezionale: ogni istante vede tutto l'audio.",
         enter: () => {
-          tab.focus("wEnc");
+          frame("wEnc");
           tab.code("py:whisper.encoder", ["self.conv1", "stride=2", "positional_embedding"]);
         },
         update: (p) => P.whisper.pulse("enc", Math.sin(p * Math.PI)),
@@ -375,7 +390,7 @@ export function installActions(tab) {
         duration: 7,
         caption: "Il decoder è causale come il GPT e consulta l'encoder con la cross-attention. Prima scrive i token speciali (inizio, lingua, compito, niente timestamp), poi il testo. Qui il testo è un esempio del formato.",
         enter: () => {
-          tab.focus("wText");
+          frame("whisperOut"); // decoder (che pulsa) e testo insieme
           tab.code("py:whisper.tokens", ["<|startoftranscript|>", "<|transcribe|>", "<|notimestamps|>"]);
           P.whisper.showTokens(0);
         },
@@ -395,7 +410,7 @@ export function installActions(tab) {
         duration: 5,
         caption: "Cambiando i token iniziali lo stesso modello trascrive, traduce verso l'inglese o riconosce la lingua. Whisper è stato addestrato su 680.000 ore di audio con trascrizioni prese dal web.",
         enter: () => {
-          tab.focus("whisperAll");
+          frame("whisperAll");
           tab.code("py:whisper.sot", ["sot_sequence.append"]);
         },
       },

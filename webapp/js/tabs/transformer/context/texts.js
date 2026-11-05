@@ -269,7 +269,7 @@ export function pathSteps(s) {
           title: "Il testo diventa token",
           text: blocked
             ? "<p>Nessuna tokenizzazione: la domanda è stata bloccata.</p>"
-            : `<p>Il transformer non legge lettere: legge una sequenza di numeri interi, i <b>token</b>. I modelli di OpenAI usano un tokenizzatore BPE (cl100k_base e successori), dove un token è spesso un pezzo di parola. Il nostro GPT usa invece un token per carattere (${"{{vocab_size}}"} caratteri).</p>` +
+            : `<p>Il transformer non legge lettere: legge una sequenza di numeri interi, i <b>token</b>. I modelli di OpenAI usano un tokenizzatore BPE (cl100k_base per GPT-4, o200k_base per i modelli più recenti come GPT-4o), dove un token è spesso un pezzo di parola. Il nostro GPT usa invece un token per carattere (${"{{vocab_size}}"} caratteri).</p>` +
               `<p>Il contesto di questa domanda è lungo circa <b>${it(s.prompt.tokens.total)} token</b> BPE (${it(s.prompt.text.length)} caratteri). Il nostro GPT ne legge al massimo {{block_size}}: per lui questa cartellina sarebbe enorme. Per GPT-4.1 OpenAI dichiara una finestra di contesto di 1 milione di token.</p>` +
               `<p class="hint">Stima: la libreria del corso approssima cl100k_base (stessa pre-tokenizzazione, pezzi da circa 4 lettere al posto del BPE vero).</p>`,
         },

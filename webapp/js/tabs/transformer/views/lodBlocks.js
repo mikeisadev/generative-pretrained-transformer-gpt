@@ -6,16 +6,22 @@
  * scritte molto più grandi, perché la camera è lontana: qui costruiamo il blocco piccolo
  * e poi lo ingrandiamo in modo uniforme (scala `s`), così il testo cresce con lui.
  *
- * `fitBlock` sceglie la scala più grande (fino a `maxScale`) per cui ogni parola del titolo,
- * il sottotitolo e la parola più lunga della descrizione entrano nella larghezza: niente
- * testo tagliato ai bordi. Le misure usano gli stessi font di makeBlock.
+ * `fitBlock` sceglie la scala più grande (fino a `maxScale`) per cui TUTTO il testo entra nel
+ * rettangolo: ogni parola del titolo e della descrizione nella larghezza, il sottotitolo su una
+ * riga e tutte le righe della descrizione nell'altezza (makeBlock altrimenti le taglierebbe in
+ * silenzio). La simulazione usa gli stessi font e le stesse proporzioni di makeBlock.
  */
 import * as THREE from "three";
 import { makeBlock } from "../../../core/diagram.js";
 
-const PX_PER_UNIT = 96; // come in core/diagram.js
-const TITLE_PX = 0.42 * PX_PER_UNIT;
-const PAD_PX = 0.08 * PX_PER_UNIT + 6;
+// Costanti di core/diagram.js (makeBlock): se cambiano là, vanno aggiornate qui.
+const PX_PER_UNIT = 96;
+const MAX_TEXTURE = 2048;
+const TITLE_FONT = (px) => `700 ${px}px Inter, system-ui, sans-serif`;
+const SUBTITLE_FONT = (px) => `500 ${px}px "JetBrains Mono", ui-monospace, monospace`;
+const BODY_FONT = (px) => `400 ${px}px Inter, system-ui, sans-serif`;
+const MIN_SCALE = 0.35;
+const SCALE_STEP = 0.94; // a ogni tentativo la scala scende del 6%
 
 let measureCtx = null;
 function textWidth(text, font) {
@@ -24,16 +30,43 @@ function textWidth(text, font) {
   return measureCtx.measureText(text).width;
 }
 
-/** Larghezza (in unità del blocco non scalato) necessaria per la riga/parola più larga. */
-function neededWidth({ title, subtitle = "", text = "" }) {
-  const longest = (s) => String(s).split(/\s+/).filter(Boolean);
-  const titleWords = String(title).split("\n").map((line) => line); // le righe del titolo non vanno spezzate a metà parola
-  const widths = [
-    ...titleWords.flatMap((line) => longest(line).map((w) => textWidth(w, `700 ${TITLE_PX}px Inter, system-ui, sans-serif`))),
-    subtitle ? textWidth(subtitle, `500 ${TITLE_PX * 0.62}px "JetBrains Mono", ui-monospace, monospace`) : 0,
-    ...longest(text).map((w) => textWidth(w, `400 ${TITLE_PX * 0.6}px Inter, system-ui, sans-serif`)),
-  ];
-  return (Math.max(...widths) + 2 * PAD_PX + 8) / PX_PER_UNIT;
+/** Numero di righe di `text` a capo come wrapLines di makeBlock, o Infinity se una parola non entra. */
+function lineCount(text, font, maxWidth) {
+  let lines = 0;
+  for (const paragraph of String(text).split("\n")) {
+    let line = "";
+    for (const word of paragraph.split(/\s+/)) {
+      if (textWidth(word, font) > maxWidth) return Infinity;
+      const test = line ? `${line} ${word}` : word;
+      if (line && textWidth(test, font) > maxWidth) {
+        lines++;
+        line = word;
+      } else line = test;
+    }
+    lines++;
+  }
+  return lines;
+}
+
+/** Il testo di un makeBlock grande `w`×`h` unità (non scalato) entra tutto? Stessa impaginazione di makeBlock. */
+export function textFits({ title, subtitle = "", text = "" }, w, h) {
+  const px = Math.min(PX_PER_UNIT, MAX_TEXTURE / Math.max(w, h));
+  const cw = Math.round(w * px);
+  const ch = Math.round(h * px);
+  const pad = 0.08 * px + 6;
+  const inner = cw - 2 * pad;
+  const titlePx = Math.max(14, Math.min(px * 0.42, ch * 0.2));
+  let y = pad + lineCount(title, TITLE_FONT(titlePx), inner) * titlePx * 1.15;
+  if (subtitle) {
+    if (textWidth(subtitle, SUBTITLE_FONT(titlePx * 0.62)) > inner) return false;
+    y += titlePx * 0.62 * 1.4 + 2;
+  }
+  if (text) {
+    const bodyPx = titlePx * 0.6;
+    const lines = lineCount(text, BODY_FONT(bodyPx), inner);
+    y += bodyPx * 0.3 + (lines - 1) * bodyPx * 1.3 + bodyPx; // fondo dell'ultima riga
+  }
+  return Number.isFinite(y) && y <= ch - pad;
 }
 
 /**
@@ -45,9 +78,8 @@ function neededWidth({ title, subtitle = "", text = "" }) {
  * @returns {THREE.Group} con userData.block, userData.scale, userData.face (il piano con il testo)
  */
 export function fitBlock({ width, height, maxScale = 3, depth = 0.2, bodyOpacity, ...rest }) {
-  const need = neededWidth(rest);
-  // Il titolo è alto al massimo il 20% del canvas: sotto 2,1 unità di altezza il testo rimpicciolisce.
-  const scale = Math.max(0.35, Math.min(maxScale, width / need, height / 2.1));
+  let scale = maxScale;
+  while (scale * SCALE_STEP >= MIN_SCALE && !textFits(rest, width / scale, height / scale)) scale *= SCALE_STEP;
   const group = makeBlock({ ...rest, width: width / scale, height: height / scale, depth: depth / scale });
   group.scale.setScalar(scale);
   const [body, face] = group.children;

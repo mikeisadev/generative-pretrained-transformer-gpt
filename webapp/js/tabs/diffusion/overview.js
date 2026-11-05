@@ -14,6 +14,7 @@ import { makeArrow, makeBlock } from "../../core/diagram.js";
 import { placeLabel } from "./shapes.js";
 
 export const VIDEO_Y = -66;
+const MACRO_SCALE = 1.5;
 
 /** Blocco di larghezza w e altezza h (unità di scena) con il testo ingrandito di S. */
 function block(group, spec, { x, y, w, h, S }) {
@@ -58,15 +59,19 @@ export function buildBlocks() {
   placeLabel(group, "z_0 alla fine", 29, -24.2, 0.4, { size: 2, color: "#7dd3fc" });
   placeLabel(group, "testo (cross-attention)", -39, 14.6, 0.4, { size: 2, color: "#c4b5fd" });
 
-  // video (sotto)
+  // video (sotto), nell'ordine della GENERAZIONE: il rumore nasce già nel latente spazio-temporale,
+  // il decoder del VAE 3D torna ai frame solo alla fine (l'encoder serve nel training)
   const vy = VIDEO_Y;
   const V = { h: 16, S };
-  block(group, { title: "Rumore 3D", subtitle: "spazio + tempo", text: "Un cubo di rumore: larghezza × altezza × tempo.", color: "#cbd5e1" }, { x: -66, y: vy, w: 22, ...V });
-  block(group, { title: "VAE 3D causale", subtitle: "comprime spazio e tempo", text: "HunyuanVideo: 8× spazio, 4× tempo, 16 canali.", color: "#7dd3fc" }, { x: -39, y: vy, w: 24, ...V });
-  block(group, { title: "Patch", subtitle: "spazio-temporali", text: "Cubetti del latente che diventano token.", color: "#22d3ee" }, { x: -12, y: vy, w: 22, ...V });
-  block(group, { title: "Transformer video", subtitle: "attention spazio + tempo", text: "Raffina tutti i frame insieme, per T passi.", color: "#fcd34d" }, { x: 16, y: vy, w: 26, ...V });
-  block(group, { title: "Video", subtitle: "frame coerenti", text: "VAE decoder 3D: dal latente ai frame.", color: "#e2e8f0" }, { x: 44, y: vy, w: 22, ...V });
-  for (const [a, b] of [[-54.6, -51.4], [-26.6, -23.4], [-0.6, 2.6], [29.4, 32.6]]) arrow(group, [[a, vy], [b, vy]]);
+  block(group, { title: "Rumore 3D", subtitle: "nel latente", text: "Un cubo di rumore: tempo × altezza × larghezza.", color: "#cbd5e1" }, { x: -66, y: vy, w: 22, ...V });
+  block(group, { title: "Patch", subtitle: "spazio-temporali", text: "Cubetti del latente che diventano token in fila.", color: "#22d3ee" }, { x: -39, y: vy, w: 22, ...V });
+  block(group, { title: "Transformer", subtitle: "attention spazio + tempo", text: "Raffina tutti i frame insieme, per T passi.", color: "#fcd34d" }, { x: -11, y: vy, w: 26, ...V });
+  block(group, { title: "VAE 3D decoder", subtitle: "latente → frame", text: "HunyuanVideo: 4× tempo, 8× spazio, 16 canali.", color: "#7dd3fc" }, { x: 17, y: vy, w: 22, ...V });
+  block(group, { title: "Video", subtitle: "frame coerenti", text: "Tutti i frame nascono insieme.", color: "#e2e8f0" }, { x: 44, y: vy, w: 22, ...V });
+  for (const [a, b] of [[-54.6, -50.4], [-27.6, -24.4], [2.4, 5.6], [28.4, 32.6]]) arrow(group, [[a, vy], [b, vy]]);
+  arrow(group, [[-11, vy + 13.5], [-11, vy + 8.6]], { color: 0xa78bfa });
+  placeLabel(group, "testo (T5, CLIP…)", -11, vy + 15.4, 0.4, { size: 2, color: "#c4b5fd" });
+  placeLabel(group, "Nel training l'encoder del VAE 3D comprime i video veri: il transformer impara in quello spazio.", -11, vy - 11.5, 0.4, { size: 1.7, color: "#94a3b8" });
   placeLabel(group, "Immagini", -66, 15, 0.4, { size: 3 });
   placeLabel(group, "Video", -66, vy + 12, 0.4, { size: 3 });
   return { group, unet, dit };
@@ -96,5 +101,8 @@ export function buildMacro() {
   arrow(group, [[32.5, vy], [55.5, vy]], { radius: 0.9, head: 5 });
   placeLabel(group, "Immagini", -84, 25, 0.6, { size: 6.5 });
   placeLabel(group, "Video", -84, vy + 25, 0.6, { size: 6.5 });
+  // La Panoramica compare oltre la soglia del livello Blocchi: ingrandita così, a quella distanza
+  // riempie lo schermo invece di occuparne metà.
+  group.scale.setScalar(MACRO_SCALE);
   return { group };
 }

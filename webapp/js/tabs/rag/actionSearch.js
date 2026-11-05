@@ -4,7 +4,11 @@
  * fotogramma per fotogramma; poi topK e soglia, prompt, ChatClient e streaming SSE.
  */
 import { shortId } from "./stationsAnswer.js";
+import { isFinished } from "./actionIndex.js";
 import { phase } from "./scene3d.js";
+
+/** Token della risposta aggiunti a ogni ridisegno della chat durante lo streaming. */
+const STREAM_BATCH = 3;
 
 /** Raggruppa i fotogrammi della ricerca per livello (dall'alto verso il livello 0). */
 function framesByLayer(frames) {
@@ -20,6 +24,7 @@ function framesByLayer(frames) {
 export function searchAction(tab) {
   let run = null;
   let answer = null;
+  let before = null; // stato della scena prima dell'azione: si ripristina se viene interrotta
 
   /** Stato di partenza di ogni passo: database pieno, stazioni della ricerca fino alla fase `stage`. */
   const baseline = (stage) => {
@@ -42,12 +47,16 @@ export function searchAction(tab) {
     category: "Ricerca",
     summary: "Embedding della domanda → ricerca HNSW (discesa e fascio) contro ricerca esatta → topK e soglia → prompt → LLM → streaming SSE.",
     onStart() {
+      before = tab.snapshot();
       tab.prepareAction();
       run = tab.currentSearch();
       answer = tab.answerFor(run);
     },
     onEnd() {
       tab.world.showSearch(run, answer);
+    },
+    onStop({ player }) {
+      if (!isFinished(player)) tab.restore(before);
     },
     build() {
       const { kb } = tab;
@@ -181,7 +190,11 @@ export function searchAction(tab) {
         },
         update: (p) => {
           tab.world.stations.llm.set("stream", p);
-          tab.world.stations.answer.set(run, answer, Math.round(phase(p, 0.05, 0.95) * answer.tokens.length));
+          // la chat si ridisegna a gruppi di STREAM_BATCH token: ogni ridisegno ricarica una texture
+          // grande, farlo a ogni token rallentava l'animazione senza rendere lo streaming più chiaro
+          const n = answer.tokens.length;
+          const shown = Math.min(n, Math.ceil((phase(p, 0.05, 0.95) * n) / STREAM_BATCH) * STREAM_BATCH);
+          tab.world.stations.answer.set(run, answer, shown);
         },
       });
       steps.push({

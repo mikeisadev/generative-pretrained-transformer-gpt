@@ -48,10 +48,3 @@ export function colormaps() {
   cache = { signed, attention, masked };
   return cache;
 }
-
-/** Colore CSS di un valore con segno in [-1, 1] (per i disegni su canvas). */
-export function signedCss(v) {
-  const { signed } = colormaps();
-  const q = Math.max(0, Math.min(255, Math.round(v * 127) + 128)) * 4;
-  return `rgb(${signed[q]},${signed[q + 1]},${signed[q + 2]})`;
-}

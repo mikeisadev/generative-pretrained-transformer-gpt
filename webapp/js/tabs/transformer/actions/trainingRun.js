@@ -10,7 +10,7 @@
  */
 import * as T from "./trainingBoards.js";
 import { TrainingData } from "./trainingData.js";
-import { lerpInto } from "./math.js";
+import { lerpInto, rateLimiter } from "./math.js";
 
 const SEGMENT_SECONDS = 5.2;
 const UPLOADS_PER_SECOND = 12;
@@ -71,16 +71,16 @@ export function createTrainingRunAction({ tab, stage, charts, data }) {
   function segment(r, a) {
     const sa = r.snapshots[a].step;
     const sb = r.snapshots[a + 1].step;
-    let lastUpload = -1;
-    let lastChart = -1;
+    const uploads = rateLimiter(UPLOADS_PER_SECOND);
+    const chartTicks = rateLimiter(CHART_UPDATES_PER_SECOND);
     return {
       title: `Step ${sa} → ${sb}`,
       caption: `Dallo step ${sa} allo step ${sb}: ${sb - sa} passi di AdamW. Le heatmap passano dallo snapshot ${sa} al ${sb} (valori intermedi interpolati); pattern di attention e probabilità sono quelli veri di ogni snapshot.`,
       duration: SEGMENT_SECONDS,
       enter: () => {
         base();
-        lastUpload = -1;
-        lastChart = -1;
+        uploads.reset();
+        chartTicks.reset();
         applyMix(r, a, 0);
         charts.fill(sa);
         charts.setSnapshotWeights(sa, r.views[a]);
@@ -88,23 +88,19 @@ export function createTrainingRunAction({ tab, stage, charts, data }) {
         stage.show(CAMERA[a % CAMERA.length], (board) => T.drawRunSegment(board, r, a, a + 1), { duration: 1.4 });
         tab.showCode("train", "train(): il ciclo completo", ["for step in range(train_cfg.max_iters)", "optimizer.step()"]);
       },
-      update: (p, dt, ctx) => {
+      update: (p) => {
         const step = Math.round(sa + (sb - sa) * p);
         // il pacchetto fa un giro per ogni "colpo d'occhio": forward e backward si ripetono di continuo
         const d = ((p * 3) % 1) * stage.length;
         stage.packetAt(d, stage.stationAt(d)?.id, { caption: false });
-        const upload = Math.floor(p * SEGMENT_SECONDS * UPLOADS_PER_SECOND);
-        if (upload !== lastUpload || p >= 1) {
-          lastUpload = upload;
+        const end = p >= 1;
+        if (uploads.ready(end)) {
           applyMix(r, a, p);
           const loss = r.trace.train_loss[Math.min(step, r.trace.train_loss.length - 1)];
           tab.setCaption(`Training: step ${step} di ${r.trace.train_config.max_iters} · loss del batch ${loss.toFixed(3).replace(".", ",")}`);
+          if (!end) return; // texture e grafici in frame diversi: niente picchi di lavoro in un solo frame
         }
-        const tick = Math.floor(p * SEGMENT_SECONDS * CHART_UPDATES_PER_SECOND);
-        if (tick !== lastChart || p >= 1) {
-          lastChart = tick;
-          charts.fill(step);
-        }
+        if (chartTicks.ready(end)) charts.fill(step);
       },
     };
   }
@@ -130,7 +126,7 @@ export function createTrainingRunAction({ tab, stage, charts, data }) {
     for (let a = 0; a < last; a++) list.push(segment(r, a));
     list.push({
       title: "Pesi finali",
-      caption: "Fine: 5000 step. Questi pesi coincidono con quelli del checkpoint usato da tutta la web app.",
+      caption: `Fine: ${r.trace.train_config.max_iters} step. Questi pesi coincidono (a meno dell'arrotondamento a 16 bit degli snapshot) con quelli del checkpoint usato da tutta la web app.`,
       duration: 6,
       enter: () => {
         base();
@@ -139,7 +135,7 @@ export function createTrainingRunAction({ tab, stage, charts, data }) {
         charts.setSnapshotWeights(r.snapshots[last].step, r.views[last]);
         stage.packetAt(stage.distanceOf("next_token"), "next_token");
         stage.show("prediction", (board) => T.drawRunEnd(board, r));
-        tab.setCaption("Training completato: 5000 step.");
+        tab.setCaption(`Training completato: ${r.trace.train_config.max_iters} step.`);
         tab.showCode("train", "train(): fine", ["return history"]);
       },
     });
@@ -157,13 +153,17 @@ export function createTrainingRunAction({ tab, stage, charts, data }) {
     category: "Training",
     summary: "La storia vera del training: heatmap dei pesi che cambiano, pattern di attention che emergono, testo generato a ogni snapshot e tutti i grafici.",
     async build(ctx) {
-      cleanup();
       await tab.views.activate("architettura");
       const r = await prepare();
+      if (ctx.isStale?.()) return [];
+      cleanup();
       r.mixViews = TrainingData.views(r.engine, r.mix);
       ctx.data.r = r;
-      tab.ui.charts?.open();
-      charts.reveal();
+      // i grafici si aprono da soli solo dove c'è spazio accanto alla scena (su un telefono la coprirebbero)
+      if (!window.matchMedia("(max-width: 900px)").matches) {
+        tab.ui.charts?.open();
+        charts.reveal();
+      }
       return steps(r);
     },
     onEnd: cleanup,

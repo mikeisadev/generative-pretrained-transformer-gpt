@@ -10,6 +10,8 @@ export function insideAction(tab) {
   const paintUNet = (pred) => recolor(pipeline.unet.mesh, (i, it) => (pred(it, i) ? it.color : dim));
   const paintDiT = (pred) => recolor(pipeline.dit.mesh, (i, it) => (pred(it, i) ? it.color : dim));
   const all = () => true;
+  /** I passi senza codice proprio tengono quello del passo precedente (stato deterministico). */
+  const withPreviousCode = (s, i, list) => ({ ...s, code: s.code ?? list.slice(0, i).findLast((p) => p.code).code });
 
   const unetSteps = () => {
     const { rowY, middleY, cross, tLines, skips } = pipeline.unet;
@@ -23,18 +25,19 @@ export function insideAction(tab) {
       { title: "ResNet block e passo t", caption: "I blocchi arancioni sono ResNet block: due convoluzioni con una scorciatoia. L'embedding del passo t viene sommato dentro ognuno: così la rete sa quanto rumore aspettarsi.", paint: (it) => it.kind === "res", lines: [false, true, false], code: ["ddpm_resnet", "DDPM: ResNet block con il passo t", ["temb_proj"]] },
       { title: "Encoder: si scende", caption: "A ogni livello la risoluzione si dimezza (64 → 32 → 16 → 8) e i canali crescono (320 → 640 → 1280): la rete passa dai dettagli alla composizione d'insieme.", paint: (it) => it.x < -1.7 && it.y > middleY + 1, lines: [false, false, false], code: ["sd_config", "channel_mult", ["channel_mult", "num_res_blocks"]] },
       { title: "Attention: self e cross", caption: "I blocchi viola sono transformer: self-attention tra le posizioni dell'immagine e cross-attention verso il testo (query dall'immagine, key e value dai 77 vettori del prompt).", paint: (it) => it.kind === "attn", lines: [true, false, false], code: ["sd_config", "attention_resolutions e context_dim", ["attention_resolutions", "context_dim: 768", "use_spatial_transformer"]] },
-      { title: "Il fondo della U", caption: "Al centro (8×8, 1280 canali) un ResNet, un'attention e un altro ResNet: qui ogni posizione 'vede' quasi tutta l'immagine.", paint: (it) => Math.abs(it.y - middleY) < 0.1, lines: [false, false, false] },
+      { title: "Il fondo della U", caption: "Al centro (8×8, 1280 canali) un ResNet, un'attention e un altro ResNet. Ogni posizione riassume una zona grande (64×64 pixel dell'immagine finale): qui si decide la composizione d'insieme.", paint: (it) => Math.abs(it.y - middleY) < 0.1, lines: [false, false, false] },
       { title: "Decoder e skip connection", caption: "Il decoder risale fino a 64×64. Le skip connection portano le feature dell'encoder dello stesso livello: i dettagli fini non vanno persi nel passaggio dal fondo.", paint: (it) => it.x > 1.7 && Math.abs(it.y - middleY) > 0.1, lines: [false, false, true] },
-      { title: "Uscita: il rumore previsto", caption: "L'ultima convoluzione torna a 4 canali: è ε̂, il rumore che la rete crede ci sia in z_t. Lo scheduler lo userà per fare un passo verso l'immagine.", paint: (it) => it.kind === "conv", lines: [false, false, false], focus: "eps" },
-    ].map((s) => ({
+      { title: "Uscita: il rumore previsto", caption: "L'ultima convoluzione torna a 4 canali: è ε̂, il rumore che la rete crede ci sia in z_t. Lo scheduler lo userà per fare un passo verso l'immagine.", paint: (it) => it.kind === "conv" && it.x > 0, lines: [false, false, false], focus: ["eps", "scheduler"], margin: 1.6 },
+    ].map(withPreviousCode).map((s) => ({
       title: s.title,
       caption: s.caption,
       duration: 4.5,
       enter() {
         paintUNet(s.paint);
-        lines(...(s.lines ?? [true, true, true]));
-        if (s.focus) tab.focus(s.focus, { margin: 1.3 });
-        if (s.code) tab.showCode(...s.code);
+        lines(...s.lines);
+        // ogni passo decide inquadratura e codice: così "passo indietro" ritrova lo stato giusto
+        tab.focus(s.focus ?? "unet", { margin: s.margin ?? 1.15, showFrame: false });
+        tab.showCode(...s.code);
       },
       exit() {
         paintUNet(all);
@@ -57,7 +60,7 @@ export function insideAction(tab) {
       duration: 4.5,
       enter() {
         paintDiT(s.paint);
-        if (s.code) tab.showCode(...s.code);
+        tab.showCode(...s.code);
       },
       exit() {
         paintDiT(all);
@@ -67,18 +70,19 @@ export function insideAction(tab) {
   return {
     id: "inside",
     title: "Un passo dentro il denoiser",
-    category: "Immagini",
+    category: "Generazione (prompt)",
     summary: "Cosa succede in UNA chiamata alla U-Net (o al DiT, se è la vista attiva): blocchi, passo t, testo.",
     onStart() {
       tab.lab.clear();
-      tab.lod.setMode("detail");
+      tab.lockLevel("detail");
       tab.focus(tab.denoiser === "dit" ? "dit" : "unet", { margin: 1.15, showFrame: false });
     },
     onStop() {
-      tab.lod.setMode("auto");
+      tab.lockLevel("auto");
+      tab.hideCode();
     },
     onEnd() {
-      tab.lod.setMode("auto");
+      tab.lockLevel("auto");
     },
     build: () => (tab.denoiser === "dit" ? ditSteps() : unetSteps()),
   };

@@ -49,7 +49,10 @@ export class Board {
     this.canvas = document.createElement("canvas");
     this.canvas.width = Math.round(width * scale);
     this.canvas.height = Math.round(height * scale);
-    this.ctx = this.canvas.getContext("2d");
+    // willReadFrequently: canvas in memoria di sistema. Il testo si disegna una volta e poi si copia
+    // nella texture: senza, il browser lo rasterizza sulla GPU e a ogni upload deve rileggerlo
+    // (con il rendering software un ridisegno costava circa il doppio).
+    this.ctx = this.canvas.getContext("2d", { willReadFrequently: true });
     this.W = this.canvas.width;
     this.H = this.canvas.height;
     this.texture = new THREE.CanvasTexture(this.canvas);

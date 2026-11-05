@@ -4,6 +4,9 @@
  *
  *   const panel = new CodePanel(tabRoot);
  *   panel.show({ title, file, startLine, code, language: "python", highlight: ["masked_fill"] });
+ *
+ * Il pulsante "▁" riduce il pannello alla sola intestazione; i tab possono farlo anche da codice
+ * con `panel.root.classList.add("minimized")` (es. sugli schermi stretti durante un'azione).
  */
 import hljs from "../../../vendor/highlight/core.min.js";
 import bash from "../../../vendor/highlight/bash.min.js";
@@ -24,7 +27,13 @@ export class CodePanel {
     this.code = el("code", { className: "hljs" });
     this.marks = el("div", { className: "code-marks" });
     this.scroller = el("div", { className: "code-scroll" }, this.gutter, el("div", { className: "code-area" }, this.marks, el("pre", {}, this.code)));
-    const toggle = el("button", { className: "icon-button", type: "button", ariaLabel: "Riduci o espandi il codice", onclick: () => this.root.classList.toggle("minimized") }, "▁");
+    // Se è lo studente a ridurre il pannello, show() rispetta la scelta (vedi show).
+    this.userMinimized = false;
+    const toggle = el(
+      "button",
+      { className: "icon-button", type: "button", ariaLabel: "Riduci o espandi il codice", onclick: () => (this.userMinimized = this.root.classList.toggle("minimized")) },
+      "▁",
+    );
     this.root = el("section", { className: "code-panel", ariaLabel: "Codice dello step" }, el("header", {}, el("div", {}, this.title, this.file), toggle), this.scroller);
     parent.append(this.root);
     this.listeners = new Set();
@@ -49,6 +58,7 @@ export class CodePanel {
    * @param {string[]} [s.highlight] le righe che contengono uno di questi testi vengono evidenziate
    */
   show({ title, file = "", startLine = 1, code, language = "python", highlight = [] }) {
+    if (this.root.hidden) this.userMinimized = false; // riaperto da capo: si parte espansi
     this.root.hidden = false;
     const lines = code.split("\n");
     this.title.textContent = title;
@@ -63,7 +73,9 @@ export class CodePanel {
     const first = lines.findIndex((line) => highlight.some((h) => line.includes(h)));
     const lineHeight = parseFloat(getComputedStyle(this.code).lineHeight) || 18;
     this.scroller.scrollTo({ top: first > 3 ? (first - 3) * lineHeight : 0, behavior: "smooth" });
-    this.root.classList.remove("minimized");
+    // Un pannello ridotto dal codice (es. durante un'azione sul telefono) si riapre al nuovo frammento;
+    // uno ridotto a mano dallo studente resta ridotto: l'intestazione mostra comunque il nuovo titolo.
+    if (!this.userMinimized) this.root.classList.remove("minimized");
   }
 
   hide() {

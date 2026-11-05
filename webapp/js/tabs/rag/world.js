@@ -22,6 +22,8 @@ export class World {
     this.stations = null;
     this.flow = null;
     this.kb = null;
+    /** Ricerca mostrata per intero ({run, answer}) oppure null. */
+    this.search = null;
     host.onFrame((dt) => this.flow?.userData.tick(dt));
   }
 
@@ -104,6 +106,7 @@ export class World {
     s.prompt.set(null);
     s.llm.set("idle");
     s.answer.set(null, null);
+    this.search = null;
   }
 
   /** Mostra il risultato completo di una ricerca (es. dopo la fine dell'azione o da un passo del percorso). */
@@ -116,5 +119,6 @@ export class World {
     s.prompt.set(run);
     s.llm.set("idle");
     s.answer.set(run, answer, answer.tokens.length);
+    this.search = { run, answer };
   }
 }

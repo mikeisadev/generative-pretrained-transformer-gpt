@@ -9,9 +9,10 @@
  *                     e agenti, Oltre il testo)
  *   plots.js          grafici; sim.js matematica pura (formule pubblicate e simulazioni dichiarate)
  *   content.js        percorso didattico, schede dei modelli, fonti; snippets.js codice vero
+ *   ourModel.js       numeri del nostro GPT (data/model.json) per i testi con segnaposto {{chiave}}
  */
 import * as THREE from "three";
-import { el, fmt, sleep } from "../../core/dom.js";
+import { el, fillTemplate, fmt, sleep } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
 import { LODController } from "../../core/lod.js";
 import { Menu } from "../../core/ui/menu.js";
@@ -22,6 +23,7 @@ import { reasoningActions } from "./actionsReasoning.js";
 import { trainingActions } from "./actionsTraining.js";
 import { MODEL_CARDS, PATH, SOURCES } from "./content.js";
 import { buildBlocks, buildMacro, macroBox } from "./overview.js";
+import { loadModel, modelVars } from "./ourModel.js";
 import { installPlots } from "./plots.js";
 import { buildAgent } from "./regionAgent.js";
 import { buildBpe } from "./regionBpe.js";
@@ -39,7 +41,7 @@ import { buildRope } from "./regionRope.js";
 import { buildScaling } from "./regionScaling.js";
 import { buildSpec } from "./regionSpec.js";
 import { buildTraining } from "./regionTraining.js";
-import { gridBox, REGION_BY_ID, REGIONS, ROWS, regionBox, regionCenter, regionShell } from "./regions.js";
+import { gridBox, REGION_BY_ID, REGION_H, REGION_W, REGIONS, ROWS, regionBox, regionCenter, regionShell } from "./regions.js";
 import { Snippets } from "./snippets.js";
 
 const BUILDERS = {
@@ -64,8 +66,20 @@ const BUILDERS = {
 const CATEGORIES = ["Architettura", "Addestramento", "Ragionamento e agenti", "Oltre il testo"];
 /** Schemi e testi si guardano quasi di fronte: il testo resta leggibile. */
 const FRONT = new THREE.Vector3(0, 0.06, 1).normalize();
-/** Durante un'azione la barra del player copre il fondo dello stage: si inquadra un po' più in basso. */
+/**
+ * Durante un'azione la barra del player copre il fondo dello stage: il riquadro da inquadrare si
+ * allunga verso il basso (in unità di scena). Sugli schermi stretti la barra occupa più spazio.
+ */
 const PLAYER_PAD = 9;
+const PLAYER_PAD_NARROW = 16;
+/** Soglie del LOD (distanza camera → punto guardato) pensate per uno stage più largo che alto. */
+const LOD_DETAIL_MAX = 74;
+const LOD_BLOCKS_MAX = 235;
+/**
+ * Schermo stretto: stessa soglia di core/ui/charts.js. Sotto i 900 px i pannelli non stanno accanto
+ * alla scena ma sopra (grafici a tutto schermo, codice in basso).
+ */
+const NARROW = window.matchMedia("(max-width: 899px)");
 
 export async function createTab(root, app) {
   const ui = createTabLayout(root, {
@@ -75,6 +89,9 @@ export async function createTab(root, app) {
     hint: "Segui il percorso o avvia un'azione. Rotellina: da vicino i componenti, più lontano un rettangolo per meccanismo, da lontanissimo la pipeline completa. Clic su una regione per avvicinarti.",
   });
   const { host, director, sidebar, codePanel, stage } = ui;
+  // numeri del nostro GPT per i testi (segnaposto {{chiave}}), dal model.json esportato
+  const model = await loadModel();
+  const vars = modelVars(model);
 
   // --- scena: Dettaglio (16 regioni), Blocchi, Panoramica
   const detail = new THREE.Group();
@@ -84,7 +101,7 @@ export async function createTab(root, app) {
     g.position.copy(regionCenter(region));
     g.userData.regionId = region.id;
     regionShell(g, region);
-    regions[region.id] = BUILDERS[region.id](g);
+    regions[region.id] = BUILDERS[region.id](g, vars);
     detail.add(g);
   }
   const blocks = buildBlocks();
@@ -95,8 +112,8 @@ export async function createTab(root, app) {
   let lod = null;
   lod = new LODController(host, {
     levels: [
-      { id: "detail", label: "Dettaglio", maxDistance: 74, group: detail },
-      { id: "blocks", label: "Blocchi", maxDistance: 235, group: blocks },
+      { id: "detail", label: "Dettaglio", maxDistance: LOD_DETAIL_MAX, group: detail },
+      { id: "blocks", label: "Blocchi", maxDistance: LOD_BLOCKS_MAX, group: blocks },
       { id: "macro", label: "Panoramica", maxDistance: Infinity, group: macro },
     ],
     widgetParent: stage,
@@ -104,6 +121,22 @@ export async function createTab(root, app) {
       if (lod && lod.mode !== "auto" && lod.mode === id) flyToLevel(id);
     },
   });
+
+  /**
+   * Su uno stage stretto (telefono in verticale, pannelli aperti) la camera deve allontanarsi di più
+   * per far stare in larghezza una regione: le soglie del LOD crescono nella stessa proporzione,
+   * così una regione inquadrata per intero resta al livello Dettaglio e la griglia al livello Blocchi.
+   */
+  const REF_ASPECT = REGION_W / REGION_H;
+  function scaleLodToStage() {
+    const k = Math.max(1, REF_ASPECT / host.visibleAspect());
+    lod.levels[0].maxDistance = LOD_DETAIL_MAX * k;
+    lod.levels[1].maxDistance = LOD_BLOCKS_MAX * k;
+  }
+  scaleLodToStage();
+  new ResizeObserver(scaleLodToStage).observe(stage);
+  ui.charts.onResize(scaleLodToStage);
+  codePanel.onResize(scaleLodToStage);
 
   /** Scelta manuale di un livello: la camera si porta a una distanza adatta. */
   function flyToLevel(id) {
@@ -132,6 +165,7 @@ export async function createTab(root, app) {
     app,
     ui,
     lod,
+    vars,
     regions,
     /** Inquadra una regione di fronte. `pad` in basso lascia spazio alla barra del player. */
     focusRegion(id, { bottomPad = 0, duration = 1.1 } = {}) {
@@ -150,11 +184,17 @@ export async function createTab(root, app) {
     prepare(id, { charts = null } = {}) {
       lod.setMode("auto");
       if (charts) tab.openCharts(charts);
-      return tab.focusRegion(id, { bottomPad: PLAYER_PAD });
+      return tab.focusRegion(id, { bottomPad: NARROW.matches ? PLAYER_PAD_NARROW : PLAYER_PAD });
     },
-    openCharts(sectionId) {
+    /**
+     * Apre i grafici su una sezione. Con `auto` (aperture decise da un'azione o dal percorso) lo fa
+     * solo se il pannello sta accanto alla scena: sugli schermi stretti la coprirebbe tutta e
+     * l'animazione non si vedrebbe più; lì i grafici si aprono con il pulsante «Grafici».
+     */
+    openCharts(sectionId, { auto = true } = {}) {
+      if (auto && NARROW.matches) return;
       ui.charts.open();
-      ui.charts.section(sectionId).root?.scrollIntoView({ block: "start", behavior: "smooth" });
+      if (sectionId) ui.charts.section(sectionId).root?.scrollIntoView({ block: "start", behavior: "smooth" });
     },
     /** Mostra uno snippet: chiave di snippets.js oppure un oggetto {title, file, code, language, highlight}. */
     showCode(keyOrSnippet) {
@@ -163,6 +203,8 @@ export async function createTab(root, app) {
         const s = typeof keyOrSnippet === "string" ? await snippets.get(keyOrSnippet) : keyOrSnippet;
         if (!s || request !== codeRequest) return;
         codePanel.show({ title: s.title, file: s.file, startLine: s.startLine ?? 1, code: s.code, language: s.language, highlight: s.highlight ?? [] });
+        // su schermo stretto il codice coprirebbe la scena: resta ridotto, si espande con il suo pulsante
+        if (NARROW.matches) codePanel.root.classList.add("minimized");
       })();
       return tab.codePending;
     },
@@ -188,6 +230,7 @@ export async function createTab(root, app) {
     ...step,
     children: step.children.map((item) => ({
       ...item,
+      text: item.text && fillTemplate(item.text, vars),
       extra: item.action ? () => el("button", { type: "button", className: "mllm-run", onclick: (e) => (e.stopPropagation(), ui.player.start(item.action)) }, "▶ Avvia l'animazione") : undefined,
     })),
   }));
@@ -204,7 +247,7 @@ export async function createTab(root, app) {
   });
 
   paneViews.append(renderViews(tab, director));
-  paneModels.append(await renderModels());
+  paneModels.append(renderModels(model));
   paneSources.append(renderSources());
 
   // --- moduli
@@ -293,18 +336,15 @@ function renderViews(tab, director) {
 }
 
 /** Pannello "Modelli": il nostro GPT (dal model.json esportato) e le schede dei modelli aperti. */
-async function renderModels() {
+function renderModels(model) {
   let ours = null;
-  try {
-    const model = await fetch(new URL("../../../data/model.json", import.meta.url)).then((r) => r.json());
+  if (model?.config) {
     const c = model.config;
     ours = {
       name: "Il nostro GPT (questa lezione)",
       who: "gpt/ · data/model.json",
       rows: [["parametri", fmt(model.total_params)], ["layer", String(c.n_layer)], ["head", `${c.n_head} (MHA, head da ${model.head_size})`], ["dimensione", String(c.n_embd)], ["MLP", `ReLU, ${4 * c.n_embd}`], ["norm", "LayerNorm"], ["posizioni", `apprese, ${c.block_size}`], ["vocabolario", `${c.vocab_size} caratteri`]],
     };
-  } catch {
-    ours = null;
   }
   const table = (card) =>
     el(

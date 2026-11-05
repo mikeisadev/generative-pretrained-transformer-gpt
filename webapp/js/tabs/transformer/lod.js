@@ -64,7 +64,8 @@ export function setBaseOpacity(material, opacity) {
 class FlowHighlight {
   constructor(parent, rects) {
     this.rects = rects;
-    this.outline = makeOutline(0x67e8f9);
+    this.color = new THREE.Color(0x67e8f9);
+    this.outline = makeOutline(this.color.getHex());
     this.outline.renderOrder = 5;
     parent.add(this.outline);
     this.current = null;
@@ -84,7 +85,8 @@ class FlowHighlight {
   }
 
   pulse(elapsed) {
-    if (this.outline.visible) this.outline.material.color.setScalar(0.65 + 0.35 * Math.sin(elapsed * 5));
+    // Pulsa la luminosità mantenendo la tinta (setScalar la renderebbe grigia).
+    if (this.outline.visible) this.outline.material.color.copy(this.color).multiplyScalar(0.65 + 0.35 * Math.sin(elapsed * 5));
   }
 }
 
@@ -225,6 +227,11 @@ function registerZoomAction(tab) {
   };
   const fly = (distance, target = center) => tab.ui.director.flyTo(target.clone().addScaledVector(dir, distance), target, 1.6);
 
+  // Se l'utente passa a un'altra vista durante l'animazione, l'animazione non ha più senso.
+  tab.events.addEventListener("view", (e) => {
+    if (e.detail !== "architettura" && ui.player.action?.id === "lod-zoom") ui.player.stop();
+  });
+
   ui.player.register({
     id: "lod-zoom",
     title: "Zoom semantico: dal dettaglio alla panoramica",
@@ -259,7 +266,7 @@ function registerZoomAction(tab) {
       {
         title: "Panoramica",
         duration: 5,
-        caption: `Ancora più lontano restano tre rettangoli: Input, Transformer (${spec.config.n_layer} blocchi, ${fmt(spec.total_params)} parametri in tutto) e Output, con le frecce del flusso.`,
+        caption: `Ancora più lontano restano tre rettangoli con le frecce del flusso: Input sotto, il Transformer (${spec.config.n_layer} blocchi uguali) al centro, Output sopra. In tutto ${fmt(spec.total_params)} parametri.`,
         enter: () => {
           lod.controller.setMode("macro");
           fly(185);

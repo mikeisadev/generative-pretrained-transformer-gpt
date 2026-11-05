@@ -4,7 +4,7 @@
  * Nessun numero inventato: tutto viene da `run` (motore JS con i pesi addestrati).
  */
 import { BOARD_H, BOARD_W, INK } from "./board.js";
-import { cumulative, visibleChar } from "./math.js";
+import { cumulative, scaledScores, visibleChar } from "./math.js";
 
 const PAD = 44;
 const fmt = (v, d = 3) => (Number.isFinite(v) ? v.toFixed(d).replace(".", ",") : v === -Infinity ? "−∞" : String(v));
@@ -131,7 +131,8 @@ export function drawScores(board, run, l, masked) {
   matrixGrid(
     board,
     y + 4,
-    tr.blocks[l].heads.map((h, i) => ({ values: h.scores, rows: tr.T, cols: tr.T, title: `head ${i}`, mask: masked, square: true, rowLabels: i % 2 === 0 ? contextLabels(run) : undefined })),
+    // punteggi di tutte le coppie (anche il futuro): la maschera li tratteggia solo nel passo successivo
+    tr.blocks[l].heads.map((h, i) => ({ values: scaledScores(h.q, h.k, tr.T, tr.headSize), rows: tr.T, cols: tr.T, title: `head ${i}`, mask: masked, square: true, rowLabels: i % 2 === 0 ? contextLabels(run) : undefined })),
     2,
   );
 }
@@ -272,7 +273,9 @@ export function drawWheel(board, run, k = 0, { title } = {}) {
   board.label("1", x0 + w, top + h + 10, { size: 26, color: INK.muted, align: "right" });
   board.label(`u = ${fmt(s.u, 4)}`, x0 + s.u * w, top - 46, { size: 30, weight: 700, color: INK.warm, align: "center", mono: true });
   // le prime voci della distribuzione, per leggere i numeri
-  const list = topIds(s.probs, 6);
+  // il token estratto è sempre nella lista, anche quando non è tra i più probabili
+  const likely = topIds(s.probs, 6);
+  const list = likely.includes(s.id) ? likely : [...likely.slice(0, 5), s.id];
   board.bars(PAD, top + h + 70, BOARD_W - 2 * PAD, BOARD_H - (top + h + 70) - 30, list.map((id) => ({ label: `«${visibleChar(run.vocab[id])}» id ${id}`, value: s.probs[id], highlight: id === s.id })), { min: 0, format: pct, labelWidth: 220 });
   return { x0, w, top, bottom: top + h, u: s.u };
 }

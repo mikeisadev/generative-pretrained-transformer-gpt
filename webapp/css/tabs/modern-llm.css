@@ -61,3 +61,18 @@
   left: calc(50% - 230px);
   width: min(720px, calc(100% - 492px));
 }
+
+/* Prestazioni: il pannello del codice è quasi opaco (--panel al 94%), quindi la sfocatura dello
+   sfondo non si vede, ma costringe a ricomporre e sfocare la scena WebGL a ogni frame
+   (misurato: circa +18 ms per frame con il rendering software). Qui la togliamo. */
+.tab-root[data-tab="modern-llm"] .code-panel { backdrop-filter: none; }
+
+/* Schermo stretto, azione in corso: la barra del player occupa il fondo dello stage, dove il nucleo
+   mette anche il pannello del codice. Il codice (che qui parte ridotto) sale sotto il selettore dello
+   zoom, così resta raggiungibile e si espande con il suo pulsante. */
+@media (max-width: 899px) {
+  .tab-root[data-tab="modern-llm"]:has(.player-bar:not([hidden])) .code-panel {
+    top: 112px;
+    bottom: auto;
+  }
+}

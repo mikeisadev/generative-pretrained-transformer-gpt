@@ -3,7 +3,7 @@
  *
  *   - colore dei neuroni = attivazione vera per il prompt e la posizione scelti (motore JS,
  *     engine.forward(ids, {trace: true}));
- *   - archi = i 207.552 pesi veri che collegano due neuroni (matrici + γ delle LayerNorm),
+ *   - archi = i pesi veri (207.552 nel modello del corso) che collegano due neuroni (matrici + γ delle LayerNorm),
  *     con una soglia "mostra solo i più forti" e la possibilità di vederli tutti;
  *   - attention = archi tratteggiati calcolati dal pattern vero: NON sono pesi appresi;
  *   - clic su un neurone → scheda nella sidebar con la formula e i numeri veri.
@@ -28,6 +28,8 @@ export function installNeuronsView(tab) {
   const { ui, spec, arch, flow } = tab;
   const { host, director } = ui;
   const info = createViewInfo(tab, "neuroni");
+  // Archi con peso = tutti i parametri tranne bias e β (che appartengono al neurone): vedi neuronModel.js.
+  const EDGE_COUNT = spec.params.filter((p) => !p.name.endsWith(".bias")).reduce((a, p) => a + p.numel, 0);
   const state = {
     active: false,
     layout: buildNeuronLayout(spec.config), // deterministico e leggero (4.387 posizioni): pronto subito
@@ -50,7 +52,7 @@ export function installNeuronsView(tab) {
   // ---------------------------------------------------------------- interfaccia nella sidebar
   const status = el("p", { className: "tf-status", ariaLive: "polite" });
   // textarea e non input: il prompt d'esempio contiene un a capo, che un <input> cancellerebbe.
-  const promptInput = el("textarea", { rows: 2, value: state.prompt, maxLength: spec.config.block_size, ariaLabel: "Prompt (al massimo 32 caratteri)", spellcheck: false });
+  const promptInput = el("textarea", { rows: 2, value: state.prompt, maxLength: spec.config.block_size, ariaLabel: `Prompt (al massimo ${spec.config.block_size} caratteri)`, spellcheck: false });
   const positions = el("div", { className: "tf-positions", role: "group", ariaLabel: "Posizione da visualizzare" });
   const fractionInput = el("input", { type: "range", min: 0, max: FRACTIONS.length - 1, step: 1, value: DEFAULT_FRACTION, ariaLabel: "Quota di archi da mostrare" });
   const fractionOut = el("output");
@@ -63,6 +65,7 @@ export function installNeuronsView(tab) {
 
   function renderInfo() {
     const C = spec.config.n_embd;
+    const hs = C / spec.config.n_head;
     info.replaceChildren(
       el("h3", {}, "Rete neurale: tutti i neuroni"),
       el("p", {}, "Qui lo stesso modello è disegnato come una rete neurale classica. Ogni pallino è un neurone: un singolo numero calcolato mentre il modello legge il prompt. Ogni linea è un peso: il numero appreso che dice quanto un neurone influenza il successivo."),
@@ -76,7 +79,7 @@ export function installNeuronsView(tab) {
         el("div", { className: "tf-row" }, el("label", {}, "Posizione t (il token di cui vedi i neuroni):")),
         positions,
         el("div", { className: "tf-row" }, el("label", {}, "Archi"), fractionInput, fractionOut),
-        el("div", { className: "tf-row" }, el("button", { type: "button", title: "207.552 linee: fluido con una scheda grafica, lento con il rendering software", onclick: () => setFraction(1, true) }, "Mostra tutti i pesi"), el("button", { type: "button", onclick: () => setFraction(FRACTIONS[DEFAULT_FRACTION], true) }, "Solo i più forti")),
+        el("div", { className: "tf-row" }, el("button", { type: "button", title: `${fmt(EDGE_COUNT)} linee: fluido con una scheda grafica, lento con il rendering software`, onclick: () => setFraction(1, true) }, "Mostra tutti i pesi"), el("button", { type: "button", onclick: () => setFraction(FRACTIONS[DEFAULT_FRACTION], true) }, "Solo i più forti")),
         status,
       ),
       el("button", { type: "button", className: "tf-start", onclick: () => ui.player?.start("neurons-forward") }, "▶ Animazione: un passaggio in avanti"),
@@ -98,7 +101,7 @@ export function installNeuronsView(tab) {
         el("p", { className: "hint" }, "w sono gli archi (pesi), b il bias del neurone, f la funzione di attivazione: ReLU nella feed-forward (f(z) = max(0, z)), nessuna (identità) nelle altre nn.Linear."),
         formula(String.raw`\text{LayerNorm: } y_j = \gamma_j\,\frac{x_j - \mu}{\sqrt{\sigma^2 + \varepsilon}} + \beta_j,\quad \mu = \tfrac{1}{${C}}\sum_i x_i`),
         el("p", { className: "hint" }, "Nella LayerNorm ogni neurone dipende da tutti gli ingressi solo attraverso media μ e varianza σ² (non apprese); i parametri sono γ (disegnato come arco uno a uno) e β (parametro del neurone). ε = 0,00001."),
-        formula(String.raw`\text{head}_h(t) = \sum_{s \le t} a_{t,s}\, v_s,\qquad a_{t,s} = \operatorname{softmax}_s\!\Big(\tfrac{q_t \cdot k_s}{\sqrt{16}}\Big)`),
+        formula(String.raw`\text{head}_h(t) = \sum_{s \le t} a_{t,s}\, v_s,\qquad a_{t,s} = \operatorname{softmax}_s\!\Big(\tfrac{q_t \cdot k_s}{\sqrt{${hs}}}\Big)\quad(\sqrt{${hs}}:\ \text{head\_size})`),
         el("p", { className: "hint" }, "I coefficienti a non sono pesi: si ricalcolano a ogni prompt confrontando query e key. Per questo l'attention è tratteggiata e cambia quando cambi prompt o posizione."),
       ),
       sources([
@@ -130,7 +133,7 @@ export function installNeuronsView(tab) {
     const e = state.engine;
     const key = e.weightsSource === "custom" ? Symbol("custom") : `${e.weightsSource}:${e.snapshotStep ?? ""}`;
     if (key !== state.edgesKey) {
-      status.textContent = "Costruisco i 207.552 archi dai pesi veri…";
+      status.textContent = `Costruisco i ${fmt(EDGE_COUNT)} archi dai pesi veri…`;
       await new Promise((r) => setTimeout(r, 0));
       state.edges = buildEdges(state.layout, (name) => e.paramViews.get(name).data);
       state.scene.setEdges(state.edges);
@@ -256,7 +259,7 @@ export function installNeuronsView(tab) {
   tab.views.register({
     id: "neuroni",
     label: "Rete neurale",
-    description: "Tutti i neuroni e i 207.552 pesi che li collegano; clic su un neurone per il suo calcolo.",
+    description: `Tutti i neuroni e i ${fmt(EDGE_COUNT)} pesi che li collegano; clic su un neurone per il suo calcolo.`,
     order: 20,
     enter: async () => {
       state.active = true;
@@ -286,10 +289,14 @@ export function installNeuronsView(tab) {
       canvas.addEventListener("pointerdown", onDown);
       canvas.addEventListener("pointerup", onUp);
       tab.setCaption("Rete neurale: avvicinati per vedere i neuroni, clicca un neurone per il suo calcolo.");
+      tab.showCode("model.forward", "Rete neurale: il forward che accende i neuroni", ["tok_emb =", "pos_emb =", "x = self.blocks(x)", "x = self.ln_f(x)", "logits = self.lm_head(x)"]);
       director.focus(state.scene.boxOf(["b0.x", "b0.resid2"]), { showFrame: false, margin: 1.5, direction: FRONT });
     },
     exit: () => {
       state.active = false;
+      // L'azione "passaggio in avanti" anima questa vista: lasciarla correre a vista nascosta
+      // muoverebbe la camera verso oggetti invisibili.
+      if (ui.player?.action?.id === "neurons-forward") ui.player.stop();
       info.hidden = true;
       setSceneVisible(false);
       state.offFrame?.();
@@ -358,7 +365,7 @@ function neuronCard(x, engine, state) {
       const top = x.terms.slice(0, 3).map((s) => `(${n(s.att)})(${n(s.v)})`).join(" + ");
       body.push(
         formula(String.raw`\begin{aligned} c &= \sum_{s=0}^{${state.t}} a_{${state.t},s}\, v_s[${x.d}] \\ &= ${top}${x.terms.length > 3 ? " + \\dots" : ""} \\ &= ${n(x.sum)} \end{aligned}`),
-        el("p", { className: "hint" }, `Head ${x.head}, componente ${x.d}. 0 parametri: i coefficienti a (che sommano a 1) vengono da softmax(q·k/√16) e cambiano con il prompt. Le posizioni guardate di più:`),
+        el("p", { className: "hint" }, `Head ${x.head}, componente ${x.d}. 0 parametri: i coefficienti a (che sommano a 1) vengono da softmax(q·k/√${state.layout.headSize}) e cambiano con il prompt. Le posizioni guardate di più:`),
         el(
           "table",
           { className: "tf-contrib" },
@@ -406,19 +413,19 @@ function contribTable(terms, inputName) {
 function registerForwardAction(tab, state, { ensureCharts }) {
   const { ui, spec } = tab;
   if (!ui.player) return;
-  const L = spec.config.n_layer;
+  const { n_layer: L, n_embd: C, n_head: H, vocab_size: V, block_size: T } = spec.config;
   const stepsDef = [
-    { cols: ["tok_onehot", "pos_onehot"], title: "Input one-hot", code: "model.forward", hl: ["B, T = idx.shape"], caption: "Input layer: per il carattere scelto si accende un solo neurone su 65, e uno solo dei 32 neuroni di posizione." },
-    { cols: ["tok_emb", "pos_emb", "x0"], title: "Embedding", code: "model.forward", hl: ["tok_emb =", "pos_emb =", "x = tok_emb + pos_emb"], caption: "Ogni neurone acceso sceglie una riga di pesi: il token dà 64 numeri, la posizione altri 64; sommati diventano il vettore x." },
-    { cols: ["b0.x", "b0.ln1"], title: "Blocco 0 · LayerNorm", code: "block", hl: ["self.ln1(x)"], caption: "LayerNorm: i 64 numeri vengono riportati a media 0 e varianza 1, poi scalati da γ e spostati da β." },
-    { cols: ["b0.qkv"], title: "Blocco 0 · query, key, value", code: "head", hl: ["k = self.key(x)", "q = self.query(x)", "v = self.value(x)"], caption: "Tre gruppi di 64 neuroni: query (cosa cerco), key (cosa offro), value (cosa passo). Ognuno è una somma pesata dei 64 ingressi, senza bias." },
+    { cols: ["tok_onehot", "pos_onehot"], title: "Input one-hot", code: "model.forward", hl: ["B, T = idx.shape"], caption: `Input layer: per il carattere scelto si accende un solo neurone su ${V}, e uno solo dei ${T} neuroni di posizione.` },
+    { cols: ["tok_emb", "pos_emb", "x0"], title: "Embedding", code: "model.forward", hl: ["tok_emb =", "pos_emb =", "x = tok_emb + pos_emb"], caption: `Ogni neurone acceso sceglie una riga di pesi: il token dà ${C} numeri, la posizione altri ${C}; sommati diventano il vettore x.` },
+    { cols: ["b0.x", "b0.ln1"], title: "Blocco 0 · LayerNorm", code: "block", hl: ["self.ln1(x)"], caption: `LayerNorm: i ${C} numeri vengono riportati a media 0 e varianza 1, poi scalati da γ e spostati da β.` },
+    { cols: ["b0.qkv"], title: "Blocco 0 · query, key, value", code: "head", hl: ["k = self.key(x)", "q = self.query(x)", "v = self.value(x)"], caption: `Tre gruppi di ${C} neuroni: query (cosa cerco), key (cosa offro), value (cosa passo). Ognuno è una somma pesata dei ${C} ingressi, senza bias.` },
     { cols: ["b0.ctx", "b0.concat"], title: "Blocco 0 · attention", code: "head", hl: ["wei = q @ k.transpose", "F.softmax", "return wei @ v"], caption: "Qui non ci sono pesi: le linee tratteggiate dicono quanto questo token guarda ogni token precedente, calcolato confrontando query e key." },
-    { cols: ["b0.proj", "b0.resid1"], title: "Blocco 0 · proiezione e residuo", code: "mha", hl: ["self.proj(out)"], caption: "La proiezione rimescola le 4 head; il risultato si somma al vettore di partenza (connessione residua)." },
-    { cols: ["b0.ln2", "b0.hidden"], title: "Blocco 0 · feed-forward (256 neuroni)", code: "ffwd", hl: ["nn.Linear(config.n_embd, hidden)", "nn.ReLU()"], caption: "Dopo una seconda LayerNorm, 256 neuroni nascosti: ognuno somma 64 ingressi pesati più un bias, poi la ReLU azzera i negativi." },
-    { cols: ["b0.ffnOut", "b0.resid2"], title: "Blocco 0 · uscita e residuo", code: "block", hl: ["x = x + self.ffwd(self.ln2(x))"], caption: "La seconda matrice riporta 256 numeri a 64; si sommano di nuovo al vettore: è l'uscita del blocco 0." },
+    { cols: ["b0.proj", "b0.resid1"], title: "Blocco 0 · proiezione e residuo", code: "mha", hl: ["self.proj(out)"], caption: `La proiezione rimescola le ${H} head; il risultato si somma al vettore di partenza (connessione residua).` },
+    { cols: ["b0.ln2", "b0.hidden"], title: `Blocco 0 · feed-forward (${4 * C} neuroni)`, code: "ffwd", hl: ["nn.Linear(config.n_embd, hidden)", "nn.ReLU()"], caption: `Dopo una seconda LayerNorm, ${4 * C} neuroni nascosti: ognuno somma ${C} ingressi pesati più un bias, poi la ReLU azzera i negativi.` },
+    { cols: ["b0.ffnOut", "b0.resid2"], title: "Blocco 0 · uscita e residuo", code: "block", hl: ["x = x + self.ffwd(self.ln2(x))"], caption: `La seconda matrice riporta ${4 * C} numeri a ${C}; si sommano di nuovo al vettore: è l'uscita del blocco 0.` },
     ...[...Array(L - 1).keys()].map((i) => ({ cols: rowCols(state, i + 1), title: `Blocco ${i + 1}`, code: "block", hl: ["x = x + self.sa", "x = x + self.ffwd"], caption: `Il blocco ${i + 1} ripete gli stessi calcoli con pesi diversi: LayerNorm, attention, feed-forward, residui.` })),
     { cols: ["out.x", "ln_f"], title: "LayerNorm finale", code: "model.forward", hl: ["x = self.ln_f(x)"], caption: "Ultima normalizzazione del vettore." },
-    { cols: ["logits"], title: "Output layer: logits", code: "model.forward", hl: ["logits = self.lm_head(x)"], caption: "65 neuroni di uscita, uno per carattere: ognuno somma 64 ingressi pesati più un bias." },
+    { cols: ["logits"], title: "Output layer: logits", code: "model.forward", hl: ["logits = self.lm_head(x)"], caption: `${V} neuroni di uscita, uno per carattere: ognuno somma ${C} ingressi pesati più un bias.` },
     { cols: ["probs"], title: "Softmax: probabilità", code: "generate", hl: ["softmax"], caption: "La softmax trasforma i punteggi in probabilità che sommano a 1: il neurone più chiaro è il carattere più probabile." },
   ];
   ui.player.register({

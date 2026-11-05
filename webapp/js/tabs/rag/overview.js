@@ -8,9 +8,9 @@
  * ingrandiamo con `scale` (S) così titolo e descrizione restano leggibili da lontano.
  */
 import * as THREE from "three";
-import { makeArrow, makeBlock } from "../../core/diagram.js";
+import { makeArrow } from "../../core/diagram.js";
 import { label } from "../../core/visuals.js";
-import { ROW_BOTTOM, ROW_TOP, STATIONS } from "./scene3d.js";
+import { ROW_BOTTOM, ROW_TOP, STATIONS, bigBlock } from "./scene3d.js";
 
 const PHASES = {
   upload: { subtitle: "React → Spring Boot", text: "Il PDF arriva al DocumentController di Spring Boot, che lo salva con un nome UUID.", color: "#4ade80" },
@@ -27,8 +27,7 @@ const PHASES = {
 };
 
 function scaledBlock(spec, { x, y, w, h, S }) {
-  const b = makeBlock({ ...spec, width: w / S, height: h / S });
-  b.scale.setScalar(S);
+  const b = bigBlock(spec, { w, h, S });
   b.position.set(x, y, 0);
   return b;
 }
@@ -41,7 +40,7 @@ function arrow(group, a, b, { color = 0x67e8f9, radius = 0.4, head = 2.4 } = {})
 export function buildBlocks() {
   const group = new THREE.Group();
   const S = 9;
-  const H = 24;
+  const H = 27; // con 24 le descrizioni più lunghe (Pulizia, LLM) perdevano l'ultima riga
   const ids = Object.keys(STATIONS);
   const boxes = {};
   for (const id of ids) {

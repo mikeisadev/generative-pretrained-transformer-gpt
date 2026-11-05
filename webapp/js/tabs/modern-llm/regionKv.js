@@ -42,7 +42,8 @@ export function buildKv(group) {
       if (textChanged) header.set(KV_TOKENS.map((tok, t) => ({ text: tok, fill: t < n ? (t === n - 1 ? "#155e75" : "#1e293b") : "#0f172a", stroke: t < n ? (t === n - 1 ? "#67e8f9" : "#475569") : "#1e293b", color: t < n ? "#f1f5f9" : "#334155" })));
       for (let t = 0; t < T; t++)
         for (let l = 0; l < LAYERS; l++)
-          for (const isV of [false, true]) {
+          for (let v = 0; v < 2; v++) {
+            const isV = v === 1;
             const i = idx(t, l, isV);
             if (t >= n) {
               cells.hide(i);

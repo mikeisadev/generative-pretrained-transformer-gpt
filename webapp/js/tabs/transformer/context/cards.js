@@ -8,7 +8,10 @@
  */
 import * as THREE from "three";
 
-const PX = 64; // pixel per unità di scena: 20 unità → 1280 px
+// Pixel per unità di scena: 20 unità → 960 px. Da vicino (Dettaglio) una scheda occupa ~20-40 px
+// per unità sullo schermo: 48 basta per un testo nitido e, rispetto a 64, quasi dimezza la memoria
+// delle texture e il costo di ogni ridisegno (upload + mipmap), che si sente durante lo streaming.
+const PX = 48;
 const FONT = "Inter, system-ui, sans-serif";
 const MONO = '"JetBrains Mono", ui-monospace, monospace';
 export const INK = { text: "#e2e8f0", muted: "#94a3b8", dim: "#64748b", ok: "#34d399", bad: "#f87171", panel: "rgba(15,23,42,0.94)", line: "#334155" };
@@ -28,6 +31,7 @@ export class Card {
     this.texture.anisotropy = 4;
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthWrite: false }));
     this.key = null;
+    this.drawnAt = -Infinity; // istante (secondi della scena) dell'ultimo ridisegno
   }
 
   /** Ridisegna solo se `key` (una stringa che riassume lo stato) è cambiata. */

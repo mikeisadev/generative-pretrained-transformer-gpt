@@ -8,6 +8,24 @@ import * as THREE from "three";
 
 const clamp255 = (x) => (x < 0 ? 0 : x > 255 ? 255 : x | 0);
 
+/**
+ * Colormap divergente condivisa (la stessa delle matrici di pesi): scuro = 0, arancione = positivo,
+ * blu = negativo. Scrive un pixel RGBA in `data` a partire da `o`; v è già normalizzato (|v| ≤ 1 utile).
+ */
+function writeDiverging(data, o, v) {
+  const m = Math.pow(Math.min(1, Math.abs(v)), 0.7);
+  if (v >= 0) {
+    data[o] = clamp255(22 + (251 - 22) * m);
+    data[o + 1] = clamp255(27 + (146 - 27) * m);
+    data[o + 2] = clamp255(34 + (60 - 34) * m);
+  } else {
+    data[o] = clamp255(22 + (59 - 22) * m);
+    data[o + 1] = clamp255(27 + (130 - 27) * m);
+    data[o + 2] = clamp255(34 + (246 - 34) * m);
+  }
+  data[o + 3] = 255;
+}
+
 function dataTexture(width, height, nearest) {
   const data = new Uint8Array(width * height * 4);
   const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
@@ -68,19 +86,7 @@ export class ChannelTexture {
     for (let j = 0; j < height; j++) {
       const row = (height - 1 - j) * width;
       for (let i = 0; i < width; i++) {
-        const v = tensor[channel * n + j * width + i] / range;
-        const m = Math.pow(Math.min(1, Math.abs(v)), 0.7);
-        const o = (row + i) * 4;
-        if (v >= 0) {
-          data[o] = clamp255(22 + (251 - 22) * m);
-          data[o + 1] = clamp255(27 + (146 - 27) * m);
-          data[o + 2] = clamp255(34 + (60 - 34) * m);
-        } else {
-          data[o] = clamp255(22 + (59 - 22) * m);
-          data[o + 1] = clamp255(27 + (130 - 27) * m);
-          data[o + 2] = clamp255(34 + (246 - 34) * m);
-        }
-        data[o + 3] = 255;
+        writeDiverging(data, (row + i) * 4, tensor[channel * n + j * width + i] / range);
       }
     }
     this.texture.needsUpdate = true;
@@ -97,14 +103,7 @@ export function matrixTexture(rows, cols, valueAt) {
   const { data, texture } = dataTexture(cols, rows, true);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const v = Math.max(-1, Math.min(1, valueAt(r, c)));
-      const m = Math.pow(Math.abs(v), 0.7);
-      const o = ((rows - 1 - r) * cols + c) * 4;
-      const tip = v >= 0 ? [251, 146, 60] : [59, 130, 246];
-      data[o] = clamp255(22 + (tip[0] - 22) * m);
-      data[o + 1] = clamp255(27 + (tip[1] - 27) * m);
-      data[o + 2] = clamp255(34 + (tip[2] - 34) * m);
-      data[o + 3] = 255;
+      writeDiverging(data, ((rows - 1 - r) * cols + c) * 4, valueAt(r, c));
     }
   }
   texture.needsUpdate = true;

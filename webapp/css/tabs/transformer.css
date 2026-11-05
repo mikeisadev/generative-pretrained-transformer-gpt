@@ -63,3 +63,12 @@
 .tf-contrib td.pos { color: #fdba74; }
 .tf-contrib td.neg { color: #93c5fd; }
 .tf-start { width: 100%; margin-top: 6px; }
+
+/* Telefono: il selettore dello zoom semantico andrebbe sotto i pulsanti "Vista d'insieme / Flusso / Grafici".
+   Lo spostiamo in una seconda riga, senza l'etichetta "Zoom:" (il pulsante attivo dice già il livello). */
+@media (max-width: 900px) {
+  .tab-root[data-tab="transformer"] .lod-switch { top: 52px; left: 12px; max-width: calc(100% - 24px); flex-wrap: wrap; }
+  .tab-root[data-tab="transformer"] .lod-switch .lod-title { display: none; }
+  /* A sidebar aperta (sul telefono copre lo stage) i comandi dello stage coprirebbero le sue linguette. */
+  .tab-root[data-tab="transformer"]:not(.sidebar-collapsed) :is(.lod-switch, .stage-toolbar) { display: none; }
+}
