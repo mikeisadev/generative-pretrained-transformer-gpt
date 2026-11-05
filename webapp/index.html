@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Anatomia dell'AI generativa</title>
+    <link rel="stylesheet" href="vendor/katex/katex.min.css" />
+    <link rel="stylesheet" href="vendor/highlight/github-dark.min.css" />
+    <link rel="stylesheet" href="css/core.css" />
+    <link rel="stylesheet" href="css/tabs/transformer.css" />
+    <link rel="stylesheet" href="css/tabs/transformer-actions.css" />
+    <link rel="stylesheet" href="css/tabs/transformer-context.css" />
+    <link rel="stylesheet" href="css/tabs/rag.css" />
+    <link rel="stylesheet" href="css/tabs/diffusion.css" />
+    <link rel="stylesheet" href="css/tabs/audio.css" />
+    <link rel="stylesheet" href="css/tabs/modern-llm.css" />
+    <!-- Librerie incluse nella repository (vendor/): la web app funziona anche senza internet. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/three.module.min.js",
+          "three/addons/": "./vendor/three/addons/"
+        }
+      }
+    </script>
+    <script type="module" src="js/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>Anatomia dell'AI generativa</strong>
+        <span class="muted">Lezione L20 · GPT didattico</span>
+      </div>
+      <nav class="tabbar" data-tabs aria-label="Sezioni"></nav>
+    </header>
+    <div id="app"></div>
+  </body>
+</html>

@@ -1,0 +1,78 @@
+/* Stili specifici del tab "LLM moderni". Prefisso: .mllm- */
+
+.mllm-note {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.08);
+  font-size: 13px;
+}
+
+/* Pulsante "Avvia l'animazione" dentro un passo del percorso */
+.mllm-run {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  border-color: var(--accent);
+  color: #e0f2fe;
+  background: rgba(56, 189, 248, 0.1);
+}
+.mllm-run:hover { background: rgba(56, 189, 248, 0.2); }
+
+/* Viste raggruppate per riga della griglia */
+.mllm-h3,
+.mllm-sources h3 {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 12px 0 2px;
+}
+
+/* Schede dei modelli */
+.mllm-models { display: grid; gap: 10px; }
+.mllm-model {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #0b1324;
+}
+.mllm-model.closed { border-style: dashed; }
+.mllm-model h3 { margin: 0; font-size: 14px; color: #e0f2fe; }
+.mllm-model .hint { margin: 2px 0 6px; }
+.mllm-model table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.mllm-model th { text-align: left; font-weight: 500; color: var(--muted); padding: 3px 8px 3px 0; vertical-align: top; width: 42%; }
+.mllm-model td { padding: 3px 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.mllm-model tr + tr th,
+.mllm-model tr + tr td { border-top: 1px solid rgba(51, 65, 85, 0.6); }
+
+/* Pannello Fonti */
+.mllm-sources ul { list-style: none; margin: 0; padding: 0; }
+.mllm-sources li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.mllm-sources a { color: #7dd3fc; text-decoration: none; font-weight: 600; }
+.mllm-sources a:hover { text-decoration: underline; }
+.mllm-sources .hint { margin: 3px 0 0; }
+
+/* Durante le azioni i controlli del player devono restare cliccabili anche con il pannello del codice aperto. */
+.tab-root[data-tab="modern-llm"] .player-bar { z-index: 16; }
+/* Con il pannello dei grafici aperto (460 px a destra) la barra si sposta a sinistra: i controlli
+   (compreso "chiudi") restano visibili. */
+.tab-root[data-tab="modern-llm"]:has(.charts-panel.open) .player-bar {
+  left: calc(50% - 230px);
+  width: min(720px, calc(100% - 492px));
+}
+
+/* Prestazioni: il pannello del codice è quasi opaco (--panel al 94%), quindi la sfocatura dello
+   sfondo non si vede, ma costringe a ricomporre e sfocare la scena WebGL a ogni frame
+   (misurato: circa +18 ms per frame con il rendering software). Qui la togliamo. */
+.tab-root[data-tab="modern-llm"] .code-panel { backdrop-filter: none; }
+
+/* Schermo stretto, azione in corso: la barra del player occupa il fondo dello stage, dove il nucleo
+   mette anche il pannello del codice. Il codice (che qui parte ridotto) sale sotto il selettore dello
+   zoom, così resta raggiungibile e si espande con il suo pulsante. */
+@media (max-width: 899px) {
+  .tab-root[data-tab="modern-llm"]:has(.player-bar:not([hidden])) .code-panel {
+    top: 112px;
+    bottom: auto;
+  }
+}

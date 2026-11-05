@@ -1,0 +1,74 @@
+/* Pannello "Azioni" del tab Transformer (js/tabs/transformer/actions/). Prefisso: .tfa- */
+
+.tfa-intro { margin: 4px 0 6px; color: var(--text); }
+
+.tfa .action-group.tfa-group {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px 12px 12px;
+  margin: 12px 0;
+  background: rgba(15, 23, 42, 0.55);
+}
+.tfa .tfa-group-prompt { border-left: 3px solid #38bdf8; }
+.tfa .tfa-group-training { border-left: 3px solid #f472b6; }
+.tfa .tfa-group h3 { font-size: 13px; color: var(--text); }
+.tfa-group-prompt h3 { color: #7dd3fc !important; }
+.tfa-group-training h3 { color: #f9a8d4 !important; }
+.tfa-lead { margin: 0 0 10px; font-size: 13px; color: #cbd5e1; }
+.tfa .action-card { background: rgba(2, 6, 23, 0.45); }
+.tfa .action-card button:disabled { opacity: 0.45; cursor: not-allowed; border-color: #334155; }
+
+.tfa-form { display: grid; gap: 8px; margin: 0 0 10px; }
+.tfa-row { display: flex; gap: 10px; }
+.tfa-row > .tfa-field { flex: 1; min-width: 0; }
+.tfa-field { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.tfa-field > span { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tfa-field output { color: var(--text); }
+.tfa-prompt {
+  width: 100%;
+  resize: vertical;
+  min-height: 110px;
+  font: 13px/1.45 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px;
+}
+.tfa-prompt:focus, .tfa-number:focus, .tfa-select:focus { outline: 2px solid rgba(56, 189, 248, 0.5); outline-offset: 1px; }
+.tfa-prompt.invalid { border-color: #f87171; }
+.tfa-number, .tfa-select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 5px 8px;
+  width: 100%;
+}
+.tfa-field input[type="range"] { width: 100%; accent-color: #38bdf8; }
+.tfa-small { font-size: 11.5px; padding: 1px 8px; color: var(--muted); }
+.tfa-message { margin: -2px 0 0; font-size: 12.5px; color: #86efac; }
+.tfa-message.error { color: #fca5a5; }
+
+.tfa-output { border: 1px solid #334155; border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: #0b1220; }
+.tfa-output strong { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.tfa-output-text { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5 "JetBrains Mono", ui-monospace, monospace; max-height: 260px; overflow: auto; }
+.tfa-out-prompt { color: #7dd3fc; }
+.tfa-out-generated { color: #fbbf24; background: rgba(180, 83, 9, 0.18); }
+
+.tfa .deep { margin-top: 8px; }
+.tfa-sources ul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; }
+.tfa-sources li { margin: 4px 0; }
+.tfa-sources a { color: #7dd3fc; }
+
+/* Controlli dentro il pannello dei grafici (scelta del blocco, scala log, tensore) */
+.tfa-chart-controls { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 12.5px; color: var(--muted); }
+.tfa-chart-controls label { display: flex; align-items: center; gap: 6px; }
+.tfa-chart-controls .tfa-select { width: auto; padding: 3px 6px; }
+
+/* Schermi stretti: durante un'azione il codice (ridotto) sta sopra la barra del player, non sotto. */
+@media (max-width: 900px) {
+  .tfa-playing .code-panel { bottom: calc(var(--tfa-player-h, 150px) + 52px); max-height: 32vh; }
+}

@@ -1,0 +1,7 @@
+# Versioni fissate, verificate con Python 3.13.
+# La stessa wheel di torch funziona su Linux (CPU o GPU CUDA) e su macOS (CPU e Apple Silicon/MPS).
+torch==2.15.0
+numpy==2.5.4  # evita il warning "Failed to initialize NumPy" di torch
+pytest==9.2.0
+# Il pacchetto locale `gpt`, installato in modalità modificabile:
+-e .

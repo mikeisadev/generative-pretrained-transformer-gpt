@@ -1,0 +1,67 @@
+/* Stili specifici del tab "Immagini e video" (diffusione). Prefisso: .diff- */
+
+.diff-note {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-left: 3px solid #a78bfa;
+  border-radius: 6px;
+  background: rgba(167, 139, 250, 0.08);
+  font-size: 13px;
+}
+.diff-sim {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border: 1px dashed #475569;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* Controlli della generazione nel pannello Azioni */
+.diff-controls {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0b1324;
+}
+.diff-controls h3 { margin: 0; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.diff-controls label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 8px; font-size: 13px; }
+.diff-controls input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.diff-controls output { font-variant-numeric: tabular-nums; color: #e0f2fe; font-weight: 600; }
+.diff-controls select,
+.diff-controls input[type="number"] {
+  font: inherit;
+  width: 90px;
+  color: var(--text);
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 4px 6px;
+}
+.diff-controls .hint { margin: 0; }
+
+/* Pannello Fonti */
+.diff-sources h3 { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin: 12px 0 6px; }
+.diff-sources ul { list-style: none; margin: 0; padding: 0; }
+.diff-sources li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.diff-sources a { color: #7dd3fc; text-decoration: none; font-weight: 600; }
+.diff-sources a:hover { text-decoration: underline; }
+.diff-sources .hint { margin: 3px 0 0; }
+
+/* Durante le azioni i controlli del player devono restare cliccabili anche se il pannello del
+   codice è aperto: in questo tab la barra sta sopra il pannello (vedi report: proposta per il nucleo). */
+.tab-root[data-tab="diffusion"] .player-bar { z-index: 16; }
+
+/* Schermi stretti: il selettore dello zoom va a capo sotto i pulsanti in alto, così il pulsante
+   "Grafici" non copre "Panoramica" (vedi report: proposta per il nucleo, vale per tutti i tab). */
+@media (max-width: 640px) {
+  .tab-root[data-tab="diffusion"] .lod-switch {
+    top: 56px;
+    left: 10px;
+    right: 10px;
+    flex-wrap: wrap;
+  }
+}

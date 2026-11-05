@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpt-didattico"
+version = "1.0.0"
+description = "Il GPT di 'Let's build GPT' (A. Karpathy) riorganizzato per la lezione L20"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.2"]
+
+[tool.setuptools.packages.find]
+include = ["gpt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: test più lenti (overfitting, training breve)"]
+
+[tool.ruff]
+line-length = 110

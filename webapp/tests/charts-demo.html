@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prova dei grafici</title>
+    <link rel="stylesheet" href="../css/core.css" />
+    <style>
+      /* Solo per questa pagina di prova: niente barra dei tab, lo stage occupa tutta la finestra. */
+      #app { inset: 0; }
+      .demo-controls { padding: 14px; display: grid; gap: 8px; align-content: start; overflow: auto; }
+      .demo-controls h1 { font-size: 16px; margin: 0 0 4px; }
+      .demo-controls p { margin: 0; }
+      .demo-stage-text { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div class="tab-root tab" id="tab">
+        <aside class="tab-sidebar demo-controls">
+          <h1>Prova dei grafici</h1>
+          <p class="hint">Dati finti, generati con un seme fisso. Serve a controllare a occhio e con Playwright tutti i tipi di grafico.</p>
+          <button type="button" data-action="toggle">Apri / chiudi il pannello</button>
+          <button type="button" data-action="stream">Simula un training (append continuo)</button>
+          <button type="button" data-action="big">Serie da 300.000 punti</button>
+          <button type="button" data-action="highlight">Sposta l'evidenziazione</button>
+          <button type="button" data-action="clear">Svuota la sezione "Robustezza"</button>
+          <p class="hint">coveredWidth(): <strong data-covered>0</strong> px</p>
+        </aside>
+        <main class="tab-stage"><div class="demo-stage-text">Qui ci sarebbe la scena 3D</div></main>
+      </div>
+    </div>
+    <script type="module">
+      import { ChartsPanel } from "../js/core/ui/charts.js";
+
+      // Generatore pseudo-casuale con seme (mulberry32): stessi dati a ogni caricamento → screenshot confrontabili.
+      function rng(seed) {
+        return () => {
+          seed |= 0;
+          seed = (seed + 0x6d2b79f5) | 0;
+          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+      const rand = rng(1337);
+      const gauss = () => Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand());
+      const lossAt = (step, offset) => 1.62 + offset + 2.6 * Math.exp(-step / 700) + 0.05 * gauss();
+
+      const tab = document.getElementById("tab");
+      const charts = new ChartsPanel(tab);
+      const covered = document.querySelector("[data-covered]");
+      charts.onResize(() => (covered.textContent = charts.coveredWidth()));
+
+      // --- Training -------------------------------------------------------------------------
+      const training = charts.section("training", "Training", "Come impara il modello, passo dopo passo.");
+      const train = [];
+      const val = [];
+      for (let s = 0; s <= 5000; s += 10) train.push([s, lossAt(s, 0)]);
+      for (let s = 0; s <= 5000; s += 250) val.push([s, lossAt(s, 0.16) - 0.04 * gauss()]);
+      const loss = training.chart("loss", {
+        type: "line",
+        title: "Loss di training e di validazione",
+        description: "A cosa serve: se la loss di validazione smette di scendere mentre quella di training scende ancora, il modello sta memorizzando invece di imparare.",
+        xLabel: "step",
+        yLabel: "cross-entropy",
+      });
+      loss.setData({ series: [{ name: "train", points: train }, { name: "val", points: val }] });
+      loss.setHighlight({ x: 2500 });
+
+      const lossLog = training.chart("loss-log", {
+        type: "line",
+        title: "La stessa loss in scala logaritmica",
+        description: "A cosa serve: la scala log allarga la parte finale, dove i miglioramenti sono piccoli ma contano.",
+        xLabel: "step",
+        yLabel: "cross-entropy (log)",
+        yScale: "log",
+      });
+      lossLog.setData({ series: [{ name: "train", points: train }] });
+
+      const live = training.chart("live", {
+        type: "line",
+        title: "Training in diretta",
+        description: "A cosa serve: mostra la curva mentre arriva, punto per punto (pulsante a sinistra).",
+        xLabel: "step",
+        yLabel: "loss",
+      });
+
+      // --- Predizione -----------------------------------------------------------------------
+      const prediction = charts.section("predizione", "Predizione", "Che cosa pensa il modello del prossimo carattere.");
+      const topk = prediction.chart("topk", {
+        type: "bar",
+        title: "Top-10 probabilità del prossimo carattere",
+        description: "A cosa serve: il campionamento sceglie tra queste barre; la barra evidenziata è il carattere estratto.",
+        yLabel: "probabilità",
+        percent: true,
+        highlightLabel: "estratto",
+      });
+      const chars = ["e", " ", "a", "o", "\n", "i", "t", "s", "r", ","];
+      const probs = [0.31, 0.22, 0.12, 0.09, 0.07, 0.06, 0.05, 0.04, 0.025, 0.015];
+      topk.setData({ labels: chars, values: probs, highlight: 1 });
+
+      // --- Pesi -----------------------------------------------------------------------------
+      const weights = charts.section("pesi", "Pesi", "Come sono distribuiti i numeri imparati.");
+      const w = new Float32Array(16384);
+      for (let i = 0; i < w.length; i++) w[i] = 0.02 * gauss();
+      const hist = weights.chart("hist", {
+        type: "histogram",
+        title: "Distribuzione dei pesi di una matrice",
+        description: "A cosa serve: pesi concentrati attorno allo zero e senza code enormi indicano un training stabile.",
+        xLabel: "valore del peso",
+      });
+      hist.setData({ values: w, bins: 40 });
+      hist.setHighlight({ x: 0, label: "zero" });
+
+      const T = 8;
+      const tokens = ["P", "r", "i", "m", "o", " ", "c", "i"];
+      const att = new Float32Array(T * T);
+      for (let q = 0; q < T; q++) {
+        let sum = 0;
+        for (let k = 0; k <= q; k++) sum += att[q * T + k] = Math.exp(2 * rand() + (k === q ? 1 : 0));
+        for (let k = 0; k <= q; k++) att[q * T + k] /= sum;
+      }
+      const attention = weights.chart("attention", {
+        type: "heatmap",
+        title: "Pattern di attention (testa 0, blocco 0)",
+        description: "A cosa serve: ogni riga è un token che guarda i precedenti; la maschera causale lascia vuoto il triangolo in alto.",
+        xLabel: "chiave (k)",
+        yLabel: "query (q)",
+      });
+      attention.setData({ rows: T, cols: T, values: att, rowLabels: tokens, colLabels: tokens, min: 0, max: 1 });
+      attention.setHighlight({ row: 5, col: 2 });
+
+      const R = 32;
+      const C = 64;
+      const mat = new Float32Array(R * C);
+      for (let i = 0; i < mat.length; i++) mat[i] = 0.1 * gauss() + 0.05 * Math.sin(i / 9);
+      weights.chart("matrix", {
+        type: "heatmap",
+        title: "Matrice dei pesi W_q (32 × 64)",
+        description: "A cosa serve: rosso = peso positivo, blu = negativo, grigio = vicino a zero.",
+        xLabel: "colonna",
+        yLabel: "riga",
+        diverging: true,
+      }).setData({ rows: R, cols: C, values: mat, diverging: true });
+
+      // --- Embedding ------------------------------------------------------------------------
+      const emb = charts.section("embedding", "Embedding", "I caratteri come punti in uno spazio.");
+      const vowels = "aeiou";
+      const points = [];
+      for (const ch of "abcdefghijklmnopqrstuvwxyz .,;:!?") {
+        const group = vowels.includes(ch) ? "vocali" : /[a-z]/.test(ch) ? "consonanti" : "punteggiatura";
+        const [cx, cy] = { vocali: [-1.2, 0.8], consonanti: [0.9, 0.2], punteggiatura: [-0.2, -1.3] }[group];
+        points.push({ x: cx + 0.45 * gauss(), y: cy + 0.45 * gauss(), label: ch, group });
+      }
+      const scatter = emb.chart("pca", {
+        type: "scatter",
+        title: "Embedding dei caratteri (PCA, 2 componenti)",
+        description: "A cosa serve: caratteri usati in modo simile finiscono vicini, anche se nessuno l'ha detto al modello.",
+        xLabel: "PC1",
+        yLabel: "PC2",
+      });
+      scatter.setData({ points });
+      scatter.setHighlight({ label: "e" });
+
+      // --- Robustezza ----------------------------------------------------------------------
+      const robust = charts.section("robustezza", "Robustezza", "Casi limite: dati vuoti, valori non validi, serie enormi.");
+      robust.chart("empty", { type: "line", title: "Grafico senza dati", description: "Deve mostrare lo stato di attesa." });
+      robust.chart("empty-heat", { type: "heatmap", title: "Heatmap senza dati", description: "Anche qui: in attesa." }).setData({ rows: 0, cols: 0, values: [] });
+      const nan = robust.chart("nan", { type: "line", title: "Serie con NaN e Infinity", description: "I valori non validi vengono ignorati e contati nella nota.", xLabel: "x" });
+      nan.setData({ series: [{ name: "dati", points: [[0, 1], [1, NaN], [2, 2], [3, Infinity], [4, 1.5], [NaN, 3], [5, 2.5]] }] });
+      robust.chart("nan-bar", { type: "bar", title: "Barre con un valore NaN", description: "La barra non valida resta vuota." }).setData({ labels: ["a", "b", "c", "d"], values: [3, NaN, 5, -1] });
+      const big = robust.chart("big", { type: "line", title: "Serie lunga (decimazione)", description: "Con centinaia di migliaia di punti si disegnano solo minimo e massimo per pixel.", xLabel: "indice" });
+
+      // --- Azioni della pagina --------------------------------------------------------------
+      let streamTimer = 0;
+      const actions = {
+        toggle: () => charts.toggle(),
+        stream() {
+          // ~600 punti al secondo, a gruppi di 10 ogni ~16 ms: il ridisegno resta uno per frame.
+          clearInterval(streamTimer);
+          live.clear();
+          let step = 0;
+          streamTimer = setInterval(() => {
+            for (let i = 0; i < 10; i++, step++) live.append("train", [step, lossAt(step, 0)]);
+            if (step % 250 === 0) live.append("val", [step, lossAt(step, 0.16)]);
+            live.setHighlight({ x: step });
+            if (step >= 5000) clearInterval(streamTimer);
+          }, 16);
+        },
+        big() {
+          const n = 300000;
+          const pts = new Array(n);
+          for (let i = 0; i < n; i++) pts[i] = [i, Math.sin(i / 4000) + 0.3 * gauss() + (i === 150000 ? 4 : 0)];
+          big.setData({ series: [{ name: "segnale", points: pts }] });
+        },
+        highlight() {
+          const i = Math.floor(rand() * chars.length);
+          topk.setHighlight({ index: i });
+          loss.setHighlight({ x: Math.round(rand() * 5000) });
+          attention.setHighlight({ row: 7, col: Math.floor(rand() * 8) });
+        },
+        clear: () => robust.clear(),
+      };
+      document.querySelectorAll("[data-action]").forEach((b) => b.addEventListener("click", () => actions[b.dataset.action]()));
+
+      // Agganci per i test automatici (Playwright).
+      window.demo = { charts, actions, loss, live, big, topk, hist, attention, scatter };
+      if (new URLSearchParams(location.search).has("open")) charts.open();
+    </script>
+  </body>
+</html>
