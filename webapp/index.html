@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Anatomia del transformer</title>
+    <link rel="stylesheet" href="vendor/katex/katex.min.css" />
+    <link rel="stylesheet" href="vendor/highlight/github-dark.min.css" />
+    <link rel="stylesheet" href="css/style.css" />
+    <!-- Librerie incluse nella repository (vendor/): la web app funziona anche senza internet. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three/three.module.min.js",
+          "three/addons/controls/OrbitControls.js": "./vendor/three/OrbitControls.js"
+        }
+      }
+    </script>
+    <script type="module" src="js/main.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <button class="icon-button" type="button" data-menu-toggle aria-label="Mostra o nascondi il menu">☰</button>
+      <div class="brand">
+        <strong>Anatomia del transformer</strong>
+        <span class="muted" data-hparams>caricamento…</span>
+      </div>
+      <div class="actions">
+        <span class="pill" data-source></span>
+        <button type="button" data-overview>Vista d'insieme</button>
+        <button type="button" data-play>⏸ Pausa flusso</button>
+      </div>
+    </header>
+
+    <aside id="menu" aria-label="Percorso della lezione">
+      <p class="menu-hint">Scegli uno step: la camera vola sul componente e a destra compare il codice. Frecce ↑ ↓ per avanzare.</p>
+      <nav id="menu-steps"></nav>
+      <p class="legend">
+        <span class="swatch pos"></span> peso positivo <span class="swatch neg"></span> peso negativo
+        <span class="swatch zero"></span> ≈ 0 · 1 cella = 1 peso
+      </p>
+    </aside>
+
+    <main id="scene"></main>
+
+    <section id="code-panel" aria-label="Codice Python dello step">
+      <header>
+        <div>
+          <strong data-code-title>Codice</strong>
+          <span class="muted mono" data-code-file></span>
+        </div>
+        <button class="icon-button" type="button" data-code-toggle aria-label="Riduci o espandi il codice">▁</button>
+      </header>
+      <div class="code-scroll">
+        <pre class="code-gutter" data-code-gutter></pre>
+        <div class="code-area">
+          <div class="code-marks" data-code-marks></div>
+          <pre><code class="hljs language-python" data-code-body></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <footer class="caption" data-caption aria-live="polite"></footer>
+  </body>
+</html>
