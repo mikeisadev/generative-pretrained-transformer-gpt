@@ -189,6 +189,12 @@ export async function createTab(root, app) {
   });
   root.tabIndex = -1;
 
+  // Altri tab possono chiedere una vista precisa (es. il tab RAG apre la vista "contesto").
+  app.bus.addEventListener("transformer:view", (e) => {
+    app.open("transformer");
+    tab.views.activate(e.detail);
+  });
+
   tab.menu.select("data.dataset");
   tab.focus("overview");
   window.__gptApp = tab; // utile per il debug dalla console e per i test automatici

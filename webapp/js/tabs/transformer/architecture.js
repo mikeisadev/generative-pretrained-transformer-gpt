@@ -18,11 +18,15 @@ const GAP = 0.9;
 const BAR_W = 0.12;
 
 /** Un vettore 1D (γ, β o bias) disegnato come barra verticale: (1, n) → (n, 1), stessi byte. */
-function vectorBar(tensor) {
+function vectorBar(spec, name) {
+  const tensor = spec.tensors[name];
+  if (!tensor) throw new Error(`tensore mancante nel JSON: ${name}`);
   const n = tensor.shape[1];
   const column = { ...tensor, shape: [n, 1] };
   const mesh = matrixPlane(weightTexture(column), n, 1);
   mesh.scale.x = BAR_W / CELL;
+  mesh.userData.tensorName = name;
+  mesh.userData.vector = true; // disegnato come colonna (n, 1): stessi byte di (1, n)
   return mesh;
 }
 
@@ -156,8 +160,8 @@ function buildBlock(spec, layout, layer) {
 
   // LayerNorm 1: γ e β
   const ln1 = new THREE.Group();
-  const g1 = vectorBar(spec.tensors[`${p}.ln1.weight`]);
-  const b1 = vectorBar(spec.tensors[`${p}.ln1.bias`]);
+  const g1 = vectorBar(spec, `${p}.ln1.weight`);
+  const b1 = vectorBar(spec, `${p}.ln1.bias`);
   b1.position.x = 0.22;
   ln1.add(g1, b1);
   withLabel(ln1, "ln1", "γ, β (64,)".replace("64", cfg.n_embd), cfg.n_embd * CELL, { size: 0.2 });
@@ -181,7 +185,7 @@ function buildBlock(spec, layout, layer) {
   // Proiezione
   const proj = new THREE.Group();
   const pw = matrix(spec, `${p}.sa.proj.weight`);
-  const pb = vectorBar(spec.tensors[`${p}.sa.proj.bias`]);
+  const pb = vectorBar(spec, `${p}.sa.proj.bias`);
   pb.position.x = (cfg.n_embd * CELL) / 2 + 0.2;
   proj.add(pw, pb);
   withLabel(proj, "proj", `${shape(spec.tensors[`${p}.sa.proj.weight`])} + bias`, cfg.n_embd * CELL, { size: 0.22 });
@@ -191,8 +195,8 @@ function buildBlock(spec, layout, layer) {
   sub(`${p}.add1`, add1, 0.56, `Blocco ${layer} · x = x + attention`);
 
   const ln2 = new THREE.Group();
-  const g2 = vectorBar(spec.tensors[`${p}.ln2.weight`]);
-  const b2 = vectorBar(spec.tensors[`${p}.ln2.bias`]);
+  const g2 = vectorBar(spec, `${p}.ln2.weight`);
+  const b2 = vectorBar(spec, `${p}.ln2.bias`);
   b2.position.x = 0.22;
   ln2.add(g2, b2);
   withLabel(ln2, "ln2", `γ, β (${cfg.n_embd},)`, cfg.n_embd * CELL, { size: 0.2 });
@@ -256,8 +260,8 @@ function residualArc(x0, x1, height) {
 function buildOutput(spec, layout) {
   const cfg = spec.config;
   const lnf = new THREE.Group();
-  const g = vectorBar(spec.tensors["ln_f.weight"]);
-  const b = vectorBar(spec.tensors["ln_f.bias"]);
+  const g = vectorBar(spec, "ln_f.weight");
+  const b = vectorBar(spec, "ln_f.bias");
   b.position.x = 0.22;
   lnf.add(g, b);
   withLabel(lnf, "ln_f", `γ, β (${cfg.n_embd},)`, cfg.n_embd * CELL, { size: 0.2 });
@@ -266,7 +270,7 @@ function buildOutput(spec, layout) {
   const head = new THREE.Group();
   const hwT = spec.tensors["lm_head.weight"];
   const hw = matrix(spec, "lm_head.weight");
-  const hb = vectorBar(spec.tensors["lm_head.bias"]);
+  const hb = vectorBar(spec, "lm_head.bias");
   hb.position.x = (hwT.shape[1] * CELL) / 2 + 0.2;
   head.add(hw, hb);
   withLabel(head, "lm_head", `${shape(hwT)} + bias`, hwT.shape[0] * CELL);
@@ -381,5 +385,14 @@ export function buildArchitecture(spec) {
     new THREE.MeshBasicMaterial({ color: 0x155e75 }),
   );
   rail.userData.isFrame = true; // non conta per l'inquadratura
-  return { root, rail, registry: layout.registry, stations: layout.stations, path };
+  // Ogni mesh di pesi è rintracciabile con il nome PyTorch del tensore (es. "blocks.0.ffwd.net.0.weight"):
+  // serve a chi aggiorna le heatmap (snapshot del training) o le evidenzia (vista Pesi).
+  const tensorMeshes = new Map();
+  root.traverse((o) => {
+    const name = o.userData?.tensorName;
+    if (!name) return;
+    if (!tensorMeshes.has(name)) tensorMeshes.set(name, []);
+    tensorMeshes.get(name).push(o);
+  });
+  return { root, rail, registry: layout.registry, stations: layout.stations, path, tensorMeshes };
 }
