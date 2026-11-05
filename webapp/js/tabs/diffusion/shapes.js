@@ -4,6 +4,7 @@
  */
 import * as THREE from "three";
 import { label } from "../../core/visuals.js";
+import { DynamicLabel } from "./textures.js";
 
 /** Palette del tab (coerente con il resto della web app). */
 export const PALETTE = {
@@ -104,12 +105,43 @@ export function lineSegments(pairs, color, { opacity = 0.6, maxSegments = pairs.
   return lines;
 }
 
+/** Testo su più righe ("\n"), tutte dello stesso colore (la prima in grassetto). */
+export function placeText(parent, text, x, y, z = 0, { height = 0.6, color = "#cbd5e1" } = {}) {
+  const l = new DynamicLabel(text, { height, color, sub: color });
+  l.sprite.position.set(x, y, z);
+  parent.add(l.sprite);
+  return l.sprite;
+}
+
 /** Etichetta sprite posizionata. */
 export function placeLabel(parent, text, x, y, z = 0, options = {}) {
   const sprite = label(text, options);
   sprite.position.set(x, y, z);
   parent.add(sprite);
   return sprite;
+}
+
+/**
+ * Riquadro da inquadrare: mesh (anche i proxy delle istanze) E etichette sprite, così i titoli
+ * non restano tagliati fuori. Ignora ciò che è marcato userData.noBounds (linee lunghe, istanze).
+ */
+export function framingBox(object) {
+  const box = new THREE.Box3();
+  const tmp = new THREE.Box3();
+  object.updateWorldMatrix(true, true);
+  object.traverseVisible((child) => {
+    if (child.userData.noBounds || child.userData.isFrame) return;
+    if (child.isSprite) {
+      const p = new THREE.Vector3().setFromMatrixPosition(child.matrixWorld);
+      const s = new THREE.Vector3().setFromMatrixScale(child.matrixWorld);
+      box.expandByPoint(p.clone().addScaledVector(s, 0.5)).expandByPoint(p.addScaledVector(s, -0.5));
+      return;
+    }
+    if (!child.isMesh || child.isInstancedMesh) return;
+    if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+    box.union(tmp.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld));
+  });
+  return box;
 }
 
 /** Libera geometrie, materiali e texture di un sottoalbero. */

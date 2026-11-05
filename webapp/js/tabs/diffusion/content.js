@@ -20,11 +20,6 @@ export const PATH = [
       {
         id: "idea.cosa",
         title: "Che cos'è un modello di diffusione",
-        focus: "image",
-        margin: 2.4,
-        code: "ddpm_qsample",
-        codeTitle: "DDPM: aggiungere rumore (processo diretto)",
-        highlight: ["sqrt_alphas_cumprod", "noise"],
         text: `<p>Immagina una goccia d'inchiostro in un bicchiere d'acqua: piano piano si <strong>diffonde</strong> finché l'acqua è tutta grigia. Il nome viene da lì (dalla fisica dei processi di diffusione).</p>
 <p>Un modello di diffusione impara a fare il film <strong>al contrario</strong>:</p>
 <ul><li>durante l'addestramento si prende un'immagine e la si copre di rumore, un po' alla volta, fino a renderla irriconoscibile;</li>

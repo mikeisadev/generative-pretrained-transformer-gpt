@@ -7,6 +7,7 @@
  */
 import * as THREE from "three";
 import { label } from "../../core/visuals.js";
+import { fmt } from "../../core/dom.js";
 import { CODEC } from "./codec.js";
 import { envelope, hannWindow, hzToMel } from "./dsp.js";
 import { SLOT } from "./layout3d.js";
@@ -19,7 +20,6 @@ function put(arr, i, x, y, z) {
   arr[i * 3 + 1] = y;
   arr[i * 3 + 2] = z;
 }
-const fmtIt = (n, d = 0) => Number(n).toLocaleString("it-IT", { maximumFractionDigits: d, minimumFractionDigits: d });
 
 /* ======================================================================== forma d'onda === */
 
@@ -34,12 +34,12 @@ export function buildAudio(lab, initialStyle) {
     new THREE.LineBasicMaterial({ color: 0x334155, transparent: true }),
   );
   group.add(axis, wave);
-  const title = label("Forma d'onda", { size: 0.55, sub: `${fmtIt(lab.sampleRate)} campioni al secondo` });
+  const title = label("Forma d'onda", { size: 0.55, sub: `${fmt(lab.sampleRate)} campioni al secondo` });
   title.position.set(0, h / 2 + 0.9, 0);
   group.add(title);
   const duration = lab.songs[initialStyle].duration;
   placeLabel(group, "0 s", -w / 2, -h / 2 - 0.25, 0, { size: 0.3, color: "#94a3b8" });
-  placeLabel(group, `${fmtIt(duration, 1)} s`, w / 2, -h / 2 - 0.25, 0, { size: 0.3, color: "#94a3b8" });
+  placeLabel(group, `${fmt(duration, 1)} s`, w / 2, -h / 2 - 0.25, 0, { size: 0.3, color: "#94a3b8" });
   placeLabel(group, "tempo →", 0, -h / 2 - 0.25, 0, { size: 0.3, color: "#94a3b8" });
 
   const playhead = new THREE.Mesh(new THREE.BoxGeometry(0.05, h - 0.4, 0.05), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
@@ -203,13 +203,17 @@ export function buildEncoder(lab, initialStyle) {
   const base = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.4, H + 0.4), new THREE.MeshBasicMaterial({ color: 0x0b1220, transparent: true, opacity: 0.9 }));
   base.position.z = -0.03;
   base.userData.isFrame = true;
-  group.add(base, surface);
+  // il "foglio" è inclinato all'indietro: il rilievo (intensità) si legge come un paesaggio
+  const plot = new THREE.Group();
+  plot.rotation.x = -0.5;
+  group.add(plot);
+  plot.add(base, surface);
 
   const slice = new THREE.Mesh(new THREE.BoxGeometry(w / T + 0.03, H + 0.3, Z + 0.3), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25, depthWrite: false }));
   slice.position.z = Z / 2;
   slice.visible = false;
   slice.userData.noBounds = true;
-  group.add(slice);
+  plot.add(slice);
 
   const titles = [
     label("Spettrogramma (STFT)", { size: 0.5, sub: "ampiezza · frequenze in Hz (asse lineare)" }),
@@ -222,11 +226,11 @@ export function buildEncoder(lab, initialStyle) {
     group.add(t);
   }
   const ticks = FREQ_TICKS.map((f) => {
-    const tag = label(f >= 1000 ? `${f / 1000} kHz` : `${f} Hz`, { size: 0.27, color: "#94a3b8" });
-    group.add(tag);
+    const tag = label(f >= 1000 ? `${f / 1000} kHz` : `${f} Hz`, { size: 0.3, color: "#cbd5e1" });
+    plot.add(tag);
     return { f, tag };
   });
-  placeLabel(group, "tempo →", 0, -H / 2 - 0.55, 0, { size: 0.3, color: "#94a3b8" });
+  placeLabel(plot, "tempo →", 0, -H / 2 - 0.55, 0, { size: 0.32, color: "#94a3b8" });
 
   let data = d0;
   let stage = 0;
@@ -248,6 +252,7 @@ export function buildEncoder(lab, initialStyle) {
         positions[i * 3 + 1] = yLin[r] + (yMel[r] - yLin[r]) * axis;
         positions[i * 3 + 2] = shown * Z;
         rampColor(shown, color);
+        color.setRGB(color.r, color.g, color.b, THREE.SRGBColorSpace); // la rampa è in sRGB, i vertex color sono lineari
         colors[i * 3] = color.r;
         colors[i * 3 + 1] = color.g;
         colors[i * 3 + 2] = color.b;
@@ -260,7 +265,7 @@ export function buildEncoder(lab, initialStyle) {
     for (const { f, tag } of ticks) {
       const lin = -H / 2 + (f / (lab.sampleRate / 2)) * H;
       const m = -H / 2 + (hzToMel(f) / melMax) * H;
-      tag.position.set(-w / 2 - 0.85, lin + (m - lin) * axis, 0);
+      tag.position.set(-w / 2 - 0.9, lin + (m - lin) * axis, 0);
     }
   }
   setStage(0);
@@ -311,14 +316,15 @@ export function buildRvq(lab, initialStyle, styleIds) {
     const bg = new THREE.Mesh(new THREE.PlaneGeometry(2 * P + 0.2, 2 * P + 0.2), new THREE.MeshBasicMaterial({ color: 0x0b1220, transparent: true, opacity: 0.9, depthWrite: false }));
     bg.position.z = -0.04;
     const edge = new THREE.LineSegments(new THREE.EdgesGeometry(bg.geometry), new THREE.LineBasicMaterial({ color: 0x334155, transparent: true }));
+    const clampP = (v) => Math.max(-P, Math.min(P, v)); // i pochi punti lontanissimi restano sul bordo
     const pts = new Float32Array((c.points.length / 2) * 3);
-    for (let i = 0; i < c.points.length / 2; i++) pts.set([(c.points[2 * i] / c.scale) * P, (c.points[2 * i + 1] / c.scale) * P, 0], i * 3);
+    for (let i = 0; i < c.points.length / 2; i++) pts.set([clampP((c.points[2 * i] / c.scale) * P), clampP((c.points[2 * i + 1] / c.scale) * P), 0], i * 3);
     const pointGeo = new THREE.BufferGeometry();
     pointGeo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
     const points = new THREE.Points(pointGeo, new THREE.PointsMaterial({ color: 0x64748b, size: 0.05, transparent: true, opacity: 0.8 }));
     const cents = new THREE.InstancedMesh(new THREE.SphereGeometry(0.075, 10, 8), new THREE.MeshBasicMaterial({ transparent: true }), lab.rvq.k);
     for (let i = 0; i < lab.rvq.k; i++) {
-      matrix.makeTranslation((c.centroids[2 * i] / c.scale) * P, (c.centroids[2 * i + 1] / c.scale) * P, 0.03);
+      matrix.makeTranslation(clampP((c.centroids[2 * i] / c.scale) * P), clampP((c.centroids[2 * i + 1] / c.scale) * P), 0.03);
       cents.setMatrixAt(i, matrix);
       cents.setColorAt(i, tokenColor(i, color));
     }
@@ -414,8 +420,8 @@ export function buildRvq(lab, initialStyle, styleIds) {
     const px = c.pts[idx * 3] + c.holder.position.x;
     const py = c.pts[idx * 3 + 1] + c.holder.position.y;
     const tok = codes[k * T + t];
-    const cx = (c.data.centroids[2 * tok] / c.data.scale) * P + c.holder.position.x;
-    const cy = (c.data.centroids[2 * tok + 1] / c.data.scale) * P + c.holder.position.y;
+    const cx = Math.max(-P, Math.min(P, (c.data.centroids[2 * tok] / c.data.scale) * P)) + c.holder.position.x;
+    const cy = Math.max(-P, Math.min(P, (c.data.centroids[2 * tok + 1] / c.data.scale) * P)) + c.holder.position.y;
     cursor.position.set(px, py, 0.1);
     ring.position.set(cx, cy, 0.1);
     ring.material.color.copy(tokenColor(tok, color));

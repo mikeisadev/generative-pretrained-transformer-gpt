@@ -20,10 +20,39 @@
  * @param {Float32Array|null} b bias [outDim] oppure null (le Q, K, V non hanno bias)
  */
 export function linear(y, x, W, b, inDim, outDim, first, rows) {
+  // Quattro uscite alla volta: ogni x[i] letto serve a quattro righe di W e le quattro somme
+  // sono indipendenti, così la CPU non aspetta ogni somma prima della successiva (circa
+  // il doppio più veloce del ciclo semplice). L'ordine delle somme di ogni uscita non cambia.
+  const blocked = outDim - (outDim % 4);
   for (let t = first; t < first + rows; t++) {
     const xOff = t * inDim;
     const yOff = t * outDim;
-    for (let o = 0; o < outDim; o++) {
+    let o = 0;
+    for (; o < blocked; o += 4) {
+      const w0 = o * inDim;
+      const w1 = w0 + inDim;
+      const w2 = w1 + inDim;
+      const w3 = w2 + inDim;
+      let a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+      for (let i = 0; i < inDim; i++) {
+        const xi = x[xOff + i];
+        a0 += xi * W[w0 + i];
+        a1 += xi * W[w1 + i];
+        a2 += xi * W[w2 + i];
+        a3 += xi * W[w3 + i];
+      }
+      if (b !== null) {
+        a0 += b[o];
+        a1 += b[o + 1];
+        a2 += b[o + 2];
+        a3 += b[o + 3];
+      }
+      y[yOff + o] = a0;
+      y[yOff + o + 1] = a1;
+      y[yOff + o + 2] = a2;
+      y[yOff + o + 3] = a3;
+    }
+    for (; o < outDim; o++) {
       const wOff = o * inDim;
       let acc = 0;
       for (let i = 0; i < inDim; i++) acc += x[xOff + i] * W[wOff + i];

@@ -14,7 +14,7 @@
  *   audioOut.js                  riproduzione con Web Audio
  */
 import * as THREE from "three";
-import { el } from "../../core/dom.js";
+import { el, fmt } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
 import { LODController } from "../../core/lod.js";
 import { Menu } from "../../core/ui/menu.js";
@@ -24,7 +24,7 @@ import { CODEC } from "./codec.js";
 import { SOURCES, STEPS } from "./content.js";
 import { createLab } from "./lab.js";
 import { buildLabPane } from "./labPane.js";
-import { LOD_DISTANCES, SCENE_OFFSET } from "./layout3d.js";
+import { FOCUS, LOD_DISTANCES, SCENE_OFFSET } from "./layout3d.js";
 import { createPlots } from "./plots.js";
 import { buildAudio, buildEncoder, buildRvq } from "./sceneCodec.js";
 import { buildConditioning, buildCrossAttention, buildDecoder, buildDelay, buildOutput, buildTransformer } from "./sceneGen.js";
@@ -32,14 +32,9 @@ import { buildBlocks, buildFlows, buildMacro } from "./sceneLod.js";
 import { buildWhisper } from "./sceneWhisper.js";
 import { showSnippet } from "./snippets.js";
 
-const fmtIt = (n, d = 0) => Number(n).toLocaleString("it-IT", { maximumFractionDigits: d, minimumFractionDigits: d });
 
-/** Oggetto "virtuale" da inquadrare: l'unione dei membri (vedi CameraDirector.focus). */
-function members(...objects) {
-  const o = new THREE.Object3D();
-  o.userData.members = objects.flat();
-  return o;
-}
+const FRONT = new THREE.Vector3(0, 0.08, 1).normalize();
+const SLIGHT = new THREE.Vector3(0.1, 0.12, 1).normalize();
 
 export async function createTab(root, app) {
   const ui = createTabLayout(root, {
@@ -101,31 +96,23 @@ export async function createTab(root, app) {
     widgetParent: stage,
   });
 
-  // registro degli oggetti da inquadrare
   const P = parts;
-  const registry = new Map([
-    ["audio", P.audio.group],
-    ["audio.lens", members(P.audio.lens, P.audio.group.children[1])],
-    ["encoder", P.encoder.group],
-    ["rvq", P.rvq.group],
-    ["transformer", P.transformer.group],
-    ["delay", P.delay.group],
-    ["delayCore", members(P.transformer.group, P.delay.group)],
-    ["genCore", members(P.cond.t5, P.transformer.group)],
-    ["conditioning", members(P.cond.text, P.cond.t5)],
-    ["t5", members(P.cond.text, P.cond.t5, P.transformer.group)],
-    ["decoder", members(P.decoder.group)],
-    ["decoderOut", members(P.decoder.group, P.output.group)],
-    ["output", P.output.group],
-    ["wMel", P.whisper.parts.wMel],
-    ["wEnc", members(P.whisper.parts.wEnc, P.whisper.parts.wDec)],
-    ["wDec", members(P.whisper.parts.wDec, P.whisper.parts.wText)],
-    ["whisperOut", members(P.whisper.parts.wDec, P.whisper.parts.wText)],
-    ["whisperAll", members(P.whisper.parts.wMel, P.whisper.parts.wText)],
-    ["overview", blocks.group],
-  ]);
+  // registro degli oggetti da inquadrare: rettangoli invisibili (mai disegnati) nella scena
+  const focusRoot = new THREE.Group();
+  sceneRoot.add(focusRoot);
+  const focusMaterial = new THREE.MeshBasicMaterial({ visible: false });
+  const registry = new Map(
+    Object.entries(FOCUS).map(([id, [x0, x1, y0, y1]]) => {
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), focusMaterial);
+      plane.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0);
+      focusRoot.add(plane);
+      return [id, plane];
+    }),
+  );
 
   const plots = createPlots(ui.charts, lab);
+  let pendingCode = Promise.resolve(); // pannello del codice in arrivo (vedi tab.focus)
+  let stageTarget = null; // stadio dello spettrogramma scelto dal menu, raggiunto con una transizione
   const out = new AudioOut();
 
   const tab = {
@@ -136,20 +123,32 @@ export async function createTab(root, app) {
     plots,
     state,
     lod,
-    focus(id, options = {}) {
+    /**
+     * Vola su un rettangolo del registro. Aspetta che il pannello del codice chiesto nello stesso
+     * passo sia comparso (cambia la parte visibile dello stage) e, se un'azione è in corso, lascia
+     * spazio in basso per la barra del player.
+     */
+    async focus(id, options = {}) {
       const target = registry.get(id);
-      if (!target) return Promise.resolve();
-      if (id === "overview") return director.focus(target, { showFrame: false, margin: 1.08, ...options });
-      return director.focus(target, { margin: 1.25, ...options });
+      if (!target) return;
+      await Promise.resolve(); // lascia a tab.code(), chiamato subito dopo, il tempo di registrarsi
+      await pendingCode;
+      const box = new THREE.Box3().setFromObject(target);
+      const h = box.max.y - box.min.y;
+      box.max.y += h * 0.14; // i titoli non finiscono sotto la barra degli strumenti
+      if (ui.player.action) box.min.y -= h * 0.42; // barra del player in basso
+      if (id === "overview") return director.focus(box, { showFrame: false, margin: 1.06, direction: FRONT, ...options });
+      return director.focus(box, { showFrame: false, margin: 1.15, direction: SLIGHT, ...options });
     },
     code(ref, highlight = [], title) {
-      return showSnippet(codePanel, ref, highlight, title);
+      pendingCode = showSnippet(codePanel, ref, highlight, title).catch(() => {});
+      return pendingCode;
     },
     setCaption(text) {
       ui.caption.textContent = text;
     },
     /** Riporta la scena allo stato di riposo (fine o interruzione di un'azione). */
-    resetScene({ keepStage = false, keepGeneration = false } = {}) {
+    resetScene({ keepStage = false } = {}) {
       P.audio.showLens(null);
       P.audio.setPlayhead(null);
       if (!keepStage) P.encoder.setStage(0);
@@ -165,7 +164,7 @@ export async function createTab(root, app) {
       P.decoder.pulse(0);
       P.whisper.revealMel(null);
       P.whisper.showTokens(8);
-      if (!keepGeneration) P.delay.show(state.gen, state.gen ? state.gen.steps.length - 1 : -1);
+      P.delay.show(state.gen, state.gen ? state.gen.steps.length - 1 : -1);
       plots?.specUpTo(lab.frames, true);
       plots?.errorUpTo(CODEC.levels);
       plots?.tokens(lab.codes[state.style], lab.frames);
@@ -183,7 +182,7 @@ export async function createTab(root, app) {
       if (state.gen !== gen) return;
       P.output.setAudio(audio, "ready");
       labPane.enableGenerated(true);
-      labPane.setStatus(`Brano generato (temperatura ${fmtIt(gen.options?.temperature ?? state.genOptions.temperature, 1)}, seme ${state.genOptions.seed}): premi «Generato».`);
+      labPane.setStatus(`Brano generato (temperatura ${fmt(state.genOptions.temperature, 1)}, seme ${state.genOptions.seed}): premi «Generato».`);
     },
     async showReconstruction(q) {
       const audio = await lab.reconstruct(state.style, q);
@@ -194,11 +193,11 @@ export async function createTab(root, app) {
       if (!lab.songs[id] || id === state.style) return;
       out.stop();
       state.style = id;
-      state.gen = null;
       for (const k of ["audio", "encoder", "rvq", "cond", "whisper"]) P[k].setStyle(id);
-      P.delay.show(null, -1);
       P.output.setAudio(null);
-      labPane.enableGenerated(false);
+      tab.runGeneration(state.genOptions);
+      P.delay.show(state.gen, state.gen.steps.length - 1);
+      tab.showGenerated(state.gen);
       labPane.selectStyle(id);
       plots?.setStyle(id);
       labPane.setStatus(`Brano scelto: "${lab.songs[id].style.prompt}".`);
@@ -213,24 +212,24 @@ export async function createTab(root, app) {
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Paper originali e codice ufficiale da cui vengono i numeri dei modelli reali." });
 
   const err = lab.relativeError();
-  const pct = (v) => `${fmtIt(v * 100, v < 0.01 ? 2 : 1)} %`;
+  const pct = (v) => `${fmt(v * 100, v < 0.01 ? 2 : 1)} %`;
   const vars = {
-    sampleRate: fmtIt(lab.sampleRate),
-    duration: fmtIt(lab.songs[state.style].duration, 1),
-    samples: fmtIt(lab.songs[state.style].samples.length),
-    nFft: fmtIt(CODEC.nFft),
-    hop: fmtIt(CODEC.hop),
-    frames: fmtIt(lab.frames),
-    bins: fmtIt(CODEC.bins),
+    sampleRate: fmt(lab.sampleRate),
+    duration: fmt(lab.songs[state.style].duration, 1),
+    samples: fmt(lab.songs[state.style].samples.length),
+    nFft: fmt(CODEC.nFft),
+    hop: fmt(CODEC.hop),
+    frames: fmt(lab.frames),
+    bins: fmt(CODEC.bins),
     mels: "64",
-    k: fmtIt(lab.rvq.k),
+    k: fmt(lab.rvq.k),
     err1: pct(err[1]),
     err4: pct(err[4]),
     err8: pct(err[8]),
-    frameRate: fmtIt(lab.frameRate),
-    bitrate4: fmtIt(lab.bitrate(4)),
-    pcmBitrate: fmtIt(lab.sampleRate * 16),
-    whisperFrames: fmtIt(lab.whisper(state.style).signalFrames),
+    frameRate: fmt(lab.frameRate),
+    bitrate4: fmt(lab.bitrate(4)),
+    pcmBitrate: fmt(lab.sampleRate * 16),
+    whisperFrames: fmt(lab.whisper(state.style).signalFrames),
   };
   panePath.append(el("p", { className: "audio-intro" }, "Il GPT della lezione genera caratteri. Qui vediamo come la stessa idea, il prossimo token, genera suono: prima bisogna trasformare l'audio in token e ritorno."));
   new Menu(panePath, STEPS, {
@@ -238,6 +237,7 @@ export async function createTab(root, app) {
     onSelect: (item) => {
       tab.focus(item.focus);
       tab.code(item.code, item.highlight ?? []);
+      if (item.stage !== undefined && !ui.player.action) stageTarget = item.stage;
     },
   });
   panePath.append(
@@ -336,6 +336,12 @@ export async function createTab(root, app) {
 
   host.onFrame((dt) => {
     flows.tick(dt);
+    if (stageTarget !== null && !ui.player.action) {
+      const s = P.encoder.stage;
+      const next = s + Math.sign(stageTarget - s) * Math.min(Math.abs(stageTarget - s), dt * 1.2);
+      P.encoder.setStage(next);
+      if (next === stageTarget) stageTarget = null;
+    }
     const t = out.position();
     if (t !== null && playheadTarget) {
       playheadTarget.setPlayhead(t);
@@ -352,9 +358,17 @@ export async function createTab(root, app) {
   });
 
   plots?.setStyle(state.style);
+  // una generazione di partenza: la scala del delay pattern e l'uscita non restano vuote
+  state.gen = lab.generate(state.style, state.genOptions);
   tab.resetScene();
-  tab.code("js:song.js#synthesize", ["addNote(out"], "Il brano: sintesi additiva (questo tab)");
-  tab.setCaption("Suono → token → suono: zooma su un componente per il dettaglio, allontanati per il diagramma a blocchi.");
+  setTimeout(() => tab.showGenerated(state.gen), 300);
+  const firstStep = state.gen.steps[1][0];
+  plots?.nextToken(firstStep.p, firstStep.token);
+  codePanel.hide(); // all'inizio la scena intera: il codice compare quando scegli un passo
+  const idleCaption = "Suono → token → suono: zooma su un componente per il dettaglio, allontanati per il diagramma a blocchi.";
+  tab.setCaption(idleCaption);
+  // durante un'azione parla la barra del player: la didascalia di base si toglie
+  ui.player.on("state", () => tab.setCaption(ui.player.action ? "" : idleCaption));
   tab.focus("overview", { duration: 0.01 });
   window.__audioTab = tab; // per il debug dalla console e per i test automatici
 

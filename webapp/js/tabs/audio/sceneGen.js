@@ -181,25 +181,28 @@ export function buildDelay(lab) {
 
   // lente: colonne = passi di generazione, righe = codebook; la cella (k, s) è il frame s − k
   const lens = canvasPanel(w, 5.2, (ctx, cw, ch) => {
-    const padL = 150;
-    const top = 70;
+    const padL = 200;
+    const top = 80;
     const cellW = (cw - padL - 8) / LENS_STEPS;
     const cellH = (ch - top - 54) / Q;
     ctx.textBaseline = "middle";
-    ctx.font = "600 22px Inter, system-ui, sans-serif";
+    ctx.font = "600 30px Inter, system-ui, sans-serif";
     ctx.fillStyle = "#94a3b8";
     ctx.textAlign = "left";
-    ctx.fillText("passo", 8, top - 22);
+    ctx.fillText("passo", 8, top - 28);
     for (let i = 0; i < LENS_STEPS; i++) {
       const s = state.start + i;
       ctx.textAlign = "center";
       ctx.fillStyle = s === state.step ? "#ffffff" : "#94a3b8";
-      ctx.fillText(String(s), padL + (i + 0.5) * cellW, top - 22);
+      ctx.fillText(String(s), padL + (i + 0.5) * cellW, top - 28);
     }
     for (let k = 0; k < Q; k++) {
       ctx.textAlign = "left";
       ctx.fillStyle = CB_CSS[k];
-      ctx.fillText(`cb ${k + 1} (ritardo ${k})`, 8, top + (k + 0.5) * cellH);
+      ctx.fillText(`cb ${k + 1}`, 8, top + (k + 0.5) * cellH - 16);
+      ctx.font = "500 24px Inter, system-ui, sans-serif";
+      ctx.fillText(`ritardo ${k}`, 8, top + (k + 0.5) * cellH + 16);
+      ctx.font = "600 30px Inter, system-ui, sans-serif";
       for (let i = 0; i < LENS_STEPS; i++) {
         const s = state.start + i;
         const frame = s - k;
@@ -220,11 +223,11 @@ export function buildDelay(lab) {
         ctx.fill();
         ctx.fillStyle = special ? "#cbd5e1" : "#0b1220";
         ctx.textAlign = "center";
-        ctx.font = "700 22px 'JetBrains Mono', ui-monospace, monospace";
-        ctx.fillText(special ? "S" : String(tok), x + (cellW - 6) / 2, y + (cellH - 6) / 2 - 7);
-        ctx.font = "500 15px Inter, system-ui, sans-serif";
-        ctx.fillText(special ? "" : `f${frame}`, x + (cellW - 6) / 2, y + (cellH - 6) / 2 + 15);
-        ctx.font = "600 22px Inter, system-ui, sans-serif";
+        ctx.font = "700 30px 'JetBrains Mono', ui-monospace, monospace";
+        ctx.fillText(special ? "S" : String(tok), x + (cellW - 6) / 2, y + (cellH - 6) / 2 - 9);
+        ctx.font = "600 19px Inter, system-ui, sans-serif";
+        ctx.fillText(special ? "" : `f${frame}`, x + (cellW - 6) / 2, y + (cellH - 6) / 2 + 19);
+        ctx.font = "600 30px Inter, system-ui, sans-serif";
       }
     }
     if (state.step >= state.start && state.step < state.start + LENS_STEPS) {
@@ -235,8 +238,8 @@ export function buildDelay(lab) {
     }
     ctx.textAlign = "left";
     ctx.fillStyle = "#cbd5e1";
-    ctx.font = "500 21px Inter, system-ui, sans-serif";
-    ctx.fillText("Ogni colonna è un passo: il codebook k scrive il frame (passo − k). S = token speciale.", 8, ch - 24);
+    ctx.font = "500 27px Inter, system-ui, sans-serif";
+    ctx.fillText("Ogni colonna è un passo: il codebook k scrive il frame f = passo − k. S = token speciale.", 8, ch - 26);
   });
   lens.position.set(0, 1.9, 0);
   group.add(lens);

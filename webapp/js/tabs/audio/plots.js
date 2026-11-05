@@ -9,6 +9,8 @@ import { DISPLAY_MELS } from "./lab.js";
 
 const MEL_SHOWN = [2, 10, 18, 26, 34, 42, 50, 58]; // 8 filtri su 64: uno per colore della palette
 const fmtHz = (f) => (f >= 1000 ? `${(f / 1000).toLocaleString("it-IT", { maximumFractionDigits: 1 })} kHz` : `${Math.round(f)} Hz`);
+/** Etichetta corta per le righe delle heatmap (c'è poco spazio a sinistra). */
+const shortHz = (f) => (f >= 1000 ? `${(f / 1000).toLocaleString("it-IT", { maximumFractionDigits: 1 })}k` : `${Math.round(f)}`);
 
 export function createPlots(charts, lab) {
   if (!charts) return null;
@@ -84,7 +86,7 @@ export function createPlots(charts, lab) {
       points: Array.from({ length: fb.bins }, (_, k) => [k * binHz, fb.weights[m * fb.bins + k] * 1000]).filter(([, v], k, arr) => v > 0 || (arr[k + 1] && arr[k + 1][1] > 0) || (arr[k - 1] && arr[k - 1][1] > 0)),
     })),
   });
-  const rowLabels = Array.from({ length: DISPLAY_MELS }, (_, i) => fmtHz(fb.centers[DISPLAY_MELS - 1 - i]));
+  const rowLabels = Array.from({ length: DISPLAY_MELS }, (_, i) => shortHz(fb.centers[DISPLAY_MELS - 1 - i]));
   const specValues = new Float32Array(DISPLAY_MELS * T);
   let specStyle = null;
   let specShown = -1;
@@ -114,11 +116,11 @@ export function createPlots(charts, lab) {
         const x = (c / 479) * dur;
         points.push([x, env[2 * c]], [x, env[2 * c + 1]]);
       }
-      wave.setData({ series: [{ name: "campioni (min e max ogni 10 ms)", points }] });
+      wave.setData({ series: [{ name: "campioni", points }] });
       specStyle = id;
       drawSpec(id, T);
       this.tokens(lab.codes[id], T);
-      err.setData({ series: [{ name: "codec giocattolo", points: errPoints(CODEC.levels) }] });
+      err.setData({ series: [{ name: "errore", points: errPoints(CODEC.levels) }] });
       const lm = lab.whisper(id);
       const rows = WHISPER.nMels;
       const cols = WHISPER.nFrames;
@@ -139,7 +141,7 @@ export function createPlots(charts, lab) {
     },
     /** Errore con i primi `levels` codebook; evidenzia `q`. */
     errorUpTo(levels, q = null) {
-      err.setData({ series: [{ name: "codec giocattolo", points: errPoints(levels) }] });
+      err.setData({ series: [{ name: "errore", points: errPoints(levels) }] });
       err.setHighlight(q ? { x: q } : null);
     },
     /** Conteggio dei token del codebook 1 nei primi n frame. */

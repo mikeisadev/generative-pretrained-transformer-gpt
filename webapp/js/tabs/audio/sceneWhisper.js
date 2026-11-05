@@ -31,6 +31,10 @@ export function buildWhisper(lab, initialStyle) {
   veil.position.set(SLOT.wMel.x, SLOT.wMel.y, 0.02);
   veil.userData.noBounds = true;
   veil.visible = false;
+  // bordo dei 30 secondi: la parte di solo silenzio è scura come lo sfondo, il bordo la rende visibile
+  const melEdge = new THREE.LineSegments(new THREE.EdgesGeometry(mel.geometry), new THREE.LineBasicMaterial({ color: 0x64748b, transparent: true }));
+  melEdge.position.copy(mel.position);
+  group.add(melEdge);
   const melTitle = label("log-Mel di Whisper", { size: 0.5, sub: "30 s = 3000 frame × 80 bande, calcolato qui" });
   melTitle.position.set(SLOT.wMel.x, SLOT.wMel.y + MH / 2 + 1, 0);
   group.add(mel, veil, melTitle);
@@ -125,29 +129,30 @@ export function buildWhisper(lab, initialStyle) {
   // --- token d'uscita
   const tstate = { shown: WHISPER_TOKENS.length };
   const text = canvasPanel(SLOT.wText.w, SLOT.wText.h, (ctx, cw, ch) => {
-    ctx.font = "600 26px 'JetBrains Mono', ui-monospace, monospace";
+    // font senza legature: in alcuni monospace "<|" diventerebbe un simbolo unico
+    ctx.font = "600 40px Inter, system-ui, sans-serif";
     ctx.textBaseline = "middle";
     let x = 10;
-    let y = 46;
+    let y = 60;
     WHISPER_TOKENS.forEach((tok, i) => {
       const wd = ctx.measureText(tok).width + 22;
-      if (x + wd > cw - 10) (x = 10), (y += 70);
+      if (x + wd > cw - 10) (x = 10), (y += 96);
       const on = i < tstate.shown;
       const special = tok.startsWith("<|");
       ctx.fillStyle = on ? (special ? "#3b1f5e" : "#123b33") : "#111827";
       ctx.strokeStyle = on ? (special ? "#a78bfa" : "#34d399") : "#1e293b";
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.roundRect(x, y - 26, wd, 52, 10);
+      ctx.roundRect(x, y - 38, wd, 76, 12);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = on ? "#f1f5f9" : "#334155";
-      ctx.fillText(tok.replace(" ", "␣"), x + 11, y);
+      ctx.fillText(tok.replace(" ", "·"), x + 11, y);
       x += wd + 12;
     });
-    ctx.font = "500 22px Inter, system-ui, sans-serif";
+    ctx.font = "500 32px Inter, system-ui, sans-serif";
     ctx.fillStyle = "#94a3b8";
-    ctx.fillText("viola = token speciali (formato vero) · verde = testo d'esempio", 10, ch - 22);
+    ctx.fillText("viola = token speciali (formato vero) · verde = testo d'esempio", 10, ch - 30);
   });
   text.position.set(SLOT.wText.x, SLOT.wText.y, 0);
   const textTitle = label("Testo trascritto", { size: 0.5, sub: "esempio del formato: qui Whisper non viene eseguito" });

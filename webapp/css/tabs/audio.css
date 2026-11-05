@@ -71,3 +71,6 @@
 .audio-sources small { display: block; color: var(--muted); }
 
 .audio-link { margin-top: 10px; width: 100%; }
+
+/* Durante un'azione il pannello del codice si accorcia e lascia libera la barra del player in basso. */
+.audio-tab:has(.player-bar:not([hidden])) .code-panel { max-height: calc(100% - 290px); }

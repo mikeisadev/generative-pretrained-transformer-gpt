@@ -31,9 +31,6 @@ export function rampColor(v, out) {
   return out;
 }
 
-/** CSS della rampa (per legende HTML). */
-export const RAMP_CSS = `linear-gradient(to right, ${RAMP.map((c) => `rgb(${c.join(",")})`).join(", ")})`;
-
 /**
  * Colore di un token: identità, non grandezza. Tinta "a passo d'oro" sul cerchio dei colori:
  * indici vicini hanno tinte lontane, così due token diversi si distinguono anche se adiacenti.
@@ -150,12 +147,6 @@ export function canvasPanel(width, height, draw, { pxPerUnit = 110 } = {}) {
   mesh.userData.redraw = redraw;
   mesh.userData.dispose = () => texture.dispose();
   return mesh;
-}
-
-/** Rettangolo arrotondato su canvas. */
-export function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, r);
 }
 
 /** Lastra (strato di rete) con un'etichetta accanto. */

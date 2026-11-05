@@ -6,6 +6,7 @@
  *   4. Un passo dentro il denoiser (U-Net o DiT, secondo la vista)
  * Ogni passo ha `enter` che ricostruisce lo stato di inizio passo: "passo indietro" funziona sempre.
  */
+import * as THREE from "three";
 import { el, fmt } from "../../core/dom.js";
 import { fillGaussian, meanStd, mulberry32, qSample, samplingTimesteps, SCHEDULES } from "./math.js";
 import { recolor } from "./shapes.js";
@@ -15,19 +16,35 @@ const f2 = (x) => fmt(x, 2);
 const SIM_NOTE = "Simulazione didattica: questo denoiser conosce già l'immagine finale.\nQuello vero è una rete addestrata (U-Net o DiT) che la deve indovinare.";
 
 /** Quattro canali di un latente in una griglia 2 × 2 nel banco di lavoro. */
-function latentGrid(lab, key, x, y, w, title) {
+function latentGrid(lab, key, x, y, w, title, titleHeight = 0.85) {
   const textures = Array.from({ length: 4 }, () => lab.own(new ChannelTexture(32)));
   const half = w / 2 + 0.15;
   textures.forEach((t, c) => {
     lab.panel(`${key}${c}`, { texture: t.texture, x: x + (c % 2 ? half / 2 + 0.1 : -half / 2 - 0.1), y: y + (c < 2 ? half / 2 + 0.1 : -half / 2 - 0.1), w: w / 2, title: "" });
   });
-  lab.text(`${key}-title`, title, x, y + w / 2 + 1.2, { height: 0.5 });
+  lab.text(`${key}-title`, title, x, y + w / 2 + 0.6 + titleHeight * title.split("\n").length * 0.6, { height: titleHeight });
   return { set: (z) => textures.forEach((t, c) => t.set(z, c)) };
 }
 
-function focusLab(tab, margin = 1.08) {
-  return tab.ui.director.focus(tab.lab.bounds(), { showFrame: false, margin });
+/** Inquadra il banco di lavoro lasciando spazio in basso alla barra del player. */
+function focusLab(tab, margin = 1.05) {
+  // rimandato: all'avvio di un'azione il pannello del codice si apre subito dopo e cambia lo spazio visibile
+  return new Promise((resolve) =>
+    setTimeout(() => {
+      const box = tab.lab.bounds();
+      box.min.y -= (box.max.y - box.min.y) * 0.3;
+      tab.ui.director.focus(box, { showFrame: false, margin, direction: LAB_DIR }).then(resolve);
+    }, 0),
+  );
 }
+
+/** Porta la camera sul banco solo se non c'è già (serve quando si salta tra i passi). */
+function ensureLab(tab, ctx) {
+  if (ctx.data.view === "lab") return;
+  ctx.data.view = "lab";
+  focusLab(tab);
+}
+const LAB_DIR = new THREE.Vector3(0.06, 0.08, 1).normalize();
 
 // ---------------------------------------------------------------------------------------------
 // 1. Processo diretto
@@ -56,29 +73,30 @@ function forwardAction(tab) {
     title: "Processo diretto: aggiungere rumore",
     category: "Immagini",
     summary: "La formula vera di DDPM applicata a un'immagine: x_t = √ᾱ·x_0 + √(1−ᾱ)·ε, per vari t.",
-    onStart() {
+    onStart(ctx) {
       lab.clear();
       xt = new Float32Array(N);
       eps = fillGaussian(new Float32Array(N), mulberry32(tab.settings.seed));
       texX0 = lab.own(new RGBTexture(256).set(reference));
       texEps = lab.own(new RGBTexture(256).set(eps.map((v) => v / 3)));
       texXt = lab.own(new RGBTexture(256));
-      lab.text("formula", "x_t = √ᾱ_t · x_0 + √(1 − ᾱ_t) · ε", -2, 13, { height: 0.9, color: "#fde68a" });
-      lab.text("formula-sub", "DDPM: schedule lineare di β da 0,0001 a 0,02, T = 1000 passi", -2, 11.6, { height: 0.45, color: "#94a3b8" });
-      lab.panel("x0", { texture: texX0.texture, x: -21, y: 1, w: 8, title: "x_0" });
-      lab.text("plus", "+", -14.5, 1, { height: 1.4, color: "#e2e8f0" });
-      lab.panel("eps", { texture: texEps.texture, x: -8, y: 1, w: 8, title: "ε" });
-      lab.text("eq", "=", -1.6, 1, { height: 1.4, color: "#e2e8f0" });
-      lab.panel("xt", { texture: texXt.texture, x: 8, y: 1, w: 12, title: "x_t", titleHeight: 0.6 });
+      lab.text("formula", "x_t = √ᾱ_t · x_0 + √(1 − ᾱ_t) · ε", -4, 15.6, { height: 1.6, color: "#fde68a" });
+      lab.text("formula-sub", "DDPM: β lineare da 0,0001 a 0,02 · T = 1000", -4, 13.4, { height: 0.9, color: "#94a3b8" });
+      lab.panel("x0", { texture: texX0.texture, x: -22, y: 2.5, w: 9, title: "x_0", titleHeight: 0.9 });
+      lab.text("plus", "+", -15, 2.5, { height: 2, color: "#e2e8f0" });
+      lab.panel("eps", { texture: texEps.texture, x: -8, y: 2.5, w: 9, title: "ε", titleHeight: 0.9 });
+      lab.text("eq", "=", -1.2, 2.5, { height: 2, color: "#e2e8f0" });
+      lab.panel("xt", { texture: texXt.texture, x: 9.5, y: 2.5, w: 13, title: "x_t", titleHeight: 1.1 });
       thumbs = TS.map((t, i) => {
         const tex = lab.own(new RGBTexture(256).set(qSample(new Float32Array(N), reference, eps, schedule.alphaBar[t])));
-        return lab.panel(`thumb${i}`, { texture: tex.texture, x: -21 + i * 4.9, y: -8.6, w: 4, title: `t = ${t}`, titleHeight: 0.38 });
+        return lab.panel(`thumb${i}`, { texture: tex.texture, x: -22 + i * 5.3, y: -11, w: 4.6, title: `t = ${t}`, titleHeight: 0.75 });
       });
-      lab.text("thumbs-title", "Lo stesso ε, sempre più forte:", -24.5, -5.6, { height: 0.42, color: "#94a3b8", align: "left" });
+      lab.text("thumbs-title", "Lo stesso ε, sempre più forte:", -26.5, -5.6, { height: 0.85, color: "#94a3b8", align: "left" });
       lab.show();
       last = undefined;
       show(-1);
       tab.plots.histogram(reference);
+      ctx.data.view = "lab";
       focusLab(tab);
     },
     onStop() {
@@ -228,14 +246,14 @@ function generateAction(tab) {
       texEu = lab.own(new ChannelTexture(32));
       texEc = lab.own(new ChannelTexture(32));
       texPreview = lab.own(new RGBTexture(256));
-      gridZ = latentGrid(lab, "z", -21, 1, 8, "z_t (latente, 4 canali)");
-      lab.panel("eu", { texture: texEu.texture, x: -9, y: 4.6, w: 5, title: "ε senza prompt", titleHeight: 0.42 });
-      lab.panel("ec", { texture: texEc.texture, x: -9, y: -3.4, w: 5, title: "ε con il prompt", titleHeight: 0.42 });
-      gridEps = latentGrid(lab, "e", 2.5, 1, 7, `ε̂ = ε_u + s·(ε_c − ε_u),  s = ${fmt(traj.scale, 1)}`);
-      lab.panel("preview", { texture: texPreview.texture, x: 16, y: 1, w: 10, title: "anteprima: ẑ_0 decodificato", titleHeight: 0.5 });
-      lab.text("status", "", -2, 13, { height: 0.8, color: "#fde68a" });
-      lab.text("note", SIM_NOTE, -2, -7.6, { height: 0.42, color: "#fca5a5" });
-      lab.text("canale", "(canale 0)", -9, -6.8, { height: 0.32, color: "#94a3b8" });
+      gridZ = latentGrid(lab, "z", -23, 1, 9, "z_t · 4 canali", 1);
+      lab.panel("eu", { texture: texEu.texture, x: -10.5, y: 6, w: 5.5, title: "ε senza prompt", titleHeight: 0.95 });
+      lab.panel("ec", { texture: texEc.texture, x: -10.5, y: -4.4, w: 5.5, title: "ε con il prompt", titleHeight: 0.95 });
+      gridEps = latentGrid(lab, "e", 2.5, 1, 9, `ε̂ = ε_u + s·(ε_c − ε_u)\ns = ${fmt(traj.scale, 1)}`, 1);
+      lab.panel("preview", { texture: texPreview.texture, x: 18, y: 1, w: 12, title: "anteprima di ẑ_0", titleHeight: 1 });
+      lab.text("status", "", -2.5, 15.5, { height: 1.3, color: "#fde68a" });
+      lab.text("note", SIM_NOTE, -2.5, -11.8, { height: 0.85, color: "#fca5a5" });
+      lab.text("canale", "(canale 0)", -10.5, -7.9, { height: 0.6, color: "#94a3b8" });
       lab.show();
       lastBlend = undefined;
       tab.plots.resetGeneration();
@@ -246,13 +264,14 @@ function generateAction(tab) {
     },
     build: () => {
       const { ts, alphaBars } = traj;
-      const status = () => lab.get("status");
+      const status = () => lab.get("status").label;
       const steps = [
         {
           title: "Il prompt diventa vettori",
           caption: `"un faro su una scogliera al tramonto": il tokenizer lo spezza in token, il text encoder CLIP (un transformer) produce 77 vettori da 768 numeri.`,
           duration: 4,
-          enter() {
+          enter(ctx) {
+            ctx.data.view = "text";
             tab.focus("textEncoder", { margin: 1.6 });
             tab.showCode("sd_encode", "diffusers: encode_prompt (tokenizer + text encoder)", ["self.tokenizer(", "max_length", "self.text_encoder("]);
           },
@@ -261,7 +280,8 @@ function generateAction(tab) {
           title: "Rumore iniziale",
           caption: `Si parte da puro rumore gaussiano nel latente 4×64×64, scelto dal seed ${tab.settings.seed}: stesso seed e stesso prompt danno la stessa immagine.`,
           duration: 3.5,
-          enter() {
+          enter(ctx) {
+            ensureLab(tab, ctx);
             display(0, 0);
             texEu.set(new Float32Array(vae.z0.length), 0);
             texEc.set(new Float32Array(vae.z0.length), 0);
@@ -269,7 +289,6 @@ function generateAction(tab) {
             texPreview.set(new Float32Array(tab.reference.length));
             status().set(`seed ${tab.settings.seed} · ${ts.length} passi · t parte da ${ts[0]}`);
             pipeline.setTimestep(ts[0]);
-            focusLab(tab);
             tab.showCode("sd_loop", "diffusers: il ciclo di denoising di Stable Diffusion", ["for i, t in enumerate(timesteps)"]);
             tab.plots.showGeneration(alphaBars, 0);
           },
@@ -283,7 +302,8 @@ function generateAction(tab) {
                 ? `Passo 2 (t = ${t}): l'anteprima mostra la stima di ẑ_0, cioè cosa il modello "vede" sotto il rumore. All'inizio è vaga, poi si precisa.`
                 : `Passo ${k + 1}/${ts.length} · t = ${t} · peso del rumore √(1 − ᾱ) = ${f2(Math.sqrt(1 - alphaBars[k]))}`,
           duration: k < 2 ? 4.5 : ts.length > 30 ? 0.5 : 1.1,
-          enter() {
+          enter(ctx) {
+            ensureLab(tab, ctx);
             showPredictions(k);
             display(k, 0);
             pipeline.setTimestep(t);
@@ -301,7 +321,8 @@ function generateAction(tab) {
           title: "Dal latente ai pixel",
           caption: "Dopo l'ultimo passo il latente z_0 (4×64×64) passa nel decoder del VAE e diventa un'immagine 512×512 a colori.",
           duration: 4,
-          enter() {
+          enter(ctx) {
+            ctx.data.view = "image";
             display(ts.length, 0);
             vae.decode(preview, traj.states.at(-1));
             texPreview.set(preview);
@@ -316,11 +337,15 @@ function generateAction(tab) {
           title: "Risultato",
           caption: `Fatto: ${ts.length} passi, ${ts.length * 2} chiamate al denoiser (due per passo per la guidance). Prova a cambiare la scala s o il seed nel pannello Azioni e riavvia.`,
           duration: 5,
-          enter() {
+          enter(ctx) {
+            display(ts.length, 0);
+            vae.decode(preview, traj.states.at(-1));
+            texPreview.set(preview);
             pipeline.imageTex.set(preview);
+            lab.get("preview").title.set("immagine finale (VAE decoder)");
             const { std } = meanStd(preview);
             status().set(`s = ${fmt(traj.scale, 1)} · contrasto ${f2(std)}`);
-            focusLab(tab);
+            ensureLab(tab, ctx);
           },
         },
       ];
@@ -368,9 +393,9 @@ function vaeAction(tab) {
     title: "Dal latente ai pixel (VAE)",
     category: "Immagini",
     summary: "Il decoder del VAE: 4 × 64 × 64 numeri diventano 512 × 512 × 3 pixel. Perché si lavora nel latente.",
-    onStart() {
+    onStart(ctx) {
       lab.clear();
-      const grid = latentGrid(lab, "z", -24, 0, 7, "latente z_0 · 4 × 64 × 64");
+      const grid = latentGrid(lab, "z", -24, 0, 7, "latente z_0\n4 × 64 × 64");
       grid.set(vae.z0);
       const defs = [
         { f: 8, w: 4.2, x: -13.5, title: "64 × 64\n512 canali" },
@@ -380,12 +405,13 @@ function vaeAction(tab) {
       ];
       stages = defs.map((d, i) => {
         const tex = lab.own(new RGBTexture(256, { nearest: d.f > 1 }).set(stageImage(d.f)));
-        return lab.panel(`s${i}`, { texture: tex.texture, x: d.x, y: 0, w: d.w, title: d.title, titleHeight: 0.42 });
+        return lab.panel(`s${i}`, { texture: tex.texture, x: d.x, y: 0, w: d.w, title: d.title, titleHeight: 0.8 });
       });
-      lab.text("title", "VAE decoder: la risoluzione sale, i canali scendono", -4, 11.5, { height: 0.75, color: "#7dd3fc" });
-      lab.text("note", "Simulazione didattica: le feature intermedie vere hanno centinaia di canali;\nqui mostriamo solo l'immagine a quella risoluzione.", -4, -8.4, { height: 0.4, color: "#94a3b8" });
+      lab.text("title", "VAE decoder: la risoluzione sale, i canali scendono", -4.5, 12.5, { height: 1.3, color: "#7dd3fc" });
+      lab.text("note", "Simulazione didattica: le feature vere hanno centinaia di canali;\nqui vediamo solo l'immagine a quella risoluzione.", -4.5, -8.6, { height: 0.75, color: "#94a3b8" });
       lab.show();
       reveal(-1);
+      ctx.data.view = "lab";
       focusLab(tab);
     },
     onStop() {
@@ -396,7 +422,8 @@ function vaeAction(tab) {
         title: "Il latente",
         caption: "Il latente di Stable Diffusion: 4 canali × 64 × 64 = 16.384 numeri. Un'immagine 512×512 a colori ne ha 786.432: 48 volte di più.",
         duration: 4.5,
-        enter() {
+        enter(ctx) {
+          ensureLab(tab, ctx);
           reveal(-1);
           tab.showCode("sd_config", "Stable Diffusion 1.x: configurazione dell'autoencoder", ["z_channels: 4", "ch_mult", "embed_dim: 4"]);
         },
@@ -405,7 +432,8 @@ function vaeAction(tab) {
         title: ["Primo blocco", "Upsampling ×2", "Upsampling ×2", "Immagine"][k],
         caption,
         duration: 3,
-        enter() {
+        enter(ctx) {
+          ensureLab(tab, ctx);
           reveal(k, 0);
         },
         update(p) {
@@ -416,7 +444,8 @@ function vaeAction(tab) {
         title: "Perché lavorare nel latente",
         caption: "Il denoiser gira 20-50 volte (il doppio con la guidance): farlo su 64×64 invece che su 512×512 costa molto meno. Il VAE decoder invece si usa una volta sola, alla fine.",
         duration: 5,
-        enter() {
+        enter(ctx) {
+          ensureLab(tab, ctx);
           reveal(3, 1);
           tab.showCode("sd_decode", "diffusers: decodifica del latente", ["vae.decode"]);
         },
@@ -425,7 +454,8 @@ function vaeAction(tab) {
         title: "Il fattore di scala",
         caption: "Prima del decoder il latente viene diviso per 0,18215 (scale_factor): durante il training lo si era moltiplicato per avere varianza circa 1, comoda per la diffusione.",
         duration: 5,
-        enter() {
+        enter(ctx) {
+          ensureLab(tab, ctx);
           reveal(3, 1);
           tab.showCode("sd_decode", "diffusers: il latente viene riscalato", ["scaling_factor"]);
         },
@@ -434,7 +464,8 @@ function vaeAction(tab) {
         title: "E l'encoder?",
         caption: "L'encoder del VAE fa il viaggio inverso (immagine → latente). Serve nel training e per partire da una foto (image-to-image), non nella generazione da testo.",
         duration: 5,
-        enter() {
+        enter(ctx) {
+          ctx.data.view = "vae";
           reveal(3, 1);
           tab.focus("vae", { margin: 1.8 });
         },

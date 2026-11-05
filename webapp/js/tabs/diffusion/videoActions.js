@@ -44,7 +44,7 @@ export function installVideo(tab) {
       duration: 5,
       enter() {
         reset();
-        tab.focus(v.group, { showFrame: false, margin: 1.05 });
+        tab.focus(v.regions.intro(), { showFrame: false, margin: 1.02 });
       },
     },
     {
@@ -86,7 +86,7 @@ export function installVideo(tab) {
         v.patchGrid.visible = true;
         v.tokens.visible = true;
         v.setTokenLayout(0, 0.01);
-        tab.focus("videoLatent", { margin: 1.4 });
+        tab.focus(v.regions.tokens(), { showFrame: false, margin: 1.05 });
         tab.showCode("dit_forward", "DiT: le patch diventano token (stessa idea, in 2D)", ["x_embedder"]);
       },
       update(p) {
@@ -103,7 +103,7 @@ export function installVideo(tab) {
         v.tokens.visible = true;
         v.seqLabel.visible = true;
         v.setTokenLayout(0);
-        tab.focus(v.group, { showFrame: false, margin: 1.05 });
+        tab.focus(v.regions.cube(), { showFrame: false, margin: 1.05 });
       },
       update(p) {
         const e = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
@@ -141,7 +141,7 @@ export function installVideo(tab) {
         v.setTokenLayout(0);
         v.attention.material.color.setHex(s.color);
         v.setAttention(s.mode, QUERY, 0);
-        tab.focus("videoLatent", { margin: 1.4 });
+        tab.focus(v.regions.tokens(), { showFrame: false, margin: 1.05 });
         if (s.code) tab.showCode(...s.code);
       },
       update(p) {

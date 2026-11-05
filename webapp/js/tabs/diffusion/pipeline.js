@@ -13,7 +13,7 @@
 import * as THREE from "three";
 import { makeBlock, makeFlow } from "../../core/diagram.js";
 import { mulberry32, timestepEmbedding } from "./math.js";
-import { PALETTE, box, instancedBoxes, lineSegments, placeLabel, texturedPlane } from "./shapes.js";
+import { PALETTE, instancedBoxes, lineSegments, placeLabel, placeText, texturedPlane } from "./shapes.js";
 import { ChannelTexture, RGBTexture, matrixTexture } from "./textures.js";
 
 export const PROMPT = "un faro su una scogliera al tramonto";
@@ -55,24 +55,25 @@ function latentStack(textures, size, title, sub) {
     plane.position.set((c - 1.5) * step, (1.5 - c) * step, (1.5 - c) * 0.9);
     group.add(plane);
   });
-  placeLabel(group, title, 0, size / 2 + 1.5, 0, { size: 0.5, sub });
+  placeLabel(group, title, 0, size / 2 + 2, 0, { size: 0.95, sub });
   return group;
 }
 
 function buildTextSide(group, registry) {
   // prompt
-  const prompt = makeBlock({ title: "Prompt", text: `"${PROMPT}"`, width: 8.5, height: 2.6, color: "#c4b5fd" });
-  prompt.position.set(LAYOUT.prompt.x, 8.2, 0);
+  const prompt = new THREE.Group();
+  placeLabel(prompt, `"${PROMPT}"`, LAYOUT.prompt.x + 4, 13.4, 0, { size: 0.95, color: "#e0e7ff" });
+  placeLabel(prompt, "Prompt", LAYOUT.prompt.x - 6.5, 15, 0, { size: 0.8, color: "#c4b5fd" });
   group.add(prompt);
   registry.set("prompt", prompt);
 
   // token: un InstancedMesh di "gettoni" con etichetta
   const tokenGroup = new THREE.Group();
-  const items = TOKENS.map((_, i) => ({ x: LAYOUT.prompt.x, y: 5 - i * 1.15, z: 0, sx: 4.6, sy: 0.85, sz: 0.4, color: i === TOKENS.length - 1 ? 0x334155 : 0x312e81 }));
+  const items = TOKENS.map((_, i) => ({ x: LAYOUT.prompt.x, y: 6.1 - i * 1.35, z: 0, sx: 5.4, sy: 1.1, sz: 0.4, color: i === TOKENS.length - 1 ? 0x334155 : 0x312e81 }));
   const chips = instancedBoxes(items);
   tokenGroup.add(chips);
-  TOKENS.forEach((tok, i) => placeLabel(tokenGroup, tok, LAYOUT.prompt.x, items[i].y, 0.3, { size: 0.36, color: i === TOKENS.length - 1 ? "#94a3b8" : "#e0e7ff" }));
-  placeLabel(tokenGroup, "Tokenizer", LAYOUT.prompt.x, 6.3, 0, { size: 0.42, color: "#c4b5fd", sub: "token → numeri (vocabolario BPE)" });
+  TOKENS.forEach((tok, i) => placeLabel(tokenGroup, tok, LAYOUT.prompt.x, items[i].y, 0.3, { size: 0.6, color: i === TOKENS.length - 1 ? "#94a3b8" : "#e0e7ff" }));
+  placeLabel(tokenGroup, "Tokenizer", LAYOUT.prompt.x, 9.2, 0, { size: 0.95, color: "#c4b5fd", sub: "testo → token" });
   group.add(tokenGroup);
   registry.set("tokens", tokenGroup);
 
@@ -80,7 +81,7 @@ function buildTextSide(group, registry) {
   const encGroup = new THREE.Group();
   const layers = Array.from({ length: 12 }, (_, i) => ({ x: LAYOUT.encoder.x - 3.6 + i * 0.65, y: 0, z: 0, sx: 0.36, sy: 10, sz: 4, color: i % 2 ? 0x7c3aed : 0x6d28d9 }));
   encGroup.add(instancedBoxes(layers));
-  placeLabel(encGroup, "Text encoder CLIP", LAYOUT.encoder.x, 6.6, 0, { size: 0.5, color: "#c4b5fd", sub: "transformer · 12 layer · 768" });
+  placeLabel(encGroup, "Text encoder", LAYOUT.encoder.x, 7.6, 0, { size: 0.95, color: "#c4b5fd", sub: "CLIP · 12 layer" });
   group.add(encGroup);
   registry.set("textEncoder", encGroup);
 
@@ -91,7 +92,7 @@ function buildTextSide(group, registry) {
   emb.position.copy(LAYOUT.textEmb);
   const embGroup = new THREE.Group();
   embGroup.add(emb);
-  placeLabel(embGroup, "Embedding del testo", LAYOUT.textEmb.x, 6.6, 0, { size: 0.45, color: "#c4b5fd", sub: "77 × 768 (larghezza compressa)" });
+  placeLabel(embGroup, "Embedding", LAYOUT.textEmb.x, 7.6, 0, { size: 0.95, color: "#c4b5fd", sub: "77 × 768" });
   group.add(embGroup);
   registry.set("textEmb", embGroup);
 }
@@ -179,14 +180,14 @@ function buildUNet(textAnchor) {
   group.add(tLines);
 
   // etichette
-  placeLabel(group, "U-Net", 0, 11.3, 0, { size: 0.75, color: "#fde68a", sub: "≈ 860 milioni di parametri (Stable Diffusion 1.x)" });
-  placeLabel(group, "Encoder: riduce la risoluzione", -12, 9.6, 0, { size: 0.4, color: "#e2e8f0" });
-  placeLabel(group, "Decoder: la riporta su", 12, 9.6, 0, { size: 0.4, color: "#e2e8f0" });
-  UNET_LEVELS.forEach((l, i) => placeLabel(group, `${l.res}×${l.res} · ${l.ch} canali`, ends[i].encStart - 3, rowY[i], 0, { size: 0.32, color: "#94a3b8" }));
-  placeLabel(group, "Blocco centrale 8×8", 0, middleY - 1.5, 0, { size: 0.36, color: "#94a3b8" });
-  placeLabel(group, "skip connection", 0, rowY[0] + 0.45, 0, { size: 0.32, color: "#67e8f9" });
-  placeLabel(group, "passo t → ogni ResNet block", 0, busY - 0.65, 0, { size: 0.34, color: "#86efac" });
-  placeLabel(group, "cross-attention verso il testo", -24, 9.3, 0, { size: 0.34, color: "#c4b5fd" });
+  placeLabel(group, "U-Net", 0, 13.8, 0, { size: 1.6, color: "#fde68a", sub: "circa 860 milioni di parametri" });
+  placeLabel(group, "Encoder", -14.5, 10.4, 0, { size: 1.1, color: "#e2e8f0" });
+  placeLabel(group, "Decoder", 14.5, 10.4, 0, { size: 1.1, color: "#e2e8f0" });
+  UNET_LEVELS.forEach((l, i) => placeLabel(group, `${l.res}×${l.res} · ${l.ch} canali`, 0, rowY[i] + 0.85, 0, { size: 0.9, color: "#94a3b8" }));
+  placeLabel(group, "blocco centrale 8×8", 0, middleY - 1.9, 0, { size: 0.9, color: "#94a3b8" });
+  placeLabel(group, "skip connection", 0, rowY[0] - 0.85, 0, { size: 0.85, color: "#67e8f9" });
+  placeLabel(group, "passo t → ogni ResNet", 0, busY - 1, 0, { size: 0.9, color: "#86efac" });
+  placeLabel(group, "cross-attention", -21.5, 10.4, 0, { size: 0.9, color: "#c4b5fd" });
 
   return { group, mesh, items, cross, tLines, skips, rowY, middleY };
 }
@@ -198,7 +199,7 @@ function buildDiT(textAnchor) {
   // patchify: griglia 8 × 8 di patch (rappresentativa)
   for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) items.push({ x: -17.5 + c * 0.62, y: 2.2 - r * 0.62, z: 0, sx: 0.54, sy: 0.54, sz: 0.25, color: 0x0e7490, kind: "patch" });
   // sequenza di token
-  for (let i = 0; i < 12; i++) items.push({ x: -11.2, y: 5.5 - i * 0.95, z: 0, sx: 0.8, sy: 0.75, sz: 0.8, color: 0x0891b2, kind: "token" });
+  for (let i = 0; i < 8; i++) items.push({ x: -11.2, y: 4.6 - i * 0.95, z: 0, sx: 0.8, sy: 0.75, sz: 0.8, color: 0x0891b2, kind: "token" });
   // 8 blocchi DiT, ognuno con 4 sotto-strati (dal basso): adaLN, self-attention, adaLN, MLP
   const sub = [
     { kind: "ada", color: PALETTE.time, h: 1.0 },
@@ -244,18 +245,16 @@ function buildDiT(textAnchor) {
   );
   group.add(flow);
 
-  const cond = makeBlock({ title: "Condizionamento c", text: "embedding(t) + embedding(classe o testo) → MLP → scale, shift e gate (adaLN-Zero)", width: 17, height: 2.2, color: "#86efac" });
-  cond.position.set(0.2, condY - 0.5, 0);
+  const cond = makeBlock({ title: "c = emb(t) + emb(classe o testo) → MLP → scale, shift, gate", width: 17 / 2.6, height: 3.4 / 2.6, color: "#86efac" });
+  cond.scale.setScalar(2.6);
+  cond.position.set(0.2, condY - 0.7, 0);
   group.add(cond);
 
-  placeLabel(group, "Diffusion Transformer (DiT)", 0.3, 11.3, 0, { size: 0.75, color: "#fde68a", sub: "DiT-XL/2: 28 blocchi, larghezza 1152, 16 head · qui 8 blocchi" });
-  placeLabel(group, "Patchify", -15.3, 4.4, 0, { size: 0.42, sub: "patch 2×2 → token" });
-  placeLabel(group, "Token", -11.2, 7.2, 0, { size: 0.4 });
-  placeLabel(group, "Unpatchify", 14.8, 4.4, 0, { size: 0.42, sub: "token → latente" });
-  placeLabel(group, "MLP", blockX.at(-1) + 1.6, 2.6, 0, { size: 0.32, color: "#fcd34d" });
-  placeLabel(group, "self-attention", blockX.at(-1) + 2.0, -2.4, 0, { size: 0.32, color: "#c4b5fd" });
-  placeLabel(group, "adaLN", blockX.at(-1) + 1.5, -4.6, 0, { size: 0.32, color: "#86efac" });
-  placeLabel(group, "flusso del testo (MMDiT di SD3): attention congiunta", 0.3, 8.5, 0, { size: 0.36, color: "#c4b5fd" });
+  placeLabel(group, "Diffusion Transformer", 0.3, 13.8, 0, { size: 1.6, color: "#fde68a", sub: "DiT-XL/2: 28 blocchi · qui 8" });
+  placeLabel(group, "Patchify", -15.3, 4.8, 0, { size: 1, sub: "patch 2×2" });
+  placeLabel(group, "Unpatchify", 14.8, 4.8, 0, { size: 1, sub: "token → latente" });
+  placeText(group, "ogni blocco, dal basso:\nadaLN · attention\nadaLN · MLP", -15.3, -4.9, 0, { height: 0.75 });
+  placeLabel(group, "testo (MMDiT, SD3): attention congiunta", 0.3, 8.8, 0, { size: 0.9, color: "#c4b5fd" });
   return { group, mesh, items, condLines, joint, blockX };
 }
 
@@ -270,8 +269,8 @@ function buildVAE() {
   ];
   const items = stages.map((s, i) => ({ x: LAYOUT.vae.x - 4.2 + i * 2.8, y: 0, z: 0, sx: 1.2, sy: s.h, sz: s.d, color: PALETTE.vae, kind: "vae" }));
   group.add(instancedBoxes(items));
-  stages.forEach((s, i) => placeLabel(group, `${s.res}²·${s.ch}`, items[i].x, -s.h / 2 - 0.6, 0, { size: 0.3, color: "#94a3b8" }));
-  placeLabel(group, "VAE decoder", LAYOUT.vae.x, 5.6, 0, { size: 0.55, color: "#7dd3fc", sub: "fattore 8: 64×64×4 → 512×512×3" });
+  stages.forEach((s, i) => placeLabel(group, String(s.res), items[i].x, -s.h / 2 - 0.8, 0, { size: 0.62, color: "#94a3b8" }));
+  placeLabel(group, "VAE decoder", LAYOUT.vae.x, 6.6, 0, { size: 0.95, color: "#7dd3fc", sub: "fattore 8" });
   return { group, items };
 }
 
@@ -296,7 +295,7 @@ export function buildPipeline() {
   const tGroup = new THREE.Group();
   tPlane.position.copy(LAYOUT.timestep);
   tGroup.add(tPlane);
-  placeLabel(tGroup, "Passo t", LAYOUT.timestep.x, LAYOUT.timestep.y + 1.3, 0, { size: 0.42, color: "#86efac", sub: "embedding sinusoidale" });
+  placeLabel(tGroup, "Passo t", LAYOUT.timestep.x, LAYOUT.timestep.y + 1.9, 0, { size: 0.8, color: "#86efac", sub: "seni e coseni" });
   group.add(tGroup);
   registry.set("timestep", tGroup);
 
@@ -310,13 +309,14 @@ export function buildPipeline() {
 
   // rumore previsto
   const epsTex = Array.from({ length: 4 }, () => new ChannelTexture(32));
-  const eps = latentStack(epsTex, 3.6, "Rumore previsto ε̂", "stessa forma del latente");
+  const eps = latentStack(epsTex, 3.6, "Rumore ε̂", "previsto");
   eps.position.copy(LAYOUT.eps);
   group.add(eps);
   registry.set("eps", eps);
 
   // scheduler e anello del campionamento
-  const scheduler = makeBlock({ title: "Scheduler (DDIM)", subtitle: "z_t, ε̂ → z_t−1", text: "Toglie la parte di rumore prevista: si ripete per ogni passo (es. 50).", width: 11, height: 3.2, color: "#a5f3fc" });
+  const scheduler = makeBlock({ title: "Scheduler (DDIM)", subtitle: "z_t, ε̂ → z_t−1", text: "Toglie il rumore previsto. Si ripete a ogni passo.", width: 11 / 1.8, height: 3.4 / 1.8, color: "#a5f3fc" });
+  scheduler.scale.setScalar(1.8);
   scheduler.position.copy(LAYOUT.scheduler);
   group.add(scheduler);
   registry.set("scheduler", scheduler);
@@ -331,8 +331,8 @@ export function buildPipeline() {
     makeFlow([new THREE.Vector3(LAYOUT.vae.x + 5, 0, 0), new THREE.Vector3(LAYOUT.image.x - 4.6, 0, 0)], { radius: 0.09 }),
   ];
   flows.forEach((f) => group.add(f));
-  placeLabel(group, "z_t−1: si ricomincia con t più piccolo", -14, LAYOUT.scheduler.y - 0.9, 0, { size: 0.36, color: "#a5f3fc" });
-  placeLabel(group, "dopo l'ultimo passo: z_0", LAYOUT.vae.x - 4, LAYOUT.scheduler.y + 1.4, 0, { size: 0.34, color: "#7dd3fc" });
+  placeLabel(group, "z_t−1: di nuovo, con t più piccolo", -17, LAYOUT.scheduler.y - 1.2, 0, { size: 0.68, color: "#a5f3fc" });
+  placeLabel(group, "alla fine: z_0", LAYOUT.vae.x - 4.5, LAYOUT.scheduler.y + 1.8, 0, { size: 0.68, color: "#7dd3fc" });
 
   const vae = buildVAE();
   group.add(vae.group);
@@ -343,7 +343,7 @@ export function buildPipeline() {
   image.position.copy(LAYOUT.image);
   const imageGroup = new THREE.Group();
   imageGroup.add(image);
-  placeLabel(imageGroup, "Immagine", LAYOUT.image.x, 5.6, 0, { size: 0.55, sub: "512 × 512 × 3" });
+  placeLabel(imageGroup, "Immagine", LAYOUT.image.x, 6.6, 0, { size: 0.95, sub: "512 × 512 × 3" });
   group.add(imageGroup);
   registry.set("image", imageGroup);
 

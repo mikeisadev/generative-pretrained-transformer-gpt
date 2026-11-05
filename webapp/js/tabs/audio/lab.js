@@ -216,10 +216,10 @@ function codebookClouds(rvq, data, n, dim, random) {
     for (let c = 0; c < rvq.k; c++) centroids.set(p.project(cb, c * dim), c * 2);
     const points = new Float32Array(n * 2);
     for (let i = 0; i < n; i++) points.set(p.project(residual, i * dim), i * 2);
-    let scale = 0;
-    for (const v of centroids) scale = Math.max(scale, Math.abs(v));
-    for (const v of points) scale = Math.max(scale, Math.abs(v) * 0.7);
-    out.push({ centroids, points, scale: scale || 1 });
+    // scala robusta: l'85° percentile delle coordinate dei centroidi (pochi outlier non schiacciano la nuvola)
+    const mags = Array.from(centroids, Math.abs).sort((a, b) => a - b);
+    const scale = mags[Math.floor(mags.length * 0.85)] * 1.25 || 1;
+    out.push({ centroids, points, scale });
     for (let i = 0; i < n; i++) {
       const best = nearest(cb, rvq.k, residual, i * dim, dim);
       for (let j = 0; j < dim; j++) residual[i * dim + j] -= cb[best * dim + j];

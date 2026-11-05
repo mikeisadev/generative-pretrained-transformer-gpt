@@ -17,6 +17,7 @@ import { Menu } from "../../core/ui/menu.js";
 import { installActions } from "./actions/index.js";
 import { buildArchitecture } from "./architecture.js";
 import { STEPS } from "./content.js";
+import { loadEngine } from "../../engine/gpt.js";
 import { installContext } from "./context/index.js";
 import { loadModelSpec } from "./data.js";
 import { DataFlow } from "./flow.js";
@@ -102,6 +103,7 @@ export async function createTab(root, app) {
   );
 
   const events = new EventTarget();
+  let enginePromise = null;
   const tab = {
     app,
     ui,
@@ -127,6 +129,11 @@ export async function createTab(root, app) {
     },
     setCaption(text) {
       ui.caption.textContent = text;
+    },
+    /** Motore GPT in JavaScript (pesi addestrati veri), caricato una sola volta e condiviso tra i moduli. */
+    getEngine() {
+      enginePromise ??= loadEngine("data/");
+      return enginePromise;
     },
   };
 

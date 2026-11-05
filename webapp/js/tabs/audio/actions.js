@@ -7,12 +7,12 @@
  * Ogni passo: enter() porta la scena allo stato iniziale del passo (così "indietro" funziona),
  * update(p) anima con p da 0 a 1 senza allocare.
  */
+import { fmt } from "../../core/dom.js";
 import { CODEC } from "./codec.js";
 import { WHISPER } from "./dsp.js";
 import { WHISPER_TOKENS } from "./sceneWhisper.js";
 
-const fmtIt = (n, d = 0) => Number(n).toLocaleString("it-IT", { maximumFractionDigits: d, minimumFractionDigits: d });
-const pct = (v) => `${fmtIt(v * 100, v < 0.01 ? 2 : 1)} %`;
+const pct = (v) => `${fmt(v * 100, v < 0.01 ? 2 : 1)} %`;
 
 /** @param {object} tab vedi index.js */
 export function installActions(tab) {
@@ -53,7 +53,7 @@ export function installActions(tab) {
       {
         title: "Campionamento",
         duration: 4,
-        caption: `Ingrandiamo 3 millisecondi: il computer non conserva la curva, ma ${fmtIt(lab.sampleRate)} misure al secondo. Ogni punto è un numero tra −1 e 1.`,
+        caption: `Ingrandiamo 3 millisecondi: il computer non conserva la curva, ma ${fmt(lab.sampleRate)} misure al secondo. Ogni punto è un numero tra −1 e 1.`,
         enter: () => {
           tab.focus("audio.lens");
           tab.code("js:dsp.js#normalizePeak");
@@ -126,7 +126,7 @@ export function installActions(tab) {
       {
         title: "Dal suono ai numeri",
         duration: 4,
-        caption: `Riassunto: ${fmtIt(lab.songs[tab.state.style].samples.length)} campioni sono diventati ${fmtIt(T)} frame × 64 bande = ${fmtIt(T * 64)} numeri, ordinati nel tempo. Ma sono ancora numeri reali, non token.`,
+        caption: `Riassunto: ${fmt(lab.songs[tab.state.style].samples.length)} campioni sono diventati ${fmt(T)} frame × 64 bande = ${fmt(T * 64)} numeri, ordinati nel tempo. Ma sono ancora numeri reali, non token.`,
         enter: () => {
           tab.focus("encoder");
           tab.code("js:dsp.js#applyMel");
@@ -175,7 +175,7 @@ export function installActions(tab) {
       {
         title: "Un vettore per frame",
         duration: 4,
-        caption: `Il nostro encoder (fisso, non una rete) prende per ogni frame da 20 ms lo spettro fino a 4 kHz in scala logaritmica: un vettore di ${CODEC.bins} numeri, ${fmtIt(lab.frameRate)} volte al secondo. EnCodec fa lo stesso con una rete convoluzionale: 75 vettori al secondo a 24 kHz.`,
+        caption: `Il nostro encoder (fisso, non una rete) prende per ogni frame da 20 ms lo spettro fino a 4 kHz in scala logaritmica: un vettore di ${CODEC.bins} numeri, ${fmt(lab.frameRate)} volte al secondo. EnCodec fa lo stesso con una rete convoluzionale: 75 vettori al secondo a 24 kHz.`,
         enter: () => {
           tab.focus("encoder");
           tab.code("js:codec.js#encodeFeatures");
@@ -194,14 +194,13 @@ export function installActions(tab) {
       {
         title: "Più codebook, meno errore",
         duration: 5,
-        caption: `Ogni frame ora è 4 numeri tra 0 e ${lab.rvq.k - 1}: ${fmtIt(lab.bitrate(4))} bit al secondo invece di ${fmtIt(lab.sampleRate * 16)}. Nel grafico: con 8 codebook l'errore scende a ${pct(lab.relativeError()[8])}. Più codebook = più bit = più qualità.`,
+        caption: `Ogni frame ora è 4 numeri tra 0 e ${lab.rvq.k - 1}: ${fmt(lab.bitrate(4))} bit al secondo invece di ${fmt(lab.sampleRate * 16)}. Nei grafici (pulsante in alto a destra): con 8 codebook l'errore scende a ${pct(lab.relativeError()[8])}. Più codebook = più bit = più qualità.`,
         enter: () => {
           tab.focus("rvq");
           tab.code("js:codec.js#trainRvq", ["kmeans(residual"]);
           P.rvq.reveal(T);
           P.rvq.setLens(0);
           plots?.errorUpTo(CODEC.levels, 4);
-          ui.charts?.open();
         },
       },
       {
@@ -226,8 +225,9 @@ export function installActions(tab) {
     category: "Generazione",
     summary: "Prompt, cross-attention, delay pattern: il transformer sceglie il prossimo token, ma i token sono pezzi di suono.",
     onStart: () => tab.resetScene(),
-    onStop: () => tab.resetScene({ keepGeneration: true }),
-    onEnd: () => tab.resetScene({ keepGeneration: true }),
+    // a fine (o a metà) azione la scena mostra la generazione completa e il suo audio
+    onStop: () => (tab.resetScene(), tab.showGenerated(tab.state.gen)),
+    onEnd: () => (tab.resetScene(), tab.showGenerated(tab.state.gen)),
     build: async (ctx) => {
       const gen = tab.runGeneration(tab.state.genOptions);
       ctx.data.gen = gen;
@@ -282,7 +282,7 @@ export function installActions(tab) {
                 ? `Passo ${s}: il codebook k scrive il frame ${s} − k, così vede già il codebook sopra dello stesso frame. ${desc}`
                 : `Passo ${s}: ${desc}`,
           enter: () => {
-            if (s === 0) tab.focus("delayCore");
+            if (s === 0) tab.focus("delay");
             tab.code(s === 0 ? "py:musicgen.delay" : "js:codec.js#TokenModel", s === 0 ? ["[S, 1, 2, 3, 4]"] : ["distribution(style", "delayPattern(T"]);
             P.delay.show(gen, s);
             const first = slots[0];
@@ -341,7 +341,7 @@ export function installActions(tab) {
       {
         title: "30 secondi a 16 kHz",
         duration: 4,
-        caption: `Whisper lavora sempre su blocchi da 30 secondi di audio a 16 kHz. Il log-Mel si calcola con finestre da ${WHISPER.nFft} campioni (25 ms) ogni ${WHISPER.hop} (10 ms): ${fmtIt(WHISPER.nFrames)} frame. Il nostro brano ne occupa ${lab.whisper(tab.state.style).signalFrames}, il resto è silenzio.`,
+        caption: `Whisper lavora sempre su blocchi da 30 secondi di audio a 16 kHz. Il log-Mel si calcola con finestre da ${WHISPER.nFft} campioni (25 ms) ogni ${WHISPER.hop} (10 ms): ${fmt(WHISPER.nFrames)} frame. Il nostro brano ne occupa ${lab.whisper(tab.state.style).signalFrames}, il resto è silenzio.`,
         enter: () => {
           tab.focus("wMel");
           tab.code("py:whisper.params", ["N_FFT", "HOP_LENGTH", "CHUNK_LENGTH"]);
@@ -375,7 +375,7 @@ export function installActions(tab) {
         duration: 7,
         caption: "Il decoder è causale come il GPT e consulta l'encoder con la cross-attention. Prima scrive i token speciali (inizio, lingua, compito, niente timestamp), poi il testo. Qui il testo è un esempio del formato.",
         enter: () => {
-          tab.focus("whisperOut");
+          tab.focus("wText");
           tab.code("py:whisper.tokens", ["<|startoftranscript|>", "<|transcribe|>", "<|notimestamps|>"]);
           P.whisper.showTokens(0);
         },

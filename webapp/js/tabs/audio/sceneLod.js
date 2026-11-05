@@ -10,19 +10,29 @@ import { makeArrow, makeBlock, makeFlow } from "../../core/diagram.js";
 import { SLOT } from "./layout3d.js";
 
 const BLOCKS = [
-  { slot: "audio", title: "Audio", subtitle: "16.000 campioni/s", text: "La forma d'onda: un numero ogni 1/16.000 di secondo. Continua e lunghissima.", color: "#67e8f9" },
-  { slot: "encoder", title: "Encoder", subtitle: "un vettore ogni 20 ms", text: "Riassume ogni frame in un vettore. Nei codec veri è una rete convoluzionale; qui spettro + logaritmo.", color: "#fbbf24" },
-  { slot: "rvq", title: "RVQ", subtitle: "4 codebook da 64 voci", text: "Ogni vettore diventa 4 numeri interi: i token. Ogni codebook corregge l'errore dei precedenti.", color: "#f472b6" },
-  { slot: "transformer", title: "Transformer", subtitle: "prossimo token", text: "Come il GPT della lezione, ma i token sono pezzi di suono. Il delay pattern sfasa i 4 codebook.", color: "#38bdf8", spanTo: "delay" },
-  { slot: "decoder", title: "Decoder", subtitle: "token → suono", text: "Dai token ricostruisce la forma d'onda (nei codec veri: convoluzioni che aumentano la risoluzione).", color: "#34d399" },
-  { slot: "output", title: "Audio generato", subtitle: "ascoltalo", text: "Il suono nuovo, prodotto token dopo token e decodificato.", color: "#34d399" },
-  { slot: "text", title: "Prompt testuale", subtitle: "\"melodia allegra…\"", text: "La descrizione di ciò che vuoi sentire.", color: "#a78bfa" },
-  { slot: "t5", title: "Text encoder (T5)", subtitle: "cross-attention", text: "Trasforma il testo in vettori che il transformer consulta a ogni passo.", color: "#a78bfa" },
-  { slot: "wMel", title: "log-Mel (Whisper)", subtitle: "30 s · 3000 × 80", text: "Whisper non usa token audio: legge direttamente il log-Mel.", color: "#fbbf24" },
-  { slot: "wEnc", title: "Encoder Whisper", subtitle: "Conv1d + transformer", text: "Capisce l'audio guardandolo tutto insieme (attention bidirezionale).", color: "#38bdf8" },
-  { slot: "wDec", title: "Decoder Whisper", subtitle: "prossimo token di testo", text: "Scrive il testo un token alla volta consultando l'encoder.", color: "#a78bfa" },
-  { slot: "wText", title: "Testo", subtitle: "token speciali + parole", text: "Trascrizione, traduzione o lingua: lo decidono i token speciali iniziali.", color: "#34d399" },
+  { slot: "audio", title: "Audio", subtitle: "16.000 campioni/s", text: "La forma d'onda: continua e lunghissima.", color: "#67e8f9" },
+  { slot: "encoder", title: "Encoder", subtitle: "un vettore ogni 20 ms", text: "Riassume ogni frame in un vettore di numeri.", color: "#fbbf24" },
+  { slot: "rvq", title: "RVQ", subtitle: "4 codebook × 64 voci", text: "Ogni vettore diventa 4 numeri interi: i token.", color: "#f472b6" },
+  { slot: "transformer", title: "Transformer", subtitle: "prossimo token + delay pattern", text: "Come il GPT, ma i token sono pezzi di suono.", color: "#38bdf8", spanTo: "delay" },
+  { slot: "decoder", title: "Decoder", subtitle: "→ suono", text: "Dai token alla forma d'onda.", color: "#34d399" },
+  { slot: "output", title: "Audio generato", subtitle: "da ascoltare", text: "Il brano nuovo, token dopo token.", color: "#34d399" },
+  { slot: "text", title: "Prompt", subtitle: "\"melodia allegra…\"", text: "Che musica vuoi sentire.", color: "#a78bfa" },
+  { slot: "t5", title: "Text encoder", subtitle: "T5", text: "Il testo diventa vettori per la cross-attention.", color: "#a78bfa" },
+  { slot: "wMel", title: "log-Mel", subtitle: "30 s · 3000 × 80", text: "L'ingresso di Whisper: niente token audio.", color: "#fbbf24" },
+  { slot: "wEnc", title: "Encoder", subtitle: "Whisper", text: "Legge tutto l'audio insieme.", color: "#38bdf8" },
+  { slot: "wDec", title: "Decoder", subtitle: "Whisper", text: "Scrive il testo un token alla volta.", color: "#a78bfa" },
+  { slot: "wText", title: "Testo", subtitle: "token speciali + parole", text: "Trascrizione, traduzione o lingua.", color: "#34d399" },
 ];
+
+/**
+ * makeBlock disegna il testo con una dimensione fissa in unità di scena: per renderlo leggibile
+ * da lontano si costruisce il blocco in piccolo e lo si ingrandisce (testo compreso).
+ */
+function scaledBlock({ width, height, ...rest }, scale) {
+  const block = makeBlock({ ...rest, width: width / scale, height: height / scale, depth: 0.08 });
+  block.scale.setScalar(scale);
+  return block;
+}
 
 const FLOW_MAIN = ["audio", "encoder", "rvq", "transformer", "delay", "decoder", "output"];
 
@@ -38,8 +48,8 @@ export function buildBlocks() {
     const x0 = s.x - s.w / 2;
     const x1 = b.spanTo ? SLOT[b.spanTo].x + SLOT[b.spanTo].w / 2 : s.x + s.w / 2;
     const width = x1 - x0;
-    const height = b.slot === "text" || b.slot === "t5" || b.slot === "wText" ? 4 : 5.6;
-    const block = makeBlock({ title: b.title, subtitle: b.subtitle, text: b.text, width, height, color: b.color });
+    const height = b.slot === "text" || b.slot === "t5" ? 5 : b.slot.startsWith("w") ? 6 : 8;
+    const block = scaledBlock({ title: b.title, subtitle: b.subtitle, text: b.text, width, height, color: b.color }, 4.2);
     block.position.set((x0 + x1) / 2, s.y, 0);
     group.add(block);
     bySlot.set(b.slot, block);
@@ -55,17 +65,17 @@ export function buildBlocks() {
     ["wEnc", "wDec"],
     ["wDec", "wText"],
   ];
-  for (const [a, b] of arrows) group.add(makeArrow(right(a), left(b), { color: 0x94a3b8, radius: 0.09, headLength: 0.6 }));
-  group.add(makeArrow(new THREE.Vector3(SLOT.t5.x, SLOT.t5.y - 2.1, 0), new THREE.Vector3(SLOT.t5.x, SLOT.transformer.y + 3, 0), { color: 0xa78bfa, radius: 0.09, headLength: 0.6 }));
-  group.add(makeArrow(new THREE.Vector3(SLOT.audio.x, SLOT.audio.y - 3, 0), new THREE.Vector3(SLOT.wMel.x - SLOT.wMel.w / 2 + 2, SLOT.wMel.y + 2.1, 0), { color: 0xfbbf24, radius: 0.09, headLength: 0.6 }));
+  for (const [a, b] of arrows) group.add(makeArrow(right(a), left(b), { color: 0x94a3b8, radius: 0.12, headLength: 0.8 }));
+  group.add(makeArrow(new THREE.Vector3(SLOT.t5.x, SLOT.t5.y - 2.6, 0), new THREE.Vector3(SLOT.t5.x, SLOT.transformer.y + 4.2, 0), { color: 0xa78bfa, radius: 0.12, headLength: 0.8 }));
+  group.add(makeArrow(new THREE.Vector3(SLOT.audio.x, SLOT.audio.y - 4.2, 0), new THREE.Vector3(SLOT.wMel.x - SLOT.wMel.w / 2 + 2, SLOT.wMel.y + 3.2, 0), { color: 0xfbbf24, radius: 0.12, headLength: 0.8 }));
   return { group, bySlot };
 }
 
 /** Livello "Panoramica": diagramma con pochi blocchi grandi. */
 export function buildMacro() {
   const group = new THREE.Group();
-  const big = (title, subtitle, text, x0, x1, y, color, height = 9) => {
-    const b = makeBlock({ title, subtitle, text, width: x1 - x0, height, color });
+  const big = (title, subtitle, text, x0, x1, y, color, height = 13) => {
+    const b = scaledBlock({ title, subtitle, text, width: x1 - x0, height, color }, 6.5);
     b.position.set((x0 + x1) / 2, y, 0);
     group.add(b);
     return b;
@@ -76,16 +86,16 @@ export function buildMacro() {
   const tx1 = SLOT.delay.x + SLOT.delay.w / 2;
   const ox0 = SLOT.decoder.x - SLOT.decoder.w / 2;
   const ox1 = SLOT.output.x + SLOT.output.w / 2;
-  big("Suono", "forma d'onda → vettori", "Il suono è continuo: l'encoder lo riassume in un vettore ogni pochi millisecondi.", sx0, sx1, 0, "#67e8f9");
-  big("Token", "numeri interi · prossimo token", "Il codec trasforma i vettori in token; un transformer genera nuovi token, come il GPT con le lettere.", tx0, tx1, 0, "#38bdf8");
-  big("Suono", "token → forma d'onda", "Il decoder del codec trasforma i token in suono da ascoltare.", ox0, ox1, 0, "#34d399");
-  big("Testo", "il prompt", "Descrive la musica da generare (cross-attention).", SLOT.text.x - 6, SLOT.t5.x + 4.5, 13, "#a78bfa", 5);
-  big("Voce → Testo (Whisper)", "log-Mel → encoder → decoder", "Il percorso opposto: dall'audio alle parole.", SLOT.wMel.x - SLOT.wMel.w / 2, SLOT.wText.x + SLOT.wText.w / 2, -15, "#fbbf24", 6);
+  big("Suono", "forma d'onda → vettori", "Un'onda continua, riassunta in un vettore ogni 20 ms.", sx0, sx1, 0, "#67e8f9");
+  big("Token", "numeri interi · prossimo token", "Il codec fa i token; il transformer ne genera di nuovi, come il GPT con le lettere.", tx0, tx1, 0, "#38bdf8");
+  big("Suono", "token → forma d'onda", "Il decoder rende i token suono da ascoltare.", ox0, ox1, 0, "#34d399");
+  big("Testo", "il prompt", "Descrive la musica da generare.", SLOT.text.x - 8, SLOT.t5.x + 8, 17, "#a78bfa", 8.5);
+  big("Voce → Testo (Whisper)", "il percorso opposto", "Dall'audio alle parole.", SLOT.wMel.x - SLOT.wMel.w / 2, SLOT.wText.x + SLOT.wText.w / 2, -19, "#fbbf24", 9);
   const y = 0;
   group.add(makeArrow(new THREE.Vector3(sx1 + 0.4, y, 0), new THREE.Vector3(tx0 - 0.4, y, 0), { color: 0xe2e8f0, radius: 0.16, headLength: 1 }));
   group.add(makeArrow(new THREE.Vector3(tx1 + 0.4, y, 0), new THREE.Vector3(ox0 - 0.4, y, 0), { color: 0xe2e8f0, radius: 0.16, headLength: 1 }));
-  group.add(makeArrow(new THREE.Vector3(SLOT.t5.x - 2, 10.4, 0), new THREE.Vector3(SLOT.t5.x - 2, 4.6, 0), { color: 0xa78bfa, radius: 0.16, headLength: 1 }));
-  group.add(makeArrow(new THREE.Vector3(SLOT.audio.x, -4.6, 0), new THREE.Vector3(SLOT.audio.x + 2, -11.9, 0), { color: 0xfbbf24, radius: 0.16, headLength: 1 }));
+  group.add(makeArrow(new THREE.Vector3(SLOT.t5.x - 2, 12.5, 0), new THREE.Vector3(SLOT.t5.x - 2, 6.9, 0), { color: 0xa78bfa, radius: 0.18, headLength: 1.1 }));
+  group.add(makeArrow(new THREE.Vector3(SLOT.audio.x, -6.9, 0), new THREE.Vector3(SLOT.wMel.x - SLOT.wMel.w / 2 + 1, -14.2, 0), { color: 0xfbbf24, radius: 0.18, headLength: 1.1 }));
   return group;
 }
 
@@ -96,7 +106,8 @@ export function buildFlows() {
   for (let i = 1; i < FLOW_MAIN.length; i++) {
     const pa = right(FLOW_MAIN[i - 1]);
     const pb = left(FLOW_MAIN[i]);
-    flows.push(makeFlow([new THREE.Vector3(pa.x - 0.3, 0, 0), new THREE.Vector3(pb.x + 0.3, 0, 0)], { radius: 0.06 }));
+    // dal bordo destro di un componente a poco prima del successivo (lascia spazio alle etichette degli assi)
+    flows.push(makeFlow([new THREE.Vector3(pa.x + 0.1, 0, 0), new THREE.Vector3(pb.x - 1.2, 0, 0)], { radius: 0.06 }));
   }
   flows.push(makeFlow([new THREE.Vector3(SLOT.audio.x - 4, -SLOT.audio.h / 2 - 0.8, 0), new THREE.Vector3(SLOT.audio.x - 4, SLOT.wMel.y + SLOT.wMel.h / 2 + 1.9, 0), new THREE.Vector3(SLOT.wMel.x - SLOT.wMel.w / 2 + 1, SLOT.wMel.y + SLOT.wMel.h / 2 + 1.9, 0)], { radius: 0.06, color: "#fbbf24" }));
   flows.push(makeFlow([right("wMel"), left("wEnc")], { radius: 0.06 }));

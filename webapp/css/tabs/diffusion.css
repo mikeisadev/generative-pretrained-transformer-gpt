@@ -50,3 +50,7 @@
 .diff-sources a { color: #7dd3fc; text-decoration: none; font-weight: 600; }
 .diff-sources a:hover { text-decoration: underline; }
 .diff-sources .hint { margin: 3px 0 0; }
+
+/* Durante le azioni i controlli del player devono restare cliccabili anche se il pannello del
+   codice è aperto: in questo tab la barra sta sopra il pannello (vedi report: proposta per il nucleo). */
+.tab-root[data-tab="diffusion"] .player-bar { z-index: 16; }

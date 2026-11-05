@@ -138,7 +138,7 @@ export function renderScene(out, size, { time = 0, variant = BASE_VARIANT } = {}
 }
 
 /** Media su blocchi f×f di un'immagine RGB intercalata: restituisce (size/f)²·3 valori. */
-function avgPool(img, size, f) {
+export function avgPool(img, size, f) {
   const s = size / f;
   const out = new Float32Array(s * s * 3);
   const n = f * f;

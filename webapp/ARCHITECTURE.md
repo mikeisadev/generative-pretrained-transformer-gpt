@@ -164,6 +164,8 @@ tab.panes = { path, actions, views }   // elementi dei pannelli della sidebar
 tab.menu (Menu del percorso)
 tab.views.register({ id, label, description, order, enter(tab), exit(tab) }); tab.views.activate(id)
 tab.showCode(snippetKey, title, highlight[]); tab.focus(registryIdOrObject, options); tab.setCaption(text)
+tab.getEngine() → Promise<GPTEngine> (js/engine/gpt.js, caricato una volta e condiviso)
+tab.arch.tensorMeshes: Map(nome tensore PyTorch → [mesh della heatmap])
 ```
 Id utili nel registro: `tokens`, `tok_emb`, `pos_emb`, `embed_add`, `blocks`, `blocks.<i>`,
 `blocks.<i>.ln1|heads|heads.<h>|heads.<h>.pattern|proj|add1|ln2|ffwd|add2`, `ln_f`, `lm_head`,
@@ -175,7 +177,7 @@ Viste registrate: `architettura` (base). I moduli aggiungono `pesi`, `neuroni`, 
 ## Test
 
 - Python: `pytest` (dalla radice).
-- JavaScript: `node --test webapp/tests/` (moduli puri senza DOM: motore GPT, libreria RAG, …).
+- JavaScript: `node --test webapp/tests/*.test.mjs` (moduli puri senza DOM: motore GPT, libreria RAG, …).
 - Visivo: `python scripts/serve_webapp.py --no-export --port 8765` poi
   `NODE_PATH=$(npm root -g) node webapp/tests/screenshot.mjs http://127.0.0.1:8765/ <cartella> transformer,rag`
   (stampa gli errori della console; il codice di uscita è 1 se ce ne sono).

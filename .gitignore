@@ -6,5 +6,5 @@ __pycache__/
 *.egg-info/
 
 # Dataset scaricato automaticamente e checkpoint del training
-data/
-checkpoints/
+/data/
+/checkpoints/

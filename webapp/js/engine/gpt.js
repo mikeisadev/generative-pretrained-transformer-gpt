@@ -418,7 +418,6 @@ export class GPTEngine {
     const ws = this._ws;
     const x = ws.x;
     const n = T * C;
-    const copy = (buffer, size) => buffer.slice(0, size);
 
     // Embedding: riga del token + riga della posizione (le posizioni ripartono da 0 nel contesto).
     for (let t = 0; t < T; t++) {
@@ -520,6 +519,11 @@ export class GPTEngine {
     }
     for (let i = 0; i < ids.length; i++) this._checkId(ids[i]);
   }
+}
+
+/** Copia delle prime `size` voci di un buffer di lavoro (il trace non deve cambiare dopo). */
+function copy(buffer, size) {
+  return buffer.slice(0, size);
 }
 
 /** Unisce base e percorso relativo ("data" + "x.json" → "data/x.json"). */

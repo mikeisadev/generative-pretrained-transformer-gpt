@@ -2,7 +2,7 @@
  * Testi del tab "Audio e musica": percorso didattico (menu a fisarmonica) e fonti.
  *
  * Ogni sottopunto: { id, title, text (HTML nostro), math?, focus (id del registro 3D),
- * code ("py:…" | "js:file#nome"), highlight? }. I segnaposto {{…}} vengono dai calcoli veri
+ * code ("py:…" | "js:file#nome"), highlight?, stage? (stadio dello spettrogramma: 0 STFT … 3 log-Mel) }. I segnaposto {{…}} vengono dai calcoli veri
  * del laboratorio (vedi index.js → vars).
  *
  * Regola: ogni numero sui modelli reali viene dai paper o dal codice ufficiale elencati in
@@ -66,6 +66,7 @@ export const STEPS = [
         id: "freq.fft",
         title: "FFT e spettrogramma",
         focus: "encoder",
+        stage: 0,
         code: "js:dsp.js#stft",
         highlight: ["fft(re, im)", "Math.hypot"],
         text: `<p>La <strong>trasformata di Fourier</strong> risponde alla domanda: "quanto di ogni frequenza c'è in questo frame?". È come un prisma che separa la luce bianca nei colori.</p>
@@ -82,6 +83,7 @@ export const STEPS = [
         id: "freq.mel",
         title: "Scala Mel e log-Mel",
         focus: "encoder",
+        stage: 3,
         code: "js:dsp.js#melFilterbank",
         highlight: ["hzToMel(fMin", "Math.min(up, down)"],
         text: `<p>L'orecchio non sente le frequenze in modo lineare: tra 100 e 200 Hz sentiamo un salto grande (un'ottava), tra 7.000 e 7.100 Hz quasi nulla.

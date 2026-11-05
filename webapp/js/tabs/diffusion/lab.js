@@ -7,7 +7,9 @@ import * as THREE from "three";
 import { DynamicLabel } from "./textures.js";
 
 export class Lab {
-  constructor() {
+  /** @param {number} textScale moltiplica tutte le altezze dei testi (leggibilità da lontano) */
+  constructor({ textScale = 1 } = {}) {
+    this.textScale = textScale;
     this.group = new THREE.Group();
     this.group.visible = false;
     this.items = new Map();
@@ -18,7 +20,8 @@ export class Lab {
    * Pannello con texture e didascalia sopra.
    * @returns {{mesh: THREE.Mesh, title: DynamicLabel}}
    */
-  panel(key, { texture, x, y, w, h = w, title = "", titleHeight = 0.5, frame = 0x475569 }) {
+  panel(key, { texture, x, y, w, h = w, title = "", titleHeight = 0.5, below = false, frame = 0x475569 }) {
+    titleHeight *= this.textScale;
     const geo = new THREE.PlaneGeometry(w, h);
     const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }));
     mesh.position.set(x, y, 0);
@@ -26,7 +29,8 @@ export class Lab {
     edges.userData.noBounds = true;
     mesh.add(edges);
     const label = new DynamicLabel(title, { height: titleHeight });
-    label.sprite.position.set(x, y + h / 2 + titleHeight * 1.1 * Math.max(1, title.split("\n").length) * 0.55 + 0.25, 0.05);
+    const offset = h / 2 + titleHeight * 1.1 * Math.max(1, title.split("\n").length) * 0.55 + 0.25;
+    label.sprite.position.set(x, below ? y - offset : y + offset, 0.05);
     this.group.add(mesh, label.sprite);
     const item = { mesh, title: label, edges };
     this.items.set(key, item);
@@ -35,7 +39,7 @@ export class Lab {
 
   /** Testo libero (formula, nota). */
   text(key, text, x, y, options = {}) {
-    const label = new DynamicLabel(text, options);
+    const label = new DynamicLabel(text, { ...options, height: (options.height ?? 0.5) * this.textScale });
     label.sprite.position.set(x, y, 0.05);
     this.group.add(label.sprite);
     this.items.set(key, { label });

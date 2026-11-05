@@ -7,7 +7,7 @@
 import { el, fmt } from "../../core/dom.js";
 import { CODEC } from "./codec.js";
 
-const pct = (v) => `${(v * 100).toLocaleString("it-IT", { maximumFractionDigits: v < 0.01 ? 2 : 1 })} %`;
+const pct = (v) => `${fmt(v * 100, v < 0.01 ? 2 : 1)} %`;
 
 /**
  * @param {HTMLElement} pane

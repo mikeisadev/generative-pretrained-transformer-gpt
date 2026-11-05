@@ -10,7 +10,7 @@
 //
 // Qui facciamo il passo 1 con la stessa regex di cl100k_base e sostituiamo il passo 2 (che
 // richiederebbe la tabella delle fusioni, qualche MB) con una regola semplice: una parola fino a
-// 7 lettere vale 1 token, una parola più lunga viene divisa in pezzi di circa 6 lettere.
+// 4 lettere vale 1 token, una parola più lunga viene divisa in pezzi di circa 4 lettere.
 // Il conteggio è quindi una stima: sull'italiano somiglia all'ordine di grandezza reale (circa
 // 3-4 caratteri per token), ma non coincide token per token con quello di OpenAI.
 
@@ -22,9 +22,9 @@ const PRE_TOKEN_PATTERN =
   /'(?:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+/giu;
 
 /** Parole fino a questa lunghezza (in lettere) contano come un solo token. */
-export const MAX_LETTERS_SINGLE_TOKEN = 7;
+export const MAX_LETTERS_SINGLE_TOKEN = 4;
 /** Lunghezza tipica dei pezzi in cui si spezzano le parole più lunghe. */
-export const LETTERS_PER_PIECE = 6;
+export const LETTERS_PER_PIECE = 4;
 
 /** Descrizione dichiarata dell'approssimazione, da mostrare nella UI. */
 export const TOKENIZER_INFO = Object.freeze({
@@ -32,8 +32,8 @@ export const TOKENIZER_INFO = Object.freeze({
   approximates: "cl100k_base (BPE di OpenAI, usato da TokenTextSplitter tramite JTokkit)",
   description:
     "Simulazione didattica: stessa regex di pre-tokenizzazione di cl100k_base, ma al posto del " +
-    "Byte Pair Encoding una regola fissa (parole fino a 7 lettere = 1 token, parole più lunghe " +
-    "divise in pezzi da circa 6 lettere). I conteggi sono stime, non i token reali di OpenAI.",
+    "Byte Pair Encoding una regola fissa (parole fino a 4 lettere = 1 token, parole più lunghe " +
+    "divise in pezzi da circa 4 lettere). I conteggi sono stime, non i token reali di OpenAI.",
 });
 
 /**
