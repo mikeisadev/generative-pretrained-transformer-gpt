@@ -203,8 +203,7 @@ const MINV = invert3(M);
 
 /**
  * VAE simulato con fattore 8 e 4 canali. Il latente è "channels first": [c][y][x], lunghezza 4·s·s.
- * Il canale 3 misura quanto è dettagliata (contrastata) ogni zona 8×8: il decoder lo usa per dosare
- * i dettagli fini. I canali sono riscalati per avere deviazione standard ~1, come fa il
+ * Il canale 3 misura quanto è dettagliata (contrastata) ogni zona 8×8. I canali sono riscalati per avere deviazione standard ~1, come fa il
  * `scale_factor` 0,18215 di Stable Diffusion con il latente vero.
  */
 export class SimulatedVAE {
@@ -274,8 +273,9 @@ export class SimulatedVAE {
   }
 
   /**
-   * Latente → immagine RGB (size × size). Ricostruisce colori e forme dal latente e i dettagli fini
-   * dall'immagine di riferimento, dosati dal canale 3: con il latente pulito restituisce l'immagine.
+   * Latente → immagine RGB (size × size). Ricostruisce colori e forme dal latente; i dettagli fini
+   * vengono dall'immagine di riferimento e compaiono solo dove il latente è vicino a quello vero:
+   * con il latente pulito restituisce esattamente l'immagine.
    */
   decode(out, z) {
     const { s, size, small, up, gainSmall, gainUp, scales, z0 } = this;
@@ -285,7 +285,10 @@ export class SimulatedVAE {
       const c1 = z[n + k] / scales[1];
       const c2 = z[2 * n + k] / scales[2];
       for (let c = 0; c < 3; c++) small[k * 3 + c] = MINV[c][0] * c0 + MINV[c][1] * c1 + MINV[c][2] * c2;
-      gainSmall[k] = clamp(1 + (z[3 * n + k] - z0[3 * n + k]) * 0.6, 0, 2.5);
+      // i dettagli fini compaiono solo dove il latente somiglia a quello vero (simulazione)
+      let err = 0;
+      for (let c = 0; c < 4; c++) err += Math.abs(z[c * n + k] - z0[c * n + k]) / 4;
+      gainSmall[k] = clamp(1 - 1.2 * err, 0, 1);
     }
     upsampleBilinear(up, small, s, size, 3);
     upsampleBilinear(gainUp, gainSmall, s, size, 1);

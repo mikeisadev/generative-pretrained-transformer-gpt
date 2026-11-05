@@ -1,0 +1,10 @@
+/**
+ * Un estratto VERO del testo di training: i primi 1371 caratteri di data/input.txt (Tiny Shakespeare,
+ * 1.115.394 caratteri in tutto). Stanno nel 90% iniziale usato per il training (gpt/data.py → split),
+ * quindi sono finestre che il modello ha davvero potuto vedere. Serve all'azione
+ * "Uno step di training al microscopio" per estrarre un batch come get_batch.
+ * Il testo di Shakespeare è di pubblico dominio.
+ */
+export const TRAINING_EXCERPT = "First Citizen:\nBefore we proceed any further, hear me speak.\n\nAll:\nSpeak, speak.\n\nFirst Citizen:\nYou are all resolved rather to die than to famish?\n\nAll:\nResolved. resolved.\n\nFirst Citizen:\nFirst, you know Caius Marcius is chief enemy to the people.\n\nAll:\nWe know't, we know't.\n\nFirst Citizen:\nLet us kill him, and we'll have corn at our own price.\nIs't a verdict?\n\nAll:\nNo more talking on't; let it be done: away, away!\n\nSecond Citizen:\nOne word, good citizens.\n\nFirst Citizen:\nWe are accounted poor citizens, the patricians good.\nWhat authority surfeits on would relieve us: if they\nwould yield us but the superfluity, while it were\nwholesome, we might guess they relieved us humanely;\nbut they think we are too dear: the leanness that\nafflicts us, the object of our misery, is as an\ninventory to particularise their abundance; our\nsufferance is a gain to them Let us revenge this with\nour pikes, ere we become rakes: for the gods know I\nspeak this in hunger for bread, not in thirst for revenge.\n\nSecond Citizen:\nWould you proceed especially against Caius Marcius?\n\nAll:\nAgainst him first: he's a very dog to the commonalty.\n\nSecond Citizen:\nConsider you what services he has done for his country?\n\nFirst Citizen:\nVery well; and could be content to give him good\nreport fort, but that he pays himself with being proud.\n\nSecond Citizen:\nNay, but speak not maliciously.\n";
+
+export const EXCERPT_SOURCE = "data/input.txt, caratteri 0–1370";

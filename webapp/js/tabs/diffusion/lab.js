@@ -4,7 +4,7 @@
  * alla fine con clear() (geometrie, materiali e texture vengono rilasciati).
  */
 import * as THREE from "three";
-import { DynamicLabel } from "./textures.js";
+import { ChannelTexture, DynamicLabel } from "./textures.js";
 
 export class Lab {
   /** @param {number} textScale moltiplica tutte le altezze dei testi (leggibilità da lontano) */
@@ -91,3 +91,35 @@ export class Lab {
   }
 }
 
+// ---------------------------------------------------------------- aiuti per le azioni
+
+/** Quattro canali di un latente in una griglia 2 × 2 nel banco di lavoro. */
+export function latentGrid(lab, key, x, y, w, title, titleHeight = 0.85) {
+  const textures = Array.from({ length: 4 }, () => lab.own(new ChannelTexture(32)));
+  const half = w / 2 + 0.15;
+  textures.forEach((t, c) => {
+    lab.panel(`${key}${c}`, { texture: t.texture, x: x + (c % 2 ? half / 2 + 0.1 : -half / 2 - 0.1), y: y + (c < 2 ? half / 2 + 0.1 : -half / 2 - 0.1), w: w / 2, title: "" });
+  });
+  lab.text(`${key}-title`, title, x, y + w / 2 + 0.6 + titleHeight * title.split("\n").length * 0.6, { height: titleHeight });
+  return { set: (z) => textures.forEach((t, c) => t.set(z, c)) };
+}
+
+/** Inquadra il banco di lavoro lasciando spazio in basso alla barra del player. */
+export function focusLab(tab, margin = 1.05) {
+  // rimandato: all'avvio di un'azione il pannello del codice si apre subito dopo e cambia lo spazio visibile
+  return new Promise((resolve) =>
+    setTimeout(() => {
+      const box = tab.lab.bounds();
+      box.min.y -= (box.max.y - box.min.y) * 0.3;
+      tab.ui.director.focus(box, { showFrame: false, margin, direction: LAB_DIR }).then(resolve);
+    }, 0),
+  );
+}
+
+/** Porta la camera sul banco solo se non c'è già (serve quando si salta tra i passi). */
+export function ensureLab(tab, ctx) {
+  if (ctx.data.view === "lab") return;
+  ctx.data.view = "lab";
+  focusLab(tab);
+}
+const LAB_DIR = new THREE.Vector3(0.06, 0.08, 1).normalize();

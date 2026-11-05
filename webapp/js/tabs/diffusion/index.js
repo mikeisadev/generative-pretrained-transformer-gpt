@@ -6,7 +6,8 @@
  *   videoScene.js livello Dettaglio della parte video (cubo spazio-temporale, patch, attention)
  *   overview.js   livelli Blocchi e Panoramica (immagine e video)
  *   lab.js        "banco di lavoro" sopra la scena dove le azioni mostrano immagini e latenti
- *   actions.js    azioni animate su immagini (rumore, generazione, VAE)
+ *   actions.js    azioni animate su immagini (rumore, generazione, VAE, dentro il denoiser)
+ *   denoiserSim.js denoiser simulato (dichiarato) per la generazione; imagery.js immagini e VAE simulato
  *   videoActions.js azione animata sul video
  *   plots.js      grafici (schedule, SNR, rumore per passo, guidance, coerenza tra frame)
  *   content.js    percorso didattico, fonti; snippets.js frammenti di codice veri
@@ -35,11 +36,11 @@ const IMAGE_SIZE = 256;
 /** Vista (camera) di partenza per ogni livello del LOD quando l'utente lo sceglie a mano. */
 const LEVEL_DISTANCE = { detail: 70, blocks: 170, macro: 380 };
 
-/** Riquadri delle viste d'insieme (coordinate di scena). */
 /** Direzione della camera per gli schemi: quasi di fronte, appena dall'alto. */
 const FRONT = new THREE.Vector3(0, 0.12, 1).normalize();
 /** Direzione per i dettagli: un po' di lato e dall'alto per dare profondità, ma testo leggibile. */
 const DETAIL_DIR = new THREE.Vector3(0.16, 0.2, 1).normalize();
+/** Riquadro della vista d'insieme (coordinate di scena): righe "Immagini" e "Video" del livello Blocchi. */
 const OVERVIEW_BOX = new THREE.Box3(new THREE.Vector3(-78, VIDEO_Y - 10, 0), new THREE.Vector3(75, 19, 0));
 
 export async function createTab(root, app) {
@@ -101,7 +102,7 @@ export async function createTab(root, app) {
   function flyToLevel(id) {
     if (id === "detail") {
       // se si stava guardando la parte video resta lì, altrimenti si va sul denoiser
-      const onVideo = host.controls.target.y < VIDEO_Y / 2;
+      const onVideo = host.controls.target.y < VIDEO_Y * 0.75;
       return tab.focus(onVideo ? video.regions.intro() : tab.denoiser, { showFrame: false, margin: 1.05 });
     }
     const target = id === "macro" ? new THREE.Vector3(0, -36, 0) : OVERVIEW_BOX.getCenter(new THREE.Vector3());
