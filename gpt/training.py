@@ -9,7 +9,7 @@ Il ciclo di training ripete quattro passi:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +28,46 @@ class EvalPoint:
     step: int
     train_loss: float
     val_loss: float
+
+
+class TrainingCallback:
+    """Osservatore del training: ridefinisci solo i metodi che ti servono.
+
+    I callback GUARDANO il training (loss, gradienti, pesi) senza cambiarlo:
+    non devono modificare i pesi né usare il generatore casuale globale di torch,
+    altrimenti i batch estratti dopo sarebbero diversi.
+    Va bene anche un oggetto qualsiasi con solo alcuni di questi metodi.
+    """
+
+    def on_train_start(self, model: nn.Module, optimizer: torch.optim.Optimizer, train_cfg: TrainConfig) -> None:
+        """Prima del primo step."""
+
+    def on_eval(self, step: int, losses: dict[str, float]) -> None:
+        """Dopo ``estimate_loss``: ``losses = {"train": ..., "val": ...}``."""
+
+    def on_after_backward(self, step: int, model: nn.Module, loss: torch.Tensor) -> None:
+        """I gradienti sono pronti, i pesi NON sono ancora stati aggiornati."""
+
+    def on_step_end(
+        self, step: int, model: nn.Module, loss: torch.Tensor, optimizer: torch.optim.Optimizer
+    ) -> None:
+        """Subito dopo ``optimizer.step()``: i pesi sono già aggiornati."""
+
+    def on_train_end(self, model: nn.Module, history: list[EvalPoint]) -> None:
+        """Dopo l'ultimo step."""
+
+
+class _CallbackList:
+    """Chiama lo stesso metodo su tutti i callback che lo definiscono, nell'ordine della lista."""
+
+    def __init__(self, callbacks: Iterable[object] | None) -> None:
+        self._callbacks = list(callbacks or ())
+
+    def __call__(self, hook: str, *args: object) -> None:
+        for callback in self._callbacks:
+            method = getattr(callback, hook, None)
+            if method is not None:
+                method(*args)
 
 
 @torch.no_grad()
@@ -60,24 +100,35 @@ def train(
     train_cfg: TrainConfig,
     device: torch.device,
     log: Callable[[str], None] = print,
+    callbacks: Iterable[TrainingCallback] | None = None,
 ) -> list[EvalPoint]:
-    """Addestra ``model`` in place e restituisce la storia delle loss misurate."""
+    """Addestra ``model`` in place e restituisce la storia delle loss misurate.
+
+    ``callbacks`` (facoltativi) osservano il training, per esempio per registrarlo
+    (vedi ``gpt.recording``); senza callback il training è identico.
+    """
     optimizer = torch.optim.AdamW(model.parameters(), lr=train_cfg.learning_rate)
     history: list[EvalPoint] = []
+    notify = _CallbackList(callbacks)
     model.train()
+    notify("on_train_start", model, optimizer, train_cfg)
 
     for step in range(train_cfg.max_iters):
         if step % train_cfg.eval_interval == 0 or step == train_cfg.max_iters - 1:
             losses = estimate_loss(model, splits, block_size, train_cfg, device)
             history.append(EvalPoint(step, losses["train"], losses["val"]))
             log(f"step {step:5d}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+            notify("on_eval", step, losses)
 
         xb, yb = get_batch(splits.train, block_size, train_cfg.batch_size, device)
         _, loss = model(xb, yb)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
+        notify("on_after_backward", step, model, loss)
         optimizer.step()
+        notify("on_step_end", step, model, loss, optimizer)
 
+    notify("on_train_end", model, history)
     return history
 
 
