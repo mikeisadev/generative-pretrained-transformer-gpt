@@ -1,0 +1,108 @@
+/*
+ * Pannello dei grafici (js/core/ui/charts.js, che inietta questo file al primo utilizzo).
+ * I colori --chart-* sono impostati dal modulo JS sul pannello: la stessa fonte per canvas e HTML.
+ * Il pulsante .charts-fab è posizionato in core.css; qui solo il suo contenuto.
+ */
+
+.charts-fab { display: inline-flex; align-items: center; gap: 6px; }
+.charts-fab-icon { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.charts-fab[aria-expanded="true"] { border-color: var(--accent); }
+
+/* Pannello laterale: alto quanto lo stage, sopra il pannello del codice (z-index 15) e il pulsante (16). */
+.charts-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(460px, 100%);
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  background: var(--chart-surface);
+  border-left: 1px solid var(--chart-grid);
+  color: var(--chart-text);
+  transform: translateX(100%);
+  visibility: hidden;
+  /* visibility cambia DOPO la chiusura, così l'animazione di uscita si vede. */
+  transition: transform 0.25s ease, visibility 0s linear 0.25s;
+}
+.charts-panel.open { transform: none; visibility: visible; transition: transform 0.25s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .charts-panel, .charts-panel.open { transition: none; }
+}
+
+.charts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 10px 16px;
+  border-bottom: 1px solid var(--chart-grid);
+}
+.charts-header h2 { margin: 0; font-size: 15px; font-weight: 600; }
+
+.charts-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 16px 24px; scrollbar-gutter: stable; }
+.charts-empty { color: var(--chart-muted); margin: 18px 0; }
+
+.charts-section { margin-top: 14px; }
+.charts-section > h3 { margin: 0; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--chart-muted); font-weight: 600; }
+.charts-section-desc { margin: 2px 0 8px; font-size: 12.5px; color: var(--chart-muted); }
+.charts-cards { display: grid; gap: 12px; }
+
+/* Card: titolo, "a cosa serve", legenda, grafico, nota, tabella. */
+.chart-card {
+  border: 1px solid var(--chart-grid);
+  border-radius: 10px;
+  padding: 12px 12px 8px;
+  min-width: 0;
+}
+.chart-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--chart-text); }
+.chart-desc { margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--chart-muted); }
+
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 12px; color: var(--chart-text); }
+.chart-legend[hidden] { display: none; }
+.chart-legend-item, .chart-legend-scale { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend-scale { color: var(--chart-muted); font-variant-numeric: tabular-nums; }
+.chart-legend-name { margin-left: 6px; }
+
+/* Chiavi della legenda e del tooltip: imitano il segno del grafico (linea, rettangolo, punto). */
+.chart-key { display: inline-block; flex: none; }
+.chart-key-line { width: 14px; height: 2px; border-radius: 1px; }
+.chart-key-rect { width: 10px; height: 10px; border-radius: 2px; }
+.chart-key-dot { width: 8px; height: 8px; border-radius: 50%; }
+.chart-key-scale { width: 120px; height: 8px; border-radius: 2px; }
+
+.chart-plot { position: relative; margin-top: 8px; height: 200px; }
+.chart-canvas { display: block; touch-action: pan-y; }
+
+.chart-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  pointer-events: none;
+  max-width: 240px;
+  padding: 6px 9px;
+  font-size: 12px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+.chart-tooltip[hidden] { display: none; }
+.chart-tooltip-title { color: var(--chart-muted); margin-bottom: 2px; }
+.chart-tooltip-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.chart-tooltip-row strong { color: var(--chart-text); font-weight: 600; }
+.chart-tooltip-row span:last-child:not(.chart-key) { color: var(--chart-muted); overflow: hidden; text-overflow: ellipsis; }
+
+.chart-note { margin: 6px 0 0; font-size: 11.5px; color: var(--chart-muted); }
+.chart-note[hidden] { display: none; }
+
+.chart-table { margin-top: 6px; font-size: 12px; }
+.chart-table summary { cursor: pointer; color: var(--chart-muted); width: max-content; }
+.chart-table summary:hover { color: var(--chart-text); }
+.chart-table-body { max-height: 220px; overflow: auto; margin-top: 6px; }
+.chart-table table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.chart-table th, .chart-table td { padding: 2px 8px 2px 0; text-align: right; border-bottom: 1px solid var(--chart-grid); white-space: nowrap; }
+.chart-table th { color: var(--chart-muted); font-weight: 600; position: sticky; top: 0; background: var(--chart-surface); }
+.chart-table th:first-child, .chart-table td:first-child { text-align: left; }

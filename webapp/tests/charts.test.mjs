@@ -70,6 +70,9 @@ test("logTicks: meno di una decade → 1…9, molte decadi → potenze di 10", (
   const mid = logTicks(0.3, 40);
   assert.deepEqual(mid.ticks, [0.2, 0.5, 1, 2, 5, 10, 20, 50]);
   assert.deepEqual(logTicks(-1, 5).ticks, [1, 10]); // dominio non valido: fallback
+  const padded = logTicks(1.66, 4.4, { pad: 1.08 });
+  assert.deepEqual(padded.ticks, [2, 3, 4]); // dominio stretto attorno ai dati, tick dentro
+  assert.ok(padded.min < 1.66 && padded.min > 1.5 && padded.max > 4.4 && padded.max < 4.8);
 });
 
 test("scale lineari e logaritmiche con invert", () => {
@@ -184,6 +187,8 @@ test("placeLabels scarta le etichette sovrapposte", () => {
     { x: 40, y: 0, w: 20, h: 10 },
   ]);
   assert.deepEqual(keep, [true, false, true]);
+  const blocked = placeLabels([{ x: 0, y: 0, w: 10, h: 10 }], 0, [{ x: 5, y: 5, w: 4, h: 4 }]);
+  assert.deepEqual(blocked, [false]); // un ostacolo (un punto) blocca l'etichetta
 });
 
 test("rampe di colore: estremi esatti e dominio divergente simmetrico", () => {

@@ -159,7 +159,11 @@ class RecorderConfig:
 
 
 class TrainingRecorder(TrainingCallback):
-    """Callback che registra loss, metriche e snapshot dei pesi; poi ``save(out_dir)``."""
+    """Callback che registra loss, metriche e snapshot dei pesi; poi ``save(out_dir)``.
+
+    Uso: ``train(..., callbacks=[recorder])``, poi ``recorder.save(cartella)``.
+    Un recorder registra UN solo training: per un altro training creane uno nuovo.
+    """
 
     def __init__(
         self,

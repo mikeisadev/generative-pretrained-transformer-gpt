@@ -16,6 +16,7 @@ pip install -r requirements.txt
 python train.py                    # ~3 minuti su CPU, salva checkpoints/gpt.pt
 python generate.py --prompt "ROMEO:" --max-new-tokens 300
 python scripts/serve_webapp.py     # poi apri http://localhost:8000
+python scripts/record_training.py  # rifà il training registrandolo per i grafici della web app (~4 min)
 ```
 
 Prova veloce del training: `python train.py --max-iters 500`. Test: `pytest`.

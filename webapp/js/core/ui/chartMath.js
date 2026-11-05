@@ -170,9 +170,13 @@ function roundTo(value, step) {
 /**
  * Tick per un asse logaritmico (solo valori > 0). Con meno di una decade usa 1…9 × 10^k,
  * con poche decadi 1, 2, 5 × 10^k, altrimenti le sole potenze di 10.
- * @returns {{min:number, max:number, ticks:number[]}} dominio allargato alle decadi o ai tick esterni
+ * @param {object} [o]
+ * @param {number} [o.pad] se dato, il dominio è [min / pad, max × pad] con i tick al suo interno;
+ *   altrimenti il dominio si allarga ai tick appena fuori dai dati. Con pochi dati in una decade
+ *   (la loss da 4,4 a 1,6) allargare fino a 1 lascerebbe metà grafico vuota.
+ * @returns {{min:number, max:number, ticks:number[]}}
  */
-export function logTicks(min, max) {
+export function logTicks(min, max, { pad } = {}) {
   if (!(min > 0) || !(max > 0) || !Number.isFinite(min) || !Number.isFinite(max)) return { min: 1, max: 10, ticks: [1, 10] };
   if (min > max) [min, max] = [max, min];
   if (min === max) {
@@ -188,6 +192,11 @@ export function logTicks(min, max) {
   for (let k = k0; k <= k1; k++) {
     if (mantissas.length === 1 && (k - k0) % every) continue;
     for (const m of mantissas) candidates.push(Number((m * 10 ** k).toPrecision(12)));
+  }
+  if (pad > 1) {
+    const [lo, hi] = [min / pad, max * pad];
+    const inside = candidates.filter((t) => t >= lo && t <= hi);
+    if (inside.length >= 2) return { min: lo, max: hi, ticks: inside };
   }
   // Dominio: dal tick appena sotto il minimo a quello appena sopra il massimo.
   const lower = candidates.filter((t) => t <= min * (1 + 1e-9)).pop() ?? candidates[0];
@@ -348,10 +357,11 @@ export function visibleRange(xs, count, x0, x1) {
  * si sovrappone a quelle già tenute (meglio qualche etichetta in meno che un groviglio).
  * @param {{x:number, y:number, w:number, h:number}[]} boxes rettangoli già in ordine di priorità
  * @param {number} [padding=2]
+ * @param {{x:number, y:number, w:number, h:number}[]} [obstacles] zone da non coprire (es. i punti di uno scatter)
  * @returns {boolean[]} quali tenere
  */
-export function placeLabels(boxes, padding = 2) {
-  const kept = [];
+export function placeLabels(boxes, padding = 2, obstacles = []) {
+  const kept = [...obstacles];
   return boxes.map((b) => {
     const clash = kept.some((k) => b.x < k.x + k.w + padding && k.x < b.x + b.w + padding && b.y < k.y + k.h + padding && k.y < b.y + b.h + padding);
     if (!clash) kept.push(b);
