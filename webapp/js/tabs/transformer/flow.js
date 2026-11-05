@@ -4,7 +4,7 @@
  * quel componente si illumina e la didascalia in basso dice che cosa sta succedendo.
  */
 import * as THREE from "three";
-import { COLORS } from "./visuals.js";
+import { COLORS } from "../../core/visuals.js";
 
 const SPEED = 12; // unità di scena al secondo
 const PAUSE_AT_END = 1.5;

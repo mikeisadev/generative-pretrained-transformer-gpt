@@ -12,7 +12,7 @@
  * delle "stazioni" attraversate dall'animazione del flusso.
  */
 import * as THREE from "three";
-import { CELL, COLORS, addNode, attentionTexture, label, matrixPlane, tokenCube, weightTexture } from "./visuals.js";
+import { CELL, COLORS, addNode, attentionTexture, label, matrixPlane, tokenCube, weightTexture } from "../../core/visuals.js";
 
 const GAP = 0.9;
 const BAR_W = 0.12;

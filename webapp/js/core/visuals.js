@@ -5,7 +5,7 @@
  * Una matrice nn.Linear di forma (out, in) è disegnata alta `out` e larga `in`.
  */
 import * as THREE from "three";
-import { decodeBytes } from "../data.js";
+import { decodeBytes } from "./binary.js";
 
 export const CELL = 0.04;
 
