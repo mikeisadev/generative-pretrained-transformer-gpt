@@ -102,7 +102,7 @@ export class TokenTape {
       this.group.add(this.labels.mesh);
     }
     this.visible = 0;
-    this.showIds = false;
+    this.idsShown = 0;
   }
 
   /** Centro (coordinate locali) della cella i. */
@@ -114,6 +114,7 @@ export class TokenTape {
   /** Posizione nel mondo della cella i (per i fili verso gli embedding). */
   worldPosition(i, target = new THREE.Vector3()) {
     this.cellPosition(i, target);
+    this.group.updateWorldMatrix(true, false);
     return this.group.localToWorld(target);
   }
 
@@ -146,10 +147,10 @@ export class TokenTape {
     if (this.cubes.instanceColor) this.cubes.instanceColor.needsUpdate = true;
   }
 
-  /** Mostra (o nasconde) gli id sotto i caratteri. */
-  setIds(show) {
-    if (show === this.showIds) return;
-    this.showIds = show;
+  /** Mostra gli id sotto i primi `count` caratteri (0 = nessuno). */
+  setIds(count) {
+    if (count === this.idsShown) return;
+    this.idsShown = count;
     this.redraw();
   }
 
@@ -201,13 +202,27 @@ export class TokenTape {
       g.font = `600 ${c * 0.5}px ${MONO}`;
       g.fillStyle = ch === " " || ch === "\n" ? "#94a3b8" : "#f8fafc";
       g.fillText(visibleChar(ch), x, y);
-      if (this.showIds) {
+      if (i < this.idsShown) {
         g.font = `600 ${c * 0.3}px ${MONO}`;
         g.fillStyle = this.states[i] === "outside" ? "#64748b" : "#fbbf24";
         g.fillText(String(this.ids[i]), x, y + c * 0.82);
       }
     }
     texture.needsUpdate = true;
+  }
+
+  /** Box3 nel mondo delle prime `count` celle (le InstancedMesh non hanno un bounding box utile). */
+  bounds(count = this.chars.length) {
+    const box = new THREE.Box3();
+    const p = new THREE.Vector3();
+    const half = this.cell * 0.55;
+    const last = Math.max(1, Math.min(count, this.chars.length));
+    for (let i = 0; i < last; i++) {
+      this.worldPosition(i, p);
+      box.expandByPoint(p.set(p.x - half, p.y + half, p.z));
+      box.expandByPoint(p.set(p.x + 2 * half, p.y - 3.4 * half, p.z));
+    }
+    return box;
   }
 
   /** Larghezza e altezza della griglia in unità di scena. */
@@ -339,6 +354,7 @@ export class ContextColumn {
 
   worldPosition(t, target = new THREE.Vector3()) {
     target.set(this.size / 2, this.y(t), 0);
+    this.group.updateWorldMatrix(true, false);
     return this.group.localToWorld(target);
   }
 

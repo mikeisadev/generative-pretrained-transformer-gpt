@@ -1,1 +1,65 @@
-/* Stili specifici del tab transformer. */
+/* Stili specifici del tab transformer: viste "Pesi" e "Rete neurale" (prefisso .tf-). */
+
+/* Riquadro informativo della vista attiva, nel pannello "Viste" della sidebar */
+.tf-view-info { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13.5px; line-height: 1.5; }
+.tf-view-info[hidden] { display: none; }
+.tf-view-info h3 { margin: 0 0 6px; font-size: 15px; color: #e0f2fe; }
+.tf-view-info h4 { margin: 14px 0 6px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.tf-view-info p { margin: 6px 0; }
+.tf-view-info .formula { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.tf-view-info .katex-display { margin: 6px 0; }
+.tf-view-info .katex { font-size: 1.02em; }
+.tf-view-info .deep { margin-top: 10px; }
+
+/* Legenda */
+.tf-legend { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.tf-legend li { display: flex; gap: 8px; align-items: center; }
+.tf-swatch { flex: none; width: 14px; height: 14px; border-radius: 3px; background: var(--sw); border: 1px solid rgba(255, 255, 255, 0.15); }
+.tf-swatch.dashed { background: repeating-linear-gradient(135deg, var(--sw) 0 3px, #1e293b 3px 6px); }
+.tf-swatch.ring { background: transparent; border: 2px solid var(--sw); border-radius: 50%; }
+.tf-swatch.line { height: 3px; border: 0; border-radius: 2px; }
+.tf-swatch.line.dashed { background: repeating-linear-gradient(90deg, var(--sw) 0 4px, transparent 4px 7px); }
+
+/* Barre "parametri per parte" */
+.tf-bars { display: grid; gap: 5px; }
+.tf-bar { display: grid; grid-template-columns: 118px 1fr auto; gap: 8px; align-items: center; font-size: 12px; }
+.tf-bar-label { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-bar-track { height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden; }
+.tf-bar-fill { display: block; height: 100%; min-width: 2px; border-radius: 4px; }
+.tf-bar-num { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Schede (tensore o neurone selezionato) */
+.tf-card { border: 1px solid #334155; border-left: 3px solid var(--accent); border-radius: 10px; padding: 8px 10px; margin: 10px 0; background: rgba(56, 189, 248, 0.04); }
+.tf-card[hidden] { display: none; }
+.tf-card h4 { margin: 0 0 4px; }
+.tf-card table.weights { margin-top: 6px; }
+.tf-tensor-name { color: #fbbf24; word-break: break-all; }
+.tf-card .tf-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.tf-card .tf-meta b { color: var(--text); font-weight: 600; }
+
+/* Tooltip nella scena */
+.tf-tooltip { position: absolute; z-index: 14; pointer-events: none; display: grid; gap: 2px; max-width: 340px; padding: 6px 9px; font-size: 12px; background: var(--panel); border: 1px solid #f59e0b; border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); }
+.tf-tooltip[hidden] { display: none; }
+.tf-tooltip strong { font-family: "JetBrains Mono", ui-monospace, monospace; color: #fbbf24; font-weight: 600; word-break: break-all; }
+.tf-tooltip small { color: var(--muted); }
+
+/* Controlli della vista Rete neurale */
+.tf-controls { display: grid; gap: 8px; margin: 10px 0; }
+.tf-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tf-row label { font-size: 12.5px; color: var(--muted); }
+.tf-row textarea { flex: 1; min-width: 0; resize: vertical; font: 13px "JetBrains Mono", ui-monospace, monospace; color: var(--text); background: #0b1220; border: 1px solid #334155; border-radius: 8px; padding: 6px 8px; }
+.tf-row input[type="text"] { flex: 1; min-width: 0; font: 13px "JetBrains Mono", ui-monospace, monospace; color: var(--text); background: #0b1220; border: 1px solid #334155; border-radius: 8px; padding: 6px 8px; }
+.tf-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.tf-row output { font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; min-width: 9ch; text-align: right; }
+.tf-status { font-size: 12px; color: var(--muted); min-height: 1.2em; }
+.tf-status.error { color: #fca5a5; }
+.tf-positions { display: flex; flex-wrap: wrap; gap: 3px; }
+.tf-positions button { min-width: 24px; padding: 3px 5px; font: 12px "JetBrains Mono", ui-monospace, monospace; border-radius: 6px; }
+.tf-positions button.active { border-color: var(--accent); background: rgba(56, 189, 248, 0.18); color: #e0f2fe; }
+.tf-positions button.future { opacity: 0.35; }
+.tf-contrib { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.tf-contrib td { padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.tf-contrib td.num { text-align: right; }
+.tf-contrib td.pos { color: #fdba74; }
+.tf-contrib td.neg { color: #93c5fd; }
+.tf-start { width: 100%; margin-top: 6px; }

@@ -10,6 +10,11 @@
  *
  * Restituisce un registro { id → Object3D } usato da menu e camera, e la lista
  * delle "stazioni" attraversate dall'animazione del flusso.
+ *
+ * Ogni componente occupa uno "slot" orizzontale largo almeno quanto serve al suo rettangolo
+ * nel livello "Blocchi" del LOD (lod.js): così rettangoli, binario e pacchetto del flusso
+ * restano allineati a qualunque livello di zoom. `slots` (id → {row, x, width}) e `rows`
+ * (centro e larghezza di ogni riga, coordinate di root) servono proprio a questo.
  */
 import * as THREE from "three";
 import { CELL, COLORS, addNode, attentionTexture, label, matrixPlane, tokenCube, weightTexture } from "../../core/visuals.js";
@@ -49,7 +54,13 @@ function shape(t) {
   return `(${t.shape.join(", ")})`;
 }
 
-const ROW_SPACING = 15;
+export const ROW_SPACING = 15;
+
+/**
+ * Larghezza minima dello slot di ogni tipo di componente: lascia spazio ai rettangoli del
+ * livello "Blocchi" (titolo leggibile) senza cambiare le dimensioni delle matrici (1 cella = 1 peso).
+ */
+const SLOT = { tokens: 4.6, embeddings: 6, add: 2.5, ln: 3.5, heads: 4.8, proj: 4.0, ln_f: 3.5, lm_head: 4.6, logits: 6.4, next: 3.8 };
 
 class Layout {
   constructor(root) {
@@ -57,6 +68,7 @@ class Layout {
     this.registry = new Map();
     this.stations = [];
     this.rows = [];
+    this.slots = new Map();
   }
 
   /** Apre una nuova riga all'altezza `index * ROW_SPACING`. */
@@ -64,6 +76,8 @@ class Layout {
     this.row = new THREE.Group();
     this.row.position.y = index * ROW_SPACING;
     this.root.add(this.row);
+    this.rowIndex = index;
+    this.rowSlots = [];
     this.x = 0;
   }
 
@@ -71,16 +85,24 @@ class Layout {
   endRow() {
     const width = this.x - GAP;
     this.row.position.x = -width / 2;
-    this.rows.push({ group: this.row, width });
+    this.rows.push({ group: this.row, width, index: this.rowIndex, y: this.row.position.y });
+    for (const slot of this.rowSlots) slot.x -= width / 2; // centro dello slot in coordinate di root
   }
 
-  /** Posiziona `obj` largo `width` alla posizione corrente della riga e avanza. */
-  place(id, obj, width, caption, { parent = this.row } = {}) {
-    obj.position.x = this.x + width / 2 - (parent === this.row ? 0 : parent.position.x);
+  /**
+   * Posiziona `obj` largo `width` al centro di uno slot largo max(width, slot) e avanza.
+   * Lo slot viene registrato in `slots` (stesso id del registro).
+   */
+  place(id, obj, width, caption, { parent = this.row, slot = 0 } = {}) {
+    const slotWidth = Math.max(width, slot);
+    obj.position.x = this.x + slotWidth / 2 - (parent === this.row ? 0 : parent.position.x);
     parent.add(obj);
     this.registry.set(id, obj);
-    if (caption) this.stations.push({ id, caption, object: obj });
-    this.x += width + GAP;
+    if (caption) this.stations.push({ id, caption, object: obj, row: this.rowIndex });
+    const record = { row: this.rowIndex, x: this.x + slotWidth / 2, width: slotWidth, y: this.row.position.y };
+    this.slots.set(id, record);
+    this.rowSlots.push(record);
+    this.x += slotWidth + GAP;
     return obj;
   }
 }
@@ -115,10 +137,10 @@ function buildEmbeddings(spec, layout) {
   const width = tokT.shape[1] * CELL;
   const group = new THREE.Group();
   group.add(tok, pos);
-  layout.place("embeddings", group, width, "Embedding: token + posizione");
+  layout.place("embeddings", group, width, "Embedding: token + posizione", { slot: SLOT.embeddings });
   layout.registry.set("tok_emb", tok);
   layout.registry.set("pos_emb", pos);
-  layout.place("embed_add", addNode(), 0.56, "x = tok_emb + pos_emb   (B, T, C)");
+  layout.place("embed_add", addNode(), 0.56, "x = tok_emb + pos_emb   (B, T, C)", { slot: SLOT.add });
 }
 
 function buildHead(spec, prefix, layer, h) {
@@ -154,8 +176,8 @@ function buildBlock(spec, layout, layer) {
   layout.row.add(block);
   layout.registry.set(p, block);
 
-  const sub = (id, obj, width, caption) => {
-    layout.place(id, obj, width, caption, { parent: block });
+  const sub = (id, obj, width, caption, slot = 0) => {
+    layout.place(id, obj, width, caption, { parent: block, slot });
   };
 
   // LayerNorm 1: γ e β
@@ -165,7 +187,7 @@ function buildBlock(spec, layout, layer) {
   b1.position.x = 0.22;
   ln1.add(g1, b1);
   withLabel(ln1, "ln1", "γ, β (64,)".replace("64", cfg.n_embd), cfg.n_embd * CELL, { size: 0.2 });
-  sub(`${p}.ln1`, ln1, 0.34, `Blocco ${layer} · LayerNorm 1`);
+  sub(`${p}.ln1`, ln1, 0.34, `Blocco ${layer} · LayerNorm 1`, SLOT.ln);
 
   // Multi-head attention: le head impilate in verticale
   const heads = new THREE.Group();
@@ -180,7 +202,7 @@ function buildBlock(spec, layout, layer) {
     layout.registry.set(`${p}.heads.${h}.pattern`, pattern);
     headsWidth = width;
   }
-  sub(`${p}.heads`, heads, headsWidth, `Blocco ${layer} · ${cfg.n_head} head di self-attention`);
+  sub(`${p}.heads`, heads, headsWidth, `Blocco ${layer} · ${cfg.n_head} head di self-attention`, SLOT.heads);
 
   // Proiezione
   const proj = new THREE.Group();
@@ -189,10 +211,10 @@ function buildBlock(spec, layout, layer) {
   pb.position.x = (cfg.n_embd * CELL) / 2 + 0.2;
   proj.add(pw, pb);
   withLabel(proj, "proj", `${shape(spec.tensors[`${p}.sa.proj.weight`])} + bias`, cfg.n_embd * CELL, { size: 0.22 });
-  sub(`${p}.proj`, proj, cfg.n_embd * CELL + 0.3, `Blocco ${layer} · proiezione`);
+  sub(`${p}.proj`, proj, cfg.n_embd * CELL + 0.3, `Blocco ${layer} · proiezione`, SLOT.proj);
 
   const add1 = addNode();
-  sub(`${p}.add1`, add1, 0.56, `Blocco ${layer} · x = x + attention`);
+  sub(`${p}.add1`, add1, 0.56, `Blocco ${layer} · x = x + attention`, SLOT.add);
 
   const ln2 = new THREE.Group();
   const g2 = vectorBar(spec, `${p}.ln2.weight`);
@@ -200,28 +222,32 @@ function buildBlock(spec, layout, layer) {
   b2.position.x = 0.22;
   ln2.add(g2, b2);
   withLabel(ln2, "ln2", `γ, β (${cfg.n_embd},)`, cfg.n_embd * CELL, { size: 0.2 });
-  sub(`${p}.ln2`, ln2, 0.34, `Blocco ${layer} · LayerNorm 2`);
+  sub(`${p}.ln2`, ln2, 0.34, `Blocco ${layer} · LayerNorm 2`, SLOT.ln);
 
-  // Feed-forward: espansione 4C, ReLU, compressione
+  // Feed-forward: espansione 4C, ReLU, compressione. I bias sono barre accanto alla loro matrice.
   const ffwd = new THREE.Group();
   const w1T = spec.tensors[`${p}.ffwd.net.0.weight`];
   const w2T = spec.tensors[`${p}.ffwd.net.2.weight`];
   const w1 = matrix(spec, `${p}.ffwd.net.0.weight`);
   const w1W = w1T.shape[1] * CELL;
+  const fb1 = vectorBar(spec, `${p}.ffwd.net.0.bias`);
+  fb1.position.x = w1W / 2 + 0.2;
   const relu = label("ReLU", { size: 0.22, color: "#a5f3fc" });
-  relu.position.x = w1W / 2 + 0.6;
+  relu.position.x = w1W / 2 + 0.8;
   const w2 = matrix(spec, `${p}.ffwd.net.2.weight`);
   const w2W = w2T.shape[1] * CELL;
-  w2.position.x = w1W / 2 + 1.2 + w2W / 2;
+  w2.position.x = w1W / 2 + 1.4 + w2W / 2;
+  const fb2 = vectorBar(spec, `${p}.ffwd.net.2.bias`);
+  fb2.position.x = w2.position.x + w2W / 2 + 0.2;
   withLabel(w1, "net.0", `${shape(w1T)} + bias`, w1T.shape[0] * CELL, { size: 0.22 });
   withLabel(w2, "net.2", `${shape(w2T)} + bias`, w2T.shape[0] * CELL, { size: 0.22 });
-  ffwd.add(w1, relu, w2);
-  const ffwdW = w1W + 1.2 + w2W;
+  ffwd.add(w1, fb1, relu, w2, fb2);
+  const ffwdW = w1W + 1.4 + w2W + 0.3;
   ffwd.children.forEach((c) => (c.position.x -= ffwdW / 2 - w1W / 2));
   sub(`${p}.ffwd`, ffwd, ffwdW, `Blocco ${layer} · feed-forward ${cfg.n_embd}→${4 * cfg.n_embd}→${cfg.n_embd}`);
 
   const add2 = addNode();
-  sub(`${p}.add2`, add2, 0.56, `Blocco ${layer} · x = x + feed-forward`);
+  sub(`${p}.add2`, add2, 0.56, `Blocco ${layer} · x = x + feed-forward`, SLOT.add);
 
   // Sfondo del blocco e archi delle connessioni residue
   const endX = layout.x - GAP;
@@ -244,16 +270,17 @@ function buildBlock(spec, layout, layer) {
   block.add(residualArc(add1.position.x, add2.position.x, arcY));
 }
 
-function residualArc(x0, x1, height) {
+/** Arco della connessione residua da x0 a x1 (coordinate del blocco), usato anche dal LOD. */
+export function residualArc(x0, x1, height, { color = 0x0ea5e9, opacity = 0.55, radius = 0.03, z = 0.6 } = {}) {
   const curve = new THREE.CubicBezierCurve3(
-    new THREE.Vector3(x0, 0, 0.6),
-    new THREE.Vector3(x0, height, 0.6),
-    new THREE.Vector3(x1, height, 0.6),
-    new THREE.Vector3(x1, 0, 0.6),
+    new THREE.Vector3(x0, 0, z),
+    new THREE.Vector3(x0, height, z),
+    new THREE.Vector3(x1, height, z),
+    new THREE.Vector3(x1, 0, z),
   );
   return new THREE.Mesh(
-    new THREE.TubeGeometry(curve, 48, 0.03, 8, false),
-    new THREE.MeshBasicMaterial({ color: 0x0ea5e9, transparent: true, opacity: 0.55 }),
+    new THREE.TubeGeometry(curve, 48, radius, 8, false),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity }),
   );
 }
 
@@ -265,7 +292,7 @@ function buildOutput(spec, layout) {
   b.position.x = 0.22;
   lnf.add(g, b);
   withLabel(lnf, "ln_f", `γ, β (${cfg.n_embd},)`, cfg.n_embd * CELL, { size: 0.2 });
-  layout.place("ln_f", lnf, 0.34, "LayerNorm finale");
+  layout.place("ln_f", lnf, 0.34, "LayerNorm finale", { slot: SLOT.ln_f });
 
   const head = new THREE.Group();
   const hwT = spec.tensors["lm_head.weight"];
@@ -274,7 +301,7 @@ function buildOutput(spec, layout) {
   hb.position.x = (hwT.shape[1] * CELL) / 2 + 0.2;
   head.add(hw, hb);
   withLabel(head, "lm_head", `${shape(hwT)} + bias`, hwT.shape[0] * CELL);
-  layout.place("lm_head", head, hwT.shape[1] * CELL + 0.3, "lm_head: un punteggio per carattere (logits)");
+  layout.place("lm_head", head, hwT.shape[1] * CELL + 0.3, "lm_head: un punteggio per carattere (logits)", { slot: SLOT.lm_head });
 
   // Probabilità del prossimo carattere (dal modello vero, sul prompt d'esempio)
   const probs = spec.example.next_token_probs;
@@ -301,12 +328,12 @@ function buildOutput(spec, layout) {
   bars.children.forEach((c) => {
     if (c.isSprite && c.position.x === 0) c.position.x = maxLen / 2;
   });
-  layout.place("logits", bars, maxLen + 1, "softmax: probabilità del prossimo carattere");
+  layout.place("logits", bars, maxLen + 1, "softmax: probabilità del prossimo carattere", { slot: SLOT.logits });
 
   const best = top[0];
   const next = tokenCube(spec.vocab[best], 0.6, { color: 0x0c4a6e, emissive: 0x0369a1 });
   withLabel(next, "prossimo token", `'${spec.vocab[best]}' (${(probs[best] * 100).toFixed(1)}%)`, 0.6);
-  layout.place("next_token", next, 0.6, "prossimo token → si aggiunge al contesto");
+  layout.place("next_token", next, 0.6, "prossimo token → si aggiunge al contesto", { slot: SLOT.next });
 }
 
 /**
@@ -317,17 +344,21 @@ function flowPath(layout) {
   layout.root.updateWorldMatrix(true, true);
   const points = [];
   let previousRow = null;
+  // Centro (y nel mondo) della riga: la stazione sta nella riga in cui è stata posizionata.
+  // Nota: non si arrotonda p.y / ROW_SPACING, perché la pila è centrata (root.position.y = −37,5)
+  // e l'arrotondamento spostava il binario di mezza riga, tra una riga e l'altra.
+  const rowY = (row) => layout.root.position.y + row * ROW_SPACING;
   layout.stations.forEach((station) => {
     const p = station.object.getWorldPosition(new THREE.Vector3());
     p.z = 0.6;
-    const row = Math.round(p.y / ROW_SPACING);
+    const row = station.row;
     if (previousRow !== null && row !== previousRow) {
       const last = points.at(-1);
-      const midY = (row - 0.5) * ROW_SPACING;
+      const midY = rowY(row - 0.5);
       points.push(new THREE.Vector3(last.x + 1.5, last.y, 0.6), new THREE.Vector3(last.x + 1.5, midY, 0.6));
-      points.push(new THREE.Vector3(p.x - 1.5, midY, 0.6), new THREE.Vector3(p.x - 1.5, row * ROW_SPACING, 0.6));
+      points.push(new THREE.Vector3(p.x - 1.5, midY, 0.6), new THREE.Vector3(p.x - 1.5, rowY(row), 0.6));
     }
-    p.y = row * ROW_SPACING; // il binario corre al centro della riga
+    p.y = rowY(row); // il binario corre al centro della riga
     points.push(p);
     station.point = p;
     previousRow = row;
@@ -351,7 +382,7 @@ export function buildArchitecture(spec) {
   const nLayer = spec.config.n_layer;
 
   layout.startRow(0);
-  layout.place("tokens", buildTokens(spec), 0.3, "Token di input (B, T)");
+  layout.place("tokens", buildTokens(spec), 0.3, "Token di input (B, T)", { slot: SLOT.tokens });
   buildEmbeddings(spec, layout);
   layout.endRow();
 
@@ -394,5 +425,5 @@ export function buildArchitecture(spec) {
     if (!tensorMeshes.has(name)) tensorMeshes.set(name, []);
     tensorMeshes.get(name).push(o);
   });
-  return { root, rail, registry: layout.registry, stations: layout.stations, path, tensorMeshes };
+  return { root, rail, registry: layout.registry, stations: layout.stations, path, tensorMeshes, slots: layout.slots, rows: layout.rows, rowSpacing: ROW_SPACING };
 }

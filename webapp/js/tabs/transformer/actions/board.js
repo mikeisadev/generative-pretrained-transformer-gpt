@@ -29,7 +29,8 @@ export class Board {
     this.texture.anisotropy = 8;
     const plane = new THREE.Mesh(
       new THREE.PlaneGeometry(BOARD_W / BOARD_H, 1),
-      new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthWrite: false, side: THREE.DoubleSide }),
+      // depthTest false: la lavagna si disegna sopra la scena (altrimenti le righe vicine la "bucano")
+      new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide }),
     );
     plane.renderOrder = 20;
     this.mesh = new THREE.Group();
@@ -37,6 +38,23 @@ export class Board {
     this.mesh.visible = false;
     this.mesh.userData.board = true;
     this.plane = plane;
+    // Ago della "ruota" delle probabilità: un mesh sopra la lavagna, che si muove senza ridisegnare il canvas.
+    this.needle = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, depthWrite: false, depthTest: false }));
+    this.needle.renderOrder = 21;
+    this.needle.visible = false;
+    this.mesh.add(this.needle);
+  }
+
+  /** Mostra l'ago come linea verticale alla x di canvas `px`, da `top` a `bottom` (pixel di canvas). */
+  needleAt(px, top, bottom, widthPx = 7) {
+    const a = this.aspect;
+    this.needle.visible = true;
+    this.needle.scale.set((widthPx / BOARD_W) * a, (bottom - top) / BOARD_H, 1);
+    this.needle.position.set((px / BOARD_W - 0.5) * a, 0.5 - (top + bottom) / 2 / BOARD_H, 0.003);
+  }
+
+  hideNeedle() {
+    this.needle.visible = false;
   }
 
   get aspect() {
@@ -45,13 +63,14 @@ export class Board {
 
   /** Altezza del pannello in unità di scena (la larghezza segue l'aspetto). */
   setHeight(h) {
-    this.mesh.scale.setScalar(h);
+    this.mesh.scale.set(h, h, 1);
   }
 
   /** Pulisce e disegna intestazione; restituisce la y da cui partire con il contenuto. */
   begin(title, subtitle = "") {
     const g = this.ctx;
     g.setTransform(1, 0, 0, 1, 0, 0);
+    this.hideNeedle();
     g.clearRect(0, 0, BOARD_W, BOARD_H);
     roundRect(g, 4, 4, BOARD_W - 8, BOARD_H - 8, 28);
     g.fillStyle = "rgba(8, 13, 24, 0.94)";
@@ -61,11 +80,11 @@ export class Board {
     g.stroke();
     g.textBaseline = "top";
     g.fillStyle = INK.accent;
-    g.font = `700 50px ${FONT}`;
-    g.fillText(title, 44, 34, BOARD_W - 88);
-    let y = 98;
+    g.font = `700 56px ${FONT}`;
+    g.fillText(title, 44, 30, BOARD_W - 88);
+    let y = 100;
     if (subtitle) {
-      y = this.paragraph(subtitle, 44, y, BOARD_W - 88, { size: 32, color: INK.muted });
+      y = this.paragraph(subtitle, 44, y, BOARD_W - 88, { size: 38, color: "#cbd5e1" });
     }
     return y + 18;
   }
@@ -112,21 +131,29 @@ export class Board {
    * @param {string[]} [o.rowLabels] etichette delle righe (es. i caratteri del contesto)
    * @param {number} [o.highlightRow] riga da incorniciare
    * @param {string} [o.title] titolo sopra la matrice
+   * @param {boolean} [o.mask] per "signed": tratteggia il triangolo sopra la diagonale (futuro)
    */
-  matrix(x, y, w, h, values, rows, cols, { kind = "signed", scale, rowLabels, highlightRow = -1, title, caption } = {}) {
+  matrix(x, y, w, h, values, rows, cols, { kind = "signed", scale, rowLabels, highlightRow = -1, title, caption, mask = false, square = false } = {}) {
     const g = this.ctx;
     const { signed, attention, masked } = colormaps();
     if (title) {
-      this.label(title, x, y, { size: 28, weight: 600, maxWidth: w + 60 });
-      y += 38;
-      h -= 38;
+      this.label(title, x, y, { size: 34, weight: 600, maxWidth: w + 60 });
+      y += 44;
+      h -= 44;
     }
-    if (caption) h -= 40;
+    if (caption) h -= 46;
     const labelW = rowLabels ? 34 : 0;
+    let showLabels = rowLabels && h / rows >= 13;
+    let mx = x + (showLabels ? labelW : 0);
+    let mw = w - (showLabels ? labelW : 0);
+    if (square) {
+      // celle quadrate (es. attention T × T): la matrice si restringe nel lato più lungo
+      const cell = Math.min(mw / cols, h / rows);
+      mw = cell * cols;
+      h = cell * rows;
+      showLabels = rowLabels && cell >= 13;
+    }
     const cellH = h / rows;
-    const showLabels = rowLabels && cellH >= 13;
-    const mx = x + (showLabels ? labelW : 0);
-    const mw = w - (showLabels ? labelW : 0);
 
     this.scratch.width = cols;
     this.scratch.height = rows;
@@ -138,7 +165,7 @@ export class Board {
         const v = values[r * cols + c];
         let src;
         let k;
-        if (kind === "attention") {
+        if (kind === "attention" || (mask && c > r)) {
           if (!Number.isFinite(v) || c > r) {
             src = masked;
             k = ((r + c) % 4) * 4;
@@ -177,7 +204,7 @@ export class Board {
       g.strokeStyle = INK.warm;
       g.strokeRect(mx - 3, y + highlightRow * cellH - 2, mw + 6, cellH + 4);
     }
-    if (caption) this.label(caption, x, y + h + 8, { size: 24, color: INK.muted, maxWidth: w + 40 });
+    if (caption) this.label(caption, x, y + h + 8, { size: 30, color: INK.muted, maxWidth: w + 40 });
     return { x: mx, y, w: mw, h, cellH, cellW: mw / cols };
   }
 
@@ -186,14 +213,14 @@ export class Board {
    * le barre partono dalla linea dello zero.
    * items: [{label, value, highlight?, color?}]
    */
-  bars(x, y, w, h, items, { max, min, format = (v) => v.toFixed(3), labelWidth = 120, color = "#475569", highlightColor = INK.accent } = {}) {
+  bars(x, y, w, h, items, { max, min, format = (v) => v.toFixed(3), labelWidth = 120, valueWidth = 150, color = "#475569", highlightColor = INK.accent } = {}) {
     const g = this.ctx;
     const rowH = h / items.length;
-    const size = Math.min(28, rowH * 0.62);
+    const size = Math.min(34, rowH * 0.66);
     const lo = Math.min(0, min ?? Math.min(...items.map((i) => i.value)));
     const hi = Math.max(max ?? Math.max(...items.map((i) => i.value)), lo + 1e-9);
     const left = x + labelWidth;
-    const span = w - labelWidth - 150; // spazio a destra per il valore scritto
+    const span = w - labelWidth - valueWidth; // spazio a destra per il valore scritto
     const toX = (v) => left + ((v - lo) / (hi - lo)) * span;
     const zeroX = toX(0);
     items.forEach((item, i) => {
@@ -221,9 +248,10 @@ export class Board {
 
   /**
    * Testo come fila di celle (un carattere per cella), con evidenziazioni per intervallo.
-   * marks: [{from, to, color}] con indici nel testo.
+   * marks: [{from, to, color}] con indici nel testo. wrapNewlines false: "↵" è solo una cella
+   * (per mostrare finestre di training su una riga).
    */
-  charCells(text, x, y, { cell = 34, cols = 38, marks = [], ids = null } = {}) {
+  charCells(text, x, y, { cell = 34, cols = 38, marks = [], ids = null, wrapNewlines = true } = {}) {
     const g = this.ctx;
     const chars = [...text];
     let col = 0;
@@ -251,7 +279,7 @@ export class Board {
       }
       g.textAlign = "left";
       col++;
-      if (ch === "\n") {
+      if (ch === "\n" && wrapNewlines) {
         col = 0;
         row++;
       }
@@ -266,7 +294,7 @@ export class Board {
     g.fillStyle = "rgba(30, 41, 59, 0.85)";
     g.fill();
     this.label(value, x + 22, y + 16, { size: 54, weight: 700, color, mono: true, maxWidth: w - 40 });
-    this.label(caption, x + 22, y + 84, { size: 24, color: INK.muted, maxWidth: w - 40 });
+    this.label(caption, x + 22, y + 84, { size: 28, color: INK.muted, maxWidth: w - 40 });
   }
 
   /** Pubblica il disegno sulla texture. */
@@ -275,6 +303,8 @@ export class Board {
   }
 
   dispose() {
+    this.needle.geometry.dispose();
+    this.needle.material.dispose();
     this.texture.dispose();
     this.plane.geometry.dispose();
     this.plane.material.dispose();
