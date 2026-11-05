@@ -1,1 +1,67 @@
-/* Stili specifici del tab rag. */
+/* Tab "Database vettoriale (RAG)": classi con prefisso .rag- */
+
+.rag-box {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: rgba(15, 23, 42, 0.6);
+}
+.rag-box h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.rag-box h4 { margin: 10px 0 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.rag-box summary { cursor: pointer; color: #93c5fd; font-size: 13px; }
+.rag-box[open] summary { margin-bottom: 8px; }
+
+.rag-question {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  color: var(--text);
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.rag-question:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.rag-examples { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.rag-examples button {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  text-align: left;
+  background: #111c30;
+}
+
+.rag-params { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+.rag-params label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.rag-params input[type="number"] { width: 56px; font: inherit; color: var(--text); background: #0b1220; border: 1px solid #334155; border-radius: 6px; padding: 3px 6px; }
+.rag-params input[type="range"] { flex: 1; min-width: 80px; accent-color: var(--accent); }
+.rag-params output { color: #e0f2fe; font-variant-numeric: tabular-nums; min-width: 2.6em; }
+
+.rag-primary { width: 100%; background: #075985; border-color: var(--accent); color: #f0f9ff; font-weight: 600; }
+.rag-primary:hover { background: #0369a1; }
+
+.rag-link { display: block; width: 100%; margin: 8px 0; text-align: left; font-size: 13px; }
+.rag-transformer { border-color: #a78bfa; color: #ede9fe; background: rgba(124, 58, 237, 0.16); }
+.rag-transformer:hover { border-color: #c4b5fd; }
+.rag-item-extra { margin-top: 8px; }
+
+.rag-select { display: grid; gap: 4px; margin: 6px 0 10px; font-size: 13px; }
+.rag-select span { color: var(--muted); }
+.rag-select select { font: inherit; color: var(--text); background: #0b1220; border: 1px solid #334155; border-radius: 8px; padding: 5px 6px; }
+.rag-select .hint { margin: 0; }
+
+.rag-legend ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; }
+.rag-swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; border: 1px solid rgba(255, 255, 255, 0.25); }
+
+.rag-sources section { margin-bottom: 14px; }
+.rag-sources h3 { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin: 6px 0; }
+.rag-sources ul { margin: 0; padding-left: 18px; }
+.rag-sources li { margin-bottom: 8px; }
+.rag-sources a { color: #7dd3fc; }
+.rag-sources p { margin: 2px 0 0; }
+
+/* Pannello del codice un po' più stretto in questo tab: le stazioni 3D hanno lavagne di testo
+   che devono restare leggibili accanto al codice. */
+.rag-tab .code-panel { width: min(470px, 34vw); }
