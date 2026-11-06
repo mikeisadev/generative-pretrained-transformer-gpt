@@ -3,5 +3,6 @@
 torch==2.15.0
 numpy==2.5.4  # evita il warning "Failed to initialize NumPy" di torch
 pytest==9.2.0
+certifi  # certificati SSL per scaricare il dataset (serve sul Python di python.org per macOS)
 # Il pacchetto locale `gpt`, installato in modalità modificabile:
 -e .

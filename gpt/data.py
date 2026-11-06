@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+import ssl
 import tempfile
 import urllib.request
 from dataclasses import dataclass
@@ -34,6 +35,20 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Usa i certificati di ``certifi`` se disponibili.
+
+    Il Python di python.org su macOS non trova i certificati di sistema
+    (errore CERTIFICATE_VERIFY_FAILED) finché non si esegue
+    "Install Certificates.command": con certifi il download funziona comunque.
+    """
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def download_tiny_shakespeare(data_dir: Path = DEFAULT_DATA_DIR) -> Path:
     """Scarica il dataset (solo la prima volta) e ne verifica l'integrità.
 
@@ -48,7 +63,9 @@ def download_tiny_shakespeare(data_dir: Path = DEFAULT_DATA_DIR) -> Path:
 
     with tempfile.NamedTemporaryFile(dir=data_dir, delete=False, suffix=".part") as tmp:
         tmp_path = Path(tmp.name)
-        with urllib.request.urlopen(DATASET_URL, timeout=_DOWNLOAD_TIMEOUT_S) as response:
+        with urllib.request.urlopen(
+            DATASET_URL, timeout=_DOWNLOAD_TIMEOUT_S, context=_ssl_context()
+        ) as response:
             shutil.copyfileobj(response, tmp)
 
     if _sha256(tmp_path) != DATASET_SHA256:
