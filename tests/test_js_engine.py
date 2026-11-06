@@ -5,6 +5,10 @@ Il test lancia ``node webapp/tests/engine_fixture.mjs``, che carica gli stessi p
 su vari prompt. Qui si rifà tutto con i moduli PyTorch di ``gpt/`` e si confronta
 attivazione per attivazione. Lo stesso confronto si ripete con i pesi di alcuni snapshot
 float16 del training (in PyTorch convertiti float16 → float32, come fa il motore).
+
+Il modello PyTorch di riferimento si costruisce dagli stessi file versionati, letti con numpy
+(indipendente dal codice JS): il test non dipende dal checkpoint locale, che cambia da un
+computer all'altro (ogni training produce pesi diversi, es. CPU contro Apple MPS).
 """
 
 from __future__ import annotations
@@ -18,13 +22,12 @@ import pytest
 import torch
 from torch.nn import functional as F
 
+from gpt.config import GPTConfig
 from gpt.export import EXAMPLE_PROMPT, PROJECT_ROOT, TRAINING_DIR, TRAINING_TRACE, WEBAPP_DATA_DIR, WEIGHTS_MANIFEST
 from gpt.model import GPTLanguageModel
-from gpt.training import load_checkpoint
 
 NODE = shutil.which("node")
 FIXTURE = PROJECT_ROOT / "webapp" / "tests" / "engine_fixture.mjs"
-CHECKPOINT = PROJECT_ROOT / "checkpoints" / "gpt.pt"
 MANIFEST = WEBAPP_DATA_DIR / WEIGHTS_MANIFEST
 TRACE = WEBAPP_DATA_DIR / TRAINING_DIR / TRAINING_TRACE
 
@@ -46,10 +49,7 @@ CASES = [
 
 pytestmark = [
     pytest.mark.skipif(NODE is None, reason="node non è nel PATH: serve Node 22 per confrontare il motore JS con PyTorch"),
-    pytest.mark.skipif(
-        not (CHECKPOINT.exists() and MANIFEST.exists()),
-        reason="mancano checkpoints/gpt.pt o webapp/data/weights.json: lancia train.py e l'export",
-    ),
+    pytest.mark.skipif(not MANIFEST.exists(), reason="manca webapp/data/weights.json: lancia train.py e l'export"),
 ]
 
 
@@ -62,18 +62,32 @@ def run_engine(snapshot: int | None) -> dict:
     return json.loads(proc.stdout)
 
 
-def snapshot_model(step: int) -> GPTLanguageModel:
-    """Modello PyTorch con i pesi dello snapshot float16, letti con numpy (indipendente dal JS)."""
-    trace = json.loads(TRACE.read_text(encoding="utf-8"))
-    entry = next(s for s in trace["snapshots"] if s["step"] == step)
-    flat = np.fromfile(WEBAPP_DATA_DIR / TRAINING_DIR / entry["file"], dtype="<f2").astype(np.float32)
-    net, _ = load_checkpoint(CHECKPOINT)
+def model_from_flat(flat: np.ndarray, layout: list[dict], config: dict) -> GPTLanguageModel:
+    """Modello PyTorch con i pesi di un vettore piatto (offset e forme presi dal manifest)."""
+    net = GPTLanguageModel(GPTConfig(**config))
     params = dict(net.named_parameters())
+    assert {p["name"] for p in layout} == params.keys()
     with torch.no_grad():
-        for p in trace["params"]:
+        for p in layout:
             values = flat[p["offset"] : p["offset"] + p["numel"]].reshape(p["shape"])
             params[p["name"]].copy_(torch.from_numpy(values.copy()))
     return net.eval()
+
+
+def trained_model() -> GPTLanguageModel:
+    """I pesi addestrati versionati (weights.f32.bin), letti con numpy."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    flat = np.fromfile(WEBAPP_DATA_DIR / manifest["file"], dtype="<f4")
+    return model_from_flat(flat, manifest["params"], manifest["config"])
+
+
+def snapshot_model(step: int) -> GPTLanguageModel:
+    """I pesi dello snapshot float16 convertiti in float32, come fa il motore."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    trace = json.loads(TRACE.read_text(encoding="utf-8"))
+    entry = next(s for s in trace["snapshots"] if s["step"] == step)
+    flat = np.fromfile(WEBAPP_DATA_DIR / TRAINING_DIR / entry["file"], dtype="<f2").astype(np.float32)
+    return model_from_flat(flat, trace["params"], manifest["config"])
 
 
 @torch.no_grad()
@@ -194,10 +208,9 @@ def check_against_pytorch(output: dict, net: GPTLanguageModel) -> None:
 
 
 def test_js_engine_matches_pytorch_on_trained_weights():
-    net, _ = load_checkpoint(CHECKPOINT)
     output = run_engine(snapshot=None)
     assert output["weightsSource"] == "trained"
-    check_against_pytorch(output, net.eval())
+    check_against_pytorch(output, trained_model())
 
 
 @pytest.mark.skipif(not TRACE.exists(), reason="manca webapp/data/training/trace.json: lancia scripts/record_training.py")

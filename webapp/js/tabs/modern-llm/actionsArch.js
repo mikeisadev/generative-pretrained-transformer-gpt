@@ -4,11 +4,10 @@
  * funziona sempre), `update(p)` anima da lì; niente allocazioni in update.
  */
 import { fillTemplate } from "../../core/dom.js";
+import { actionInfo } from "./actionCatalog.js";
 import { MOE_TOKENS } from "./regionMoe.js";
 import { RouterSim } from "./sim.js";
 import { phase } from "./shapes.js";
-
-const CATEGORY = "Architettura";
 
 function compareAction(tab) {
   const r = tab.regions.compare;
@@ -22,10 +21,7 @@ function compareAction(tab) {
   };
   const code = { pos: "llama.rope", norm: "llama.rmsnorm", attn: "llama.init_kv", res: "llama.block", ffn: "llama.ffn", out: "minbpe.train" };
   return {
-    id: "compare",
-    title: "Dal nostro GPT a un blocco moderno",
-    category: CATEGORY,
-    summary: "I pezzi del blocco cambiano uno alla volta: RoPE, RMSNorm, GQA, SwiGLU, vocabolario.",
+    ...actionInfo("compare"),
     onStart() {
       tab.prepare("compare");
       r.reveal(-1);
@@ -94,10 +90,7 @@ function moeAction(tab) {
     return counts;
   };
   return {
-    id: "moe",
-    title: "Mixture of Experts: il router sceglie",
-    category: CATEGORY,
-    summary: "Ogni token va a 2 esperti su 8 (come Mixtral); poi il problema del bilanciamento e l'esperto condiviso di DeepSeek-V3.",
+    ...actionInfo("moe"),
     onStart() {
       tab.prepare("moe", { charts: "moe" });
       // bilanciamento: 24 istantanee del carico mentre i bias si aggiustano (simulazione)
@@ -201,10 +194,7 @@ function gqaAction(tab) {
     },
   });
   return {
-    id: "gqa",
-    title: "GQA e MQA: query che condividono K e V",
-    category: CATEGORY,
-    summary: "Da una coppia K/V per head (MHA) a una per gruppo (GQA) a una sola (MQA): la KV cache si rimpicciolisce.",
+    ...actionInfo("gqa"),
     onStart() {
       tab.prepare("gqa", { charts: "kv" });
     },
@@ -267,10 +257,7 @@ function ropeAction(tab) {
   const ANGLE_NOTES = [0, 1, 2].map(angleNoteOf);
   const angleNote = (shift) => ANGLE_NOTES[shift];
   return {
-    id: "rope",
-    title: "RoPE: ruotare per dire la posizione",
-    category: CATEGORY,
-    summary: "Ogni coppia di dimensioni di q e k ruota di posizione × θ; conta solo la distanza tra i token.",
+    ...actionInfo("rope"),
     onStart() {
       tab.prepare("rope");
     },

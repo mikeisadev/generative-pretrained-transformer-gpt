@@ -8,6 +8,7 @@
  * update(p) anima con p da 0 a 1 senza allocare.
  */
 import { fmt } from "../../core/dom.js";
+import { ACTIONS } from "./catalog.js";
 import { CODEC } from "./codec.js";
 import { formatPercent } from "./lab.js";
 import { WHISPER } from "./dsp.js";
@@ -23,17 +24,17 @@ export function installActions(tab) {
   /**
    * Ogni passo dichiara il componente che deve essere inquadrato: così anche "passo indietro"
    * (o un salto con goTo) riporta la camera nel posto giusto. Se è già lì non riparte il volo.
+   * tab.actionFocusId ricorda il bersaglio dell'azione anche quando lo studente guarda altrove
+   * (camera libera): "Segui l'azione" torna lì (vedi index.js).
    */
   const frame = (id) => {
+    tab.actionFocusId = id;
     if (tab.focusedId !== id) tab.focus(id);
   };
 
   /* ------------------------------------------------------------------ 1. dal suono ai numeri */
   player.register({
-    id: "audio-sound",
-    title: "Dal suono ai numeri",
-    category: "Rappresentare il suono",
-    summary: "Campionamento, finestre, FFT, scala Mel e logaritmo: come un'onda diventa una tabella di numeri.",
+    ...ACTIONS.sound, // id, titolo, categoria e riassunto: catalog.js (li usa anche la ricerca)
     onStart: () => tab.resetScene(),
     onStop: () => tab.resetScene(),
     onEnd: () => tab.resetScene({ keepStage: true }),
@@ -178,10 +179,7 @@ export function installActions(tab) {
     },
   });
   player.register({
-    id: "audio-rvq",
-    title: "Comprimere il suono in token (RVQ)",
-    category: "Codec neurale",
-    summary: "Ogni frame diventa 4 numeri interi: codebook dopo codebook l'errore cala. Poi il decoder torna al suono.",
+    ...ACTIONS.rvq, // id, titolo, categoria e riassunto: catalog.js (li usa anche la ricerca)
     onStart: () => tab.resetScene(),
     onStop: () => tab.resetScene(),
     onEnd: () => tab.resetScene(),
@@ -234,10 +232,7 @@ export function installActions(tab) {
   /* ---------------------------------------------------------------- 3. generazione */
   const SLOW_STEPS = 9;
   player.register({
-    id: "audio-generate",
-    title: "Generare musica token per token",
-    category: "Generazione",
-    summary: "Prompt, cross-attention, delay pattern: il transformer sceglie il prossimo token, ma i token sono pezzi di suono.",
+    ...ACTIONS.generate, // id, titolo, categoria e riassunto: catalog.js (li usa anche la ricerca)
     onStart: () => tab.resetScene(),
     // a fine (o a metà) azione la scena mostra la generazione completa e il suo audio
     onStop: () => (tab.resetScene(), tab.showGenerated(tab.state.gen)),
@@ -345,10 +340,7 @@ export function installActions(tab) {
 
   /* ------------------------------------------------------------------- 4. Whisper */
   player.register({
-    id: "audio-whisper",
-    title: "Dalla voce al testo (Whisper)",
-    category: "Riconoscimento vocale",
-    summary: "log-Mel di 30 secondi, encoder con convoluzioni e transformer, decoder che scrive token di testo.",
+    ...ACTIONS.whisper, // id, titolo, categoria e riassunto: catalog.js (li usa anche la ricerca)
     onStart: () => tab.resetScene(),
     onStop: () => tab.resetScene(),
     onEnd: () => tab.resetScene(),

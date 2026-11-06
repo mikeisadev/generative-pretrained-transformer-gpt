@@ -166,6 +166,9 @@ export function installContext(tab) {
     },
     onSelect: async (item, title) => {
       await tab.views.activate(VIEW_ID);
+      // come i passi del Percorso: la scheda si inquadra da vicino, quindi lo zoom torna su Auto anche se
+      // lo studente aveva bloccato "Panoramica" (durante un'azione il livello lo decide l'azione)
+      if (!ui.player?.action) tab.lod.controller.setMode("auto");
       scene.setActive(item.stage);
       view.focus([item.stage]);
       view.showCode(item.snippet);
@@ -181,6 +184,8 @@ export function installContext(tab) {
     label: "Contesto",
     description: "Dal messaggio dell'utente al contesto dell'LLM: guardrail, RAG con pgvector, prompt, strumenti e streaming.",
     order: 30,
+    // "Centra" e "Vista d'insieme": la Panoramica Contesto → LLM → Risposta, come all'apertura della vista
+    home: () => view.overview(),
     enter: async () => {
       lodScale = 0;
       fitLodDistances();
@@ -199,7 +204,7 @@ export function installContext(tab) {
       charts.showAll(s);
       ui.sidebar.select("contesto");
       if (!ui.player?.action) {
-        tab.setCaption("Contesto: a sinistra della pila, la fase che prepara l'input dell'LLM. Rotellina per lo zoom semantico, oppure avvia l'animazione dal pannello Contesto.");
+        tab.setCaption("Contesto: a sinistra della pila, la fase che prepara l'input dell'LLM. Doppio clic su una fase per avvicinarti (lo zoom semantico mostra i dettagli), oppure avvia l'animazione dal pannello Contesto.");
         // prima la Panoramica (Contesto → LLM → Risposta) con la pila intera; con la rotellina si scende nei dettagli
         view.overview();
         view.showCode("llm");
@@ -243,7 +248,21 @@ export function installContext(tab) {
   });
 
   registerContextAction(view);
-  tab.contextView = { view, unregister }; // per la console e per i test automatici
+  tab.contextView = {
+    view,
+    unregister,
+    /**
+     * Apre la vista e un passo del suo percorso (ricerca globale, link #transformer/go=view:ctx.guard).
+     * @returns {Promise<boolean>} false se il passo non esiste
+     */
+    async reveal(stepId) {
+      await view.ensure(); // il menu del percorso nasce con il primo scenario
+      // un passo che non esiste non cambia la vista: lo studente resta dov'era e il guscio lo avvisa
+      if (!pane.menu?.items.has(stepId)) return false;
+      await tab.views.activate(VIEW_ID);
+      return pane.menu.reveal(stepId, { sidebar: ui.sidebar });
+    },
+  }; // anche per la console e per i test automatici
 }
 
 /**

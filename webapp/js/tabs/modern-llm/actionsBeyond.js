@@ -2,10 +2,9 @@
  * Azioni "Oltre il testo": immagini come token (LLaVA), mesh 3D come testo (LLaMA-Mesh),
  * interpretabilità (induction head e autoencoder sparsi).
  */
+import { actionInfo } from "./actionCatalog.js";
 import { MESH_VERTICES, OBJ_LINES } from "./regionMesh.js";
 import { phase } from "./shapes.js";
-
-const CATEGORY = "Oltre il testo";
 
 function multiAction(tab) {
   const r = tab.regions.multi;
@@ -21,10 +20,7 @@ function multiAction(tab) {
     },
   });
   return {
-    id: "multi",
-    title: "Un'immagine diventa token",
-    category: CATEGORY,
-    summary: "Schema di LLaVA: patch → encoder visivo → proiettore → token visivi accanto al testo.",
+    ...actionInfo("multi"),
     onStart() {
       tab.prepare("multi");
     },
@@ -45,10 +41,7 @@ function meshAction(tab) {
   const nV = MESH_VERTICES.length;
   const nAll = OBJ_LINES.length;
   return {
-    id: "mesh",
-    title: "Una mesh 3D scritta come testo",
-    category: CATEGORY,
-    summary: "Come LLaMA-Mesh: vertici e triangoli nel formato OBJ, coordinate intere; la forma si costruisce riga dopo riga.",
+    ...actionInfo("mesh"),
     onStart() {
       tab.prepare("mesh");
     },
@@ -110,10 +103,7 @@ function meshAction(tab) {
 function interpAction(tab) {
   const r = tab.regions.interp;
   return {
-    id: "interp",
-    title: "Interpretabilità: induction head e feature",
-    category: CATEGORY,
-    summary: "Una head che copia lo schema [A][B] … [A] → [B]; un autoencoder sparso che trova concetti leggibili.",
+    ...actionInfo("interp"),
     onStart() {
       tab.prepare("interp");
     },

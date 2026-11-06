@@ -393,7 +393,7 @@ export const STEPS = [
         code: "loss",
         text: `<p>La cross-entropy misura quanta probabilità il modello ha dato al carattere giusto: più è bassa, meglio è.</p>
           <p>Un modello appena nato tira a indovinare tra {{vocab_size}} caratteri, quindi parte da circa
-          ln({{vocab_size}}) ≈ <b>{{ln_vocab}}</b>. Dopo 5000 step il nostro arriva intorno a 1,66 sul train e 1,82 sulla validation.</p>`,
+          ln({{vocab_size}}) ≈ <b>{{ln_vocab}}</b>. Dopo {{train_steps}} step il nostro arriva a <b>{{train_loss}}</b> sul train e <b>{{val_loss}}</b> sulla validation.</p>`,
         math: [{ tex: String.raw`\mathcal{L} = -\frac{1}{BT}\sum_{b,t}\log p_\theta\big(y_{b,t}\mid x_{b,\le t}\big)` }],
       },
       {

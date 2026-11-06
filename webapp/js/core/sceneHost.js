@@ -10,6 +10,11 @@
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { prefersReducedMotion } from "./dom.js";
+import { frameDamping } from "./navMath.js";
+
+/** Smorzamento delle OrbitControls a 60 fps (poi adattato al frame rate reale, vedi frameDamping). */
+const DAMPING_60FPS = 0.08;
 
 let softwareRenderer = null;
 
@@ -46,6 +51,8 @@ export class SceneHost {
     this.container = container;
     this.coveredRight = coveredRight;
     this.updaters = new Set();
+    this.resizeListeners = new Set();
+    this.stopListeners = new Set();
     this.clock = new THREE.Clock();
     this.running = false;
 
@@ -63,9 +70,20 @@ export class SceneHost {
 
     this.camera = new THREE.PerspectiveCamera(fov, 1, 0.05, 2000);
     this.camera.position.set(0, 10, 120);
+    // Comandi del mouse (la navigazione, js/core/navigation.js, li adatta alla modalità Ruota/Sposta):
+    // sinistro = ruota, destro o centrale = sposta, Shift/Ctrl/⌘ + sinistro = sposta, rotella = zoom
+    // verso il puntatore (si avvicina a ciò che stai indicando, come in una mappa).
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
+    // L'inerzia dopo il trascinamento è movimento non chiesto: con "riduci il movimento" si toglie.
+    this.controls.enableDamping = !prefersReducedMotion();
+    this.controls.dampingFactor = DAMPING_60FPS;
     this.controls.screenSpacePanning = true;
+    this.controls.zoomToCursor = true;
+    this.controls.zoomSpeed = 1.4; // rotella; la navigazione usa 1 per il pizzico a due dita
+    this.controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
+    // Mai fino a distanza 0 dal punto guardato: lì la rotella non può più allontanare la camera (lo zoom
+    // è proporzionale alla distanza). I tab con scene grandi alzano il minimo (es. dentro i blocchi).
+    this.controls.minDistance = 1;
 
     this.raycaster = new THREE.Raycaster();
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -88,6 +106,13 @@ export class SceneHost {
     else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    for (const fn of this.resizeListeners) fn();
+  }
+
+  /** fn() dopo ogni ridimensionamento (anche quando un pannello cambia la parte coperta). Restituisce la rimozione. */
+  onResize(fn) {
+    this.resizeListeners.add(fn);
+    return () => this.resizeListeners.delete(fn);
   }
 
   /** Registra una funzione chiamata a ogni frame: fn(dt, elapsed). Restituisce la funzione per rimuoverla. */
@@ -104,14 +129,41 @@ export class SceneHost {
       const dt = Math.min(this.clock.getDelta(), 0.05);
       const elapsed = this.clock.elapsedTime;
       for (const fn of this.updaters) fn(dt, elapsed);
+      this.controls.dampingFactor = frameDamping(DAMPING_60FPS, dt);
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
     });
   }
 
+  /**
+   * Foto della scena come data URL PNG. Il canvas WebGL non conserva l'immagine tra un frame e
+   * l'altro (preserveDrawingBuffer costerebbe a ogni frame): si disegna e si copia nello stesso istante.
+   */
+  snapshot(type = "image/png") {
+    this.renderer.render(this.scene, this.camera);
+    const canvas = this.renderer.domElement;
+    // Solo la parte che si vede: quella sotto il pannello del codice o dei grafici sarebbe una striscia vuota.
+    const scale = canvas.width / Math.max(1, this.container.clientWidth);
+    const covered = Math.round(this.coveredRight() * scale);
+    if (covered <= 0 || covered >= canvas.width) return canvas.toDataURL(type);
+    const crop = document.createElement("canvas");
+    crop.width = canvas.width - covered;
+    crop.height = canvas.height;
+    crop.getContext("2d").drawImage(canvas, 0, 0, crop.width, crop.height, 0, 0, crop.width, crop.height);
+    return crop.toDataURL(type);
+  }
+
   stop() {
+    if (!this.running) return;
     this.running = false;
     this.renderer.setAnimationLoop(null);
+    for (const fn of this.stopListeners) fn();
+  }
+
+  /** fn() quando il ciclo si ferma (tab nascosto). Restituisce la funzione di rimozione. */
+  onStop(fn) {
+    this.stopListeners.add(fn);
+    return () => this.stopListeners.delete(fn);
   }
 
   /** Distanza della camera dal punto che sta guardando: è lo "zoom" usato dal LOD. */

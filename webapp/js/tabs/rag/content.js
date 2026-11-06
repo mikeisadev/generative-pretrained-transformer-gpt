@@ -27,7 +27,10 @@ export const PATH = [
 <code>LIKE '%ferie%'</code> trova le righe con quella parola, ma non capisce che "quanti giorni mi spettano"
 e "giorni spettanti" vogliono dire la stessa cosa (L17 §25.9).</p>
 <p>Un <strong>database vettoriale</strong> risolve proprio questo: invece di confrontare parole, confronta
-<strong>significati</strong>, rappresentati come vettori di numeri (gli embedding).</p>`,
+<strong>significati</strong>, rappresentati come vettori di numeri (gli embedding).</p>
+<p>La scena è un plastico di tutto il percorso: avvicinati a una stazione per vederla da
+vicino, spostati lungo il binario (tasti <kbd>A</kbd> <kbd>D</kbd>, tasto destro + trascina, due dita sul
+telefono) e premi <kbd>C</kbd> o "Centra" per tornare a questa vista.</p>`,
       },
       {
         id: "intro.db",

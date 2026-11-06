@@ -77,15 +77,12 @@
   .audio-tab:has(.player-bar:not([hidden])) .code-panel { max-height: calc(100% - 290px); }
 }
 
-/* Telefono e tablet stretto: tre file di comandi che non si coprono.
-   1ª fila: menu, "Vista d'insieme", "Ascolta" (testo corto), "Grafici"; 2ª fila: selettore dello zoom.
-   Durante un'azione il codice sta in alto, la barra del player in basso, la scena nel mezzo. */
+/* Telefono e tablet stretto (le due file di comandi sono regole comuni di core.css): "Ascolta" con il
+   testo corto; durante un'azione il codice sta in alto, la barra del player in basso, la scena nel mezzo. */
 @media (max-width: 900px) {
-  .audio-tab .stage-toolbar { left: 56px; right: auto; }
-  .audio-tab .stage-toolbar button { font-size: 12px; padding: 5px 8px; white-space: nowrap; }
   .audio-tab .audio-wide { display: none; }
-  .audio-tab .lod-switch { top: 52px; left: 12px; max-width: calc(100% - 24px); flex-wrap: wrap; }
-  .audio-tab .lod-switch .lod-title { display: none; }
-  .audio-tab:not(.sidebar-collapsed) :is(.lod-switch, .stage-toolbar) { display: none; }
   .audio-tab:has(.player-bar:not([hidden])) .code-panel { top: 96px; bottom: auto; max-height: 30vh; }
 }
+
+/* Suggerimento sulla navigazione libera sotto le viste */
+.audio-nav-hint { margin: 12px 2px 0; }

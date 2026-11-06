@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="vendor/katex/katex.min.css" />
     <link rel="stylesheet" href="vendor/highlight/github-dark.min.css" />
     <link rel="stylesheet" href="css/core.css" />
+    <link rel="stylesheet" href="css/nav.css" />
+    <link rel="stylesheet" href="css/palette.css" />
     <link rel="stylesheet" href="css/tabs/transformer.css" />
     <link rel="stylesheet" href="css/tabs/transformer-actions.css" />
     <link rel="stylesheet" href="css/tabs/transformer-context.css" />
@@ -32,6 +34,12 @@
         <span class="muted">Lezione L20 · GPT didattico</span>
       </div>
       <nav class="tabbar" data-tabs aria-label="Sezioni"></nav>
+      <!-- Ricerca globale (js/core/ui/palette.js): anche con Ctrl/⌘+K oppure "/" -->
+      <button type="button" class="search-button" data-search aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K /" aria-label="Cerca nella lezione">
+        <svg class="search-button-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span class="search-button-label">Cerca</span>
+        <kbd>Ctrl K</kbd>
+      </button>
     </header>
     <div id="app"></div>
   </body>

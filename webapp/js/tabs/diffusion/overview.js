@@ -15,6 +15,9 @@ import { placeLabel } from "./shapes.js";
 
 export const VIDEO_Y = -66;
 const MACRO_SCALE = 1.5;
+/** Riga del video nella Panoramica (y nel mondo): quella delle immagini sta a y = 0 in ogni livello. */
+const MACRO_VIDEO_ROW = -76;
+export const MACRO_VIDEO_Y = MACRO_VIDEO_ROW * MACRO_SCALE;
 
 /** Blocco di larghezza w e altezza h (unità di scena) con il testo ingrandito di S. */
 function block(group, spec, { x, y, w, h, S }) {
@@ -93,7 +96,7 @@ export function buildMacro() {
   group.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 60, 0.8, 8), new THREE.MeshBasicMaterial({ color: 0x67e8f9 })));
   placeLabel(group, "× T passi", 0, -32, 0.6, { size: 6.5, color: "#a5f3fc" });
 
-  const vy = -76;
+  const vy = MACRO_VIDEO_ROW;
   big("Testo", "prompt → vettori", "Lo stesso testo guida ogni frame.", -84, vy, "#c4b5fd");
   big("Denoiser video × T", "tutti i frame insieme", "Un cubo di latenti spazio-temporali.", 0, vy, "#fcd34d", 64);
   big("Video", "VAE 3D → frame", "Frame coerenti tra loro.", 84, vy, "#e2e8f0");

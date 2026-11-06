@@ -1,8 +1,19 @@
 /**
  * Regia della camera: volo fluido verso un oggetto e riquadro pulsante di evidenziazione.
+ *
+ * Inseguimento e "camera libera": durante un'azione del player la regia segue l'azione (ogni passo
+ * chiama focus/flyTo). Se lo studente si muove da solo (release(), chiamata dalla navigazione), la
+ * camera diventa libera: i voli chiesti dall'AZIONE non muovono più la camera, si risolvono subito e
+ * l'ultimo viene ricordato; resumeFollow() torna a seguire e vola lì. I voli chiesti dallo STUDENTE
+ * (menu, pulsanti, "Centra": la navigazione li segnala con noteUserIntent()) partono sempre.
+ * A fine azione (o quando si ferma) l'inseguimento torna automatico.
  */
 import * as THREE from "three";
+import { prefersReducedMotion } from "./dom.js";
 import { COLORS } from "./visuals.js";
+
+/** Con "riduci il movimento" attivo nel sistema, i voli durano al massimo così (secondi). */
+const REDUCED_MOTION_MAX_FLIGHT = 0.3;
 
 const DEFAULT_DIR = new THREE.Vector3(0.18, 0.22, 1).normalize(); // leggermente dall'alto e di lato
 
@@ -40,6 +51,13 @@ export class CameraDirector {
     this.camera = host.camera;
     this.controls = host.controls;
     this.flight = null;
+    this.actionActive = false; // un'azione del player è in corso (layout.js lo collega al player)
+    this.following = true; // false = camera libera: i voli dell'azione non muovono la camera
+    this.pendingFlight = null; // ultimo volo chiesto dall'azione mentre la camera era libera
+    this.lastActionFlight = null; // ultimo volo dell'azione partito davvero (per "Segui l'azione" senza voli in sospeso)
+    this.userIntentUntil = 0; // fino a quando (performance.now) un volo è "chiesto dallo studente"
+    this.intentStamp = 0; // cresce a ogni gesto dello studente (noteUserIntent)
+    this.followListeners = new Set();
     this.highlight = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
       new THREE.LineBasicMaterial({ color: COLORS.highlight, transparent: true, opacity: 0.9 }),
@@ -48,7 +66,8 @@ export class CameraDirector {
     this.highlight.userData.noBounds = true;
     host.scene.add(this.highlight);
     host.onFrame((dt, elapsed) => this.update(dt, elapsed));
-    this.controls.addEventListener("start", () => this.cancel());
+    // Trascinare la scena interrompe il volo: lo fa la navigazione (js/core/navigation.js) al primo
+    // movimento vero del puntatore, così un semplice clic su un oggetto non lascia la camera a metà volo.
   }
 
   /**
@@ -75,9 +94,18 @@ export class CameraDirector {
 
   /** Vola verso una posizione di camera precisa guardando target. */
   flyTo(position, target, duration = 1.2) {
+    if (this.holdsActionFlights()) {
+      // camera libera: il volo dell'azione non parte, ma lo ricordiamo per "Segui l'azione"
+      this.pendingFlight = { position: position.clone(), target: target.clone(), duration };
+      return Promise.resolve();
+    }
+    const byUser = performance.now() <= this.userIntentUntil;
+    if (this.actionActive && !byUser) this.lastActionFlight = { position: position.clone(), target: target.clone(), duration };
+    if (prefersReducedMotion()) duration = Math.min(duration, REDUCED_MOTION_MAX_FLIGHT);
     this.flight?.resolve?.();
     return new Promise((resolve) => {
       this.flight = {
+        intent: byUser ? this.intentStamp : 0, // volo chiesto da questo gesto dello studente
         t: 0,
         duration: Math.max(0.01, duration),
         fromPos: this.camera.position.clone(),
@@ -113,10 +141,78 @@ export class CameraDirector {
     }
   }
 
-  /** Se l'utente trascina la scena durante un volo, il volo si interrompe. */
+  /** Interrompe il volo in corso (lo studente si è mosso: trascinamento, rotella, tasti, pad). */
   cancel() {
     const f = this.flight;
     this.flight = null;
     f?.resolve?.();
+  }
+
+  // ---------------------------------------------------------------- inseguimento / camera libera
+  /** true se la camera segue l'azione (o se non c'è nessuna azione). */
+  get follow() {
+    return this.following;
+  }
+
+  /** Il player segnala se un'azione è in corso; ogni nuova azione riparte seguendo, e a fine azione si torna a seguire. */
+  setActionActive(active) {
+    active = Boolean(active);
+    if (active === this.actionActive) return;
+    this.actionActive = active;
+    this.pendingFlight = null;
+    this.lastActionFlight = null;
+    this.setFollowing(true);
+  }
+
+  /** Lo studente si è mosso da solo: durante un'azione la camera diventa libera. */
+  release() {
+    if (this.actionActive) this.setFollowing(false);
+  }
+
+  /**
+   * "Segui l'azione": torna a seguire e vola sull'ultimo bersaglio chiesto dall'azione mentre la camera
+   * era libera. Se l'azione non ne ha chiesti (il passo inquadra ancora la stessa cosa), si torna
+   * sull'ultima inquadratura dell'azione, a meno che il tab, avvisato da onFollowChange, non abbia già
+   * fatto partire un volo suo.
+   */
+  resumeFollow() {
+    const pending = this.pendingFlight;
+    this.pendingFlight = null;
+    const before = this.flight;
+    this.setFollowing(true);
+    const goal = pending ?? (this.actionActive && this.flight === before ? this.lastActionFlight : null);
+    return goal ? this.flyTo(goal.position, goal.target, Math.min(goal.duration, 1)) : Promise.resolve();
+  }
+
+  /**
+   * I voli chiesti nei prossimi `ms` millisecondi vengono dallo studente (un clic sul menu, su un
+   * pulsante, "Centra"…) e partono anche con la camera libera.
+   */
+  noteUserIntent(ms = 700) {
+    this.userIntentUntil = Math.max(this.userIntentUntil, performance.now() + ms);
+    this.intentStamp++;
+  }
+
+  /** fn(following) a ogni cambio tra inseguimento e camera libera. Restituisce la funzione di rimozione. */
+  onFollowChange(fn) {
+    this.followListeners.add(fn);
+    return () => this.followListeners.delete(fn);
+  }
+
+  /**
+   * true se un volo chiesto ora va trattenuto: camera libera durante un'azione e nessun gesto recente
+   * dello studente. Dentro la finestra del gesto vale comunque se il volo dello studente è ancora in
+   * corso: il passo dell'azione che scatta 300 ms dopo "Centra" non deve sostituirlo.
+   */
+  holdsActionFlights() {
+    if (!this.actionActive || this.following) return false;
+    if (performance.now() > this.userIntentUntil) return true;
+    return this.flight !== null && this.flight.intent === this.intentStamp;
+  }
+
+  setFollowing(following) {
+    if (following === this.following) return;
+    this.following = following;
+    for (const fn of this.followListeners) fn(following);
   }
 }

@@ -2,11 +2,10 @@
  * Azioni "Ragionamento e agenti": catena di pensiero e verifica, RL con ricompense verificabili
  * (GRPO), ciclo agente con tool use, capacità di coding (FIM e feedback di esecuzione).
  */
+import { actionInfo } from "./actionCatalog.js";
 import { AGENT_LEGS } from "./regionAgent.js";
 import { CHAINS, REWARDS } from "./regionReasoning.js";
 import { phase } from "./shapes.js";
-
-const CATEGORY = "Ragionamento e agenti";
 
 /** Passi visibili per catena, riusato a ogni frame (niente array nuovi in update). */
 const shownSteps = [0, 0, 0, 0];
@@ -22,10 +21,7 @@ function cotAction(tab) {
   const r = tab.regions.reasoning;
   const all = CHAINS.map((c) => c.steps.length);
   return {
-    id: "cot",
-    title: "Catena di pensiero e verifica",
-    category: CATEGORY,
-    summary: "Passi intermedi, più tentativi, un verificatore: spendere più calcolo al momento della risposta.",
+    ...actionInfo("cot"),
     onStart() {
       tab.prepare("reasoning", { charts: "inferenza" });
     },
@@ -118,10 +114,7 @@ function grpoAction(tab) {
     tab.plots.grpo.setData({ labels: advLabels, values: r.advantages.map((a) => (a * level) / 20) });
   };
   return {
-    id: "grpo",
-    title: "RL con ricompense verificabili (GRPO)",
-    category: CATEGORY,
-    summary: "Ricompensa da un verificatore, vantaggio = confronto con la media del gruppo: l'idea di DeepSeek-R1.",
+    ...actionInfo("grpo"),
     onStart() {
       tab.prepare("reasoning", { charts: "grpo" });
     },
@@ -220,10 +213,7 @@ function agentAction(tab) {
     "Infine il modello risponde a parole, usando dati che non conosceva.",
   ];
   return {
-    id: "agent",
-    title: "Ciclo agente e tool use",
-    category: CATEGORY,
-    summary: "Il modello scrive una chiamata, il programma esegue lo strumento, il risultato torna nel contesto.",
+    ...actionInfo("agent"),
     onStart() {
       tab.prepare("agent");
     },
@@ -249,10 +239,7 @@ function agentAction(tab) {
 function codingAction(tab) {
   const r = tab.regions.coding;
   return {
-    id: "coding",
-    title: "Coding: fill-in-the-middle e test",
-    category: CATEGORY,
-    summary: "Il riordino FIM che insegna a riempire un buco; il ciclo scrivi → esegui i test → correggi.",
+    ...actionInfo("coding"),
     onStart() {
       tab.prepare("coding");
     },

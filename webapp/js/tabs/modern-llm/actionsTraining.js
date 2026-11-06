@@ -1,20 +1,16 @@
 /**
  * Azioni "Addestramento": leggi di scala (Chinchilla) e pipeline pre-training → SFT → preferenze.
  */
+import { actionInfo } from "./actionCatalog.js";
 import { BUDGETS } from "./regionScaling.js";
 import { emergenceIllustration } from "./sim.js";
 import { phase } from "./shapes.js";
-
-const CATEGORY = "Addestramento";
 
 function scalingAction(tab) {
   const r = tab.regions.scaling;
   const fmtC = (C) => `10^${Math.log10(C)} FLOP`;
   return {
-    id: "scaling",
-    title: "Leggi di scala: quanti parametri, quanti dati",
-    category: CATEGORY,
-    summary: "Con la formula di Chinchilla: per ogni budget di calcolo, N e D ottimali e la loss prevista.",
+    ...actionInfo("scaling"),
     onStart() {
       tab.prepare("scaling", { charts: "scala" });
     },
@@ -86,10 +82,7 @@ function pipelineAction(tab) {
     },
   });
   return {
-    id: "pipeline",
-    title: "Pre-training → SFT → preferenze",
-    category: CATEGORY,
-    summary: "Le tre fasi che trasformano un modello che continua il testo in un assistente; RLHF, DPO e Constitutional AI.",
+    ...actionInfo("pipeline"),
     onStart() {
       tab.prepare("training");
     },
@@ -157,10 +150,7 @@ function emergenceAction(tab) {
     },
   });
   return {
-    id: "emergence",
-    title: "Capacità emergenti o miraggio?",
-    category: CATEGORY,
-    summary: "Un salto improvviso con la scala può dipendere dalla metrica: per token la crescita è dolce, la risposta esatta sembra «accendersi».",
+    ...actionInfo("emergence"),
     onStart() {
       tab.prepare("scaling", { charts: "emergenza" });
     },

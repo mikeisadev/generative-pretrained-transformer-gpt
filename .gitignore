@@ -8,3 +8,6 @@ __pycache__/
 # Dataset scaricato automaticamente e checkpoint del training
 /data/
 /checkpoints/
+
+# File di sistema di macOS
+.DS_Store

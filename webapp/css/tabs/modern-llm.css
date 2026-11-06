@@ -76,3 +76,43 @@
     bottom: auto;
   }
 }
+
+/* "Dove sei" (regionCompass.js): mentre lo studente passeggia nella scena, in basso a sinistra
+   il meccanismo su cui si trova, con tre scorciatoie. Stesso aspetto dei chip della navigazione. */
+.mllm-where {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 15; /* sotto il pad (16) e i suoi chip: non li copre mai */
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  width: max-content;
+  max-width: min(760px, calc(100% - 260px));
+  padding: 6px 6px 6px 12px;
+  border-radius: 14px;
+  background: var(--panel-solid);
+  border: 1px solid #334155;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  color: var(--text);
+}
+.mllm-where[hidden] { display: none; }
+.mllm-where-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+.mllm-where-text { flex: 1 1 auto; min-width: 0; }
+.mllm-where-text small { color: var(--muted); font-size: 12px; }
+.mllm-where-actions { display: inline-flex; gap: 6px; }
+.mllm-where-actions button { padding: 4px 10px; border-radius: 999px; font-size: 12.5px; white-space: nowrap; }
+.mllm-where-actions button[hidden] { display: none; }
+.mllm-where-play { border-color: var(--accent); background: rgba(56, 189, 248, 0.14); color: #e0f2fe; }
+.mllm-where button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Schermo stretto: tutta la larghezza salvo il pulsante del pad (in basso a destra), su due righe.
+   Con il pad aperto regionCompass.js porta l'etichetta sopra di lui. */
+@media (max-width: 899px) {
+  .mllm-where { left: 12px; bottom: 12px; max-width: calc(100% - 92px); }
+  .mllm-where-actions { flex-basis: 100%; }
+  .mllm-where-actions button { padding: 7px 12px; font-size: 13px; }
+  .mllm-where-row { display: none; } /* la riga della griglia: sul telefono basta il nome del meccanismo */
+}

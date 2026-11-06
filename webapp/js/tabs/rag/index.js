@@ -14,13 +14,18 @@
  * Eventi tra tab (app.bus):
  *   ascolta  "rag:query"  {detail: {question}}  → imposta la domanda e avvia la ricerca
  *   invia    "transformer:view" {view: "contesto", question} → il tab Transformer mostra la vista Contesto
- * In alternativa all'evento, l'indirizzo #rag/q=<domanda> avvia la ricerca all'apertura.
+ * In alternativa all'evento, l'indirizzo #rag/q=<domanda> avvia la ricerca (all'apertura del tab o
+ * quando l'indirizzo cambia). I link diretti #rag/go=<kind>:<id> (ricerca globale) arrivano a goto():
+ *   step:<id del Percorso>, action:indicizzazione|ricerca, view:detail|blocks|macro (livelli dello zoom).
+ * L'indice della ricerca globale sta in search.js (solo dati, senza la scena).
  */
 import * as THREE from "three";
 import { el, fmt } from "../../core/dom.js";
 import { meshBounds } from "../../core/director.js";
 import { createTabLayout } from "../../core/layout.js";
+import { installStepKeys } from "../../core/stepKeys.js";
 import { LODController } from "../../core/lod.js";
+import { parseHash } from "../../core/search.js";
 import { Menu } from "../../core/ui/menu.js";
 import { indexAction } from "./actionIndex.js";
 import { searchAction } from "./actionSearch.js";
@@ -40,6 +45,13 @@ const SCENE_CENTER = new THREE.Vector3(2, (ROW_TOP + ROW_BOTTOM) / 2 - 2, 0);
 const VIEWS = { overview: { w: 318, h: 96, min: 230 }, macro: { w: 430, h: 130 } };
 const LOD_DETAIL = 200;
 const LOD_BLOCKS = 440;
+/**
+ * Zoom avanti massimo dello studente (rotella, pizzico, +, doppio clic): più vicino la camera entra
+ * nelle carte dei chunk e lo schermo resta nero. I voli del tab restano sopra le 44 unità.
+ */
+const MIN_ZOOM_DISTANCE = 12;
+const MAX_TURN_DEG = 75; // rotazione massima attorno alla scena, dalla vista frontale (come LLM moderni)
+const MAX_TILT_DEG = 60; // inclinazione massima dall'alto o dal basso
 const FRONT = new THREE.Vector3(0, 0.06, 1).normalize();
 const DIRECTIONS = {
   default: new THREE.Vector3(0.1, 0.12, 1).normalize(),
@@ -48,15 +60,30 @@ const DIRECTIONS = {
   hnsw: new THREE.Vector3(0.12, 0.35, 1).normalize(),
 };
 
+/** Id delle azioni (player.register) raggiungibili con un link diretto. */
+const ACTION_IDS = new Set(["indicizzazione", "ricerca"]);
+/** Didascalia di un livello dello zoom aperto con un link diretto (dice anche come cambiarlo). */
+const LEVEL_CAPTIONS = {
+  detail: "Dettaglio: ogni chunk, ogni vettore, ogni nodo. Spostati lungo la pipeline per passare da una stazione all'altra; allontanati per lo schema a blocchi.",
+  blocks: "Blocchi: le undici fasi, in alto l'indicizzazione e in basso ricerca e generazione. Avvicinati a una fase per vederla da vicino.",
+  macro: "Panoramica: il RAG in tre blocchi. Avvicinati per vedere le singole fasi.",
+};
+
+/**
+ * Suggerimento sopra il Percorso: come cambiare livello di dettaglio e come scorrere lungo la
+ * pipeline (che è lunga e orizzontale). Sui touch screen i gesti, altrimenti mouse e tastiera.
+ */
+const HINT = window.matchMedia("(pointer: coarse)").matches
+  ? "Pizzica per lo zoom: da vicino ogni chunk e ogni nodo, da lontano lo schema a blocchi. Due dita: scorri lungo la pipeline."
+  : "Rotellina: da vicino ogni chunk e ogni nodo, da lontano lo schema a blocchi. A / D o tasto destro + trascina: scorri lungo la pipeline.";
+
 export async function createTab(root, app) {
-  const ui = createTabLayout(root, {
-    code: true,
-    charts: true,
-    player: true,
-    hint: "Segui il percorso o avvia un'azione. Rotellina per lo zoom: da vicino ogni chunk e ogni nodo, da lontano lo schema a blocchi.",
-  });
+  const ui = createTabLayout(root, { code: true, charts: true, player: true, hint: HINT });
   const { host, director, sidebar, codePanel, stage, player } = ui;
   root.classList.add("rag-tab");
+  // La pipeline è un plastico guardato da davanti: si gira attorno e si inclina, ma senza arrivare dietro
+  // (testo a specchio) né sopra (una linea); il volo più obliquo del tab (pila HNSW) resta ben dentro.
+  ui.nav.setOrbitLimits({ turn: MAX_TURN_DEG, tilt: MAX_TILT_DEG, minDistance: MIN_ZOOM_DISTANCE });
 
   // --- scena: tre livelli di LOD
   const world = new World(host);
@@ -65,6 +92,7 @@ export async function createTab(root, app) {
   host.scene.add(world.group, blocks.group, macro.group);
 
   let lod = null;
+  let onLevelChange = () => {}; // assegnata più sotto, quando confini e didascalie sono pronti
   lod = new LODController(host, {
     levels: [
       { id: "detail", label: "Dettaglio", maxDistance: LOD_DETAIL, group: world.group },
@@ -72,8 +100,11 @@ export async function createTab(root, app) {
       { id: "macro", label: "Panoramica", maxDistance: Infinity, group: macro.group },
     ],
     widgetParent: stage,
-    onChange: (id) => {
-      if (lod?.mode !== "auto" && lod?.mode === id) flyToLevel(id);
+    onChange: (id) => onLevelChange(id),
+    // il clic dello studente inquadra sempre il livello scelto, anche se era già quello attivo
+    // (es. dopo essersi spostato con il pan: "Blocchi" con il livello già "Blocchi" lo riporta al centro)
+    onPick: (mode) => {
+      if (mode !== "auto") flyToLevel(mode);
     },
   });
   function flyToLevel(id) {
@@ -99,6 +130,31 @@ export async function createTab(root, app) {
     return limit;
   }
   new ResizeObserver(() => updateBlocksLimit()).observe(stage);
+
+  // --- navigazione libera: "Centra" (C, Home, ◎) torna alla vista d'insieme ricalcolata per lo
+  // schermo attuale e per i pannelli aperti. I confini seguono il livello dello zoom: da vicino le
+  // stazioni (non si scivola nel vuoto oltre l'Upload o l'indice HNSW), in Panoramica lo schema a
+  // tre blocchi, più largo. Si calcolano a ogni ricostruzione della scena, non a ogni frame.
+  const navBoxes = { detail: new THREE.Box3(), macro: new THREE.Box3() };
+  function updateNavBounds() {
+    navBoxes.detail.copy(meshBounds(world.group)).union(meshBounds(blocks.group));
+    navBoxes.macro.copy(meshBounds(macro.group));
+  }
+  const navBounds = () => (lod.current === "macro" ? navBoxes.macro : navBoxes.detail);
+  // A ogni cambio di livello i confini si aggiornano subito (la navigazione li terrebbe fino a 3 s)
+  // e la didascalia di un livello aperto con un link diretto segue lo zoom dello studente: chi apre
+  // "Panoramica" e poi si avvicina non legge più "il RAG in tre blocchi" davanti alle stazioni.
+  const levelCaptions = new Set(Object.values(LEVEL_CAPTIONS));
+  onLevelChange = (id) => {
+    ui.nav.setBounds(navBounds);
+    if (levelCaptions.has(ui.caption.textContent)) ui.caption.textContent = LEVEL_CAPTIONS[id];
+  };
+  ui.nav.setHome(() => {
+    // la vista d'insieme è quella dell'avvio: anche lo zoom torna automatico (se lo studente aveva
+    // bloccato "Panoramica", da questa distanza vedrebbe ancora i tre blocchi grandi)
+    if (lod.mode !== "auto") lod.setMode("auto");
+    return tab.focus("overview");
+  });
 
   // --- stato: configurazione, base di conoscenza, ricerca corrente
   const settings = { splitter: "didactic", hnsw: "didactic", question: EXAMPLE_QUESTIONS[2].question, topK: 5, threshold: 0.5 };
@@ -246,13 +302,15 @@ export async function createTab(root, app) {
     caches.recall = null;
     world.rebuild(tab.kb);
     world.reset();
+    updateNavBounds();
+    ui.nav.setBounds(navBounds); // anche per far ricalcolare subito i confini alla navigazione
     tab.plots.setIndexed(tab.kb, 0);
     tab.plots.setSearch(tab.kb, null);
     renderMenu();
   }
 
   // --- sidebar
-  const panePath = sidebar.addPane({ id: "percorso", title: "Percorso" });
+  const panePath = sidebar.addPane({ id: "percorso", title: "Percorso", hint: HINT });
   const paneActions = sidebar.addPane({ id: "azioni", title: "Azioni", hint: "Animazioni passo per passo: controlli in basso per pausa, passo avanti/indietro e velocità." });
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Documentazione e sorgenti da cui vengono codice, numeri e parametri." });
 
@@ -270,12 +328,13 @@ export async function createTab(root, app) {
 
   function renderMenu() {
     const current = tab.menu?.current;
+    tab.menu?.dispose();
     panePath.replaceChildren();
     const steps = PATH.map((step) => ({
       ...step,
       children: step.children.map((item) => ({ ...item, extra: () => itemExtra(item) })),
     }));
-    tab.menu = new Menu(panePath, steps, { vars: menuVars(), onSelect: (item, title) => selectItem(item, title) });
+    tab.menu = new Menu(panePath, steps, { vars: menuVars(), onSelect: (item, title) => selectItem(item, title), tabId: "rag" });
     if (current) tab.menu.select(current);
   }
 
@@ -436,30 +495,70 @@ export async function createTab(root, app) {
     if (ui.charts.isOpen) tab.plots.startScaling(tab.kb, tab.corpusRecall());
   });
 
-  // --- tasti
-  root.tabIndex = -1;
-  root.addEventListener("keydown", (e) => {
-    if (e.target.closest("input, textarea, select")) return;
-    if (e.key === "ArrowDown") tab.menu.move(+1);
-    if (e.key === "ArrowUp") tab.menu.move(-1);
-    if (e.key === " " && player.action) {
-      e.preventDefault();
-      player.toggle();
-    }
-  });
+  // --- tasti: ↑ ↓ scorrono i passi del Percorso, Spazio mette in pausa l'azione (core/stepKeys.js);
+  // il menu si ricostruisce quando cambia la configurazione, quindi lo si legge ogni volta
+  installStepKeys({ root, ui, menu: () => tab.menu, pathPane: panePath });
 
   rebuild();
-  tab.menu.select("intro.problema");
+  // Aperto da un link diretto a un passo: si parte da quel passo (goto lo mostrerà subito dopo),
+  // così il primo passo del Percorso non viene segnato come visto senza che lo studente l'abbia letto.
+  const initial = parseHash(location.hash);
+  const firstStep = initial.tab === "rag" && initial.go?.kind === "step" && tab.menu.items.has(initial.go.id) ? initial.go.id : "intro.problema";
+  tab.menu.select(firstStep, { scroll: false });
   tab.focus("overview", { duration: 0.01 });
 
-  // #rag/q=<domanda>: avvio diretto di una ricerca (alternativa all'evento "rag:query")
-  const match = /^#rag\/q=(.+)$/.exec(location.hash);
-  if (match) setQuestion(decodeURIComponent(match[1]), true);
+  // #rag/q=<domanda>: avvio diretto di una ricerca (alternativa all'evento "rag:query"), sia
+  // all'apertura del tab sia quando l'indirizzo cambia a pagina aperta. Lo stesso indirizzo non
+  // riparte due volte (es. tornando con "indietro" da un altro tab).
+  let handledQuery = null;
+  function routeQuery() {
+    const match = /^#rag\/q=(.+)$/.exec(location.hash);
+    if (!match || match[1] === handledQuery) return;
+    handledQuery = match[1];
+    let question;
+    try {
+      question = decodeURIComponent(match[1]).trim();
+    } catch {
+      return; // indirizzo malformato (es. "%" da solo): lo ignoriamo
+    }
+    if (question) setQuestion(question, true);
+  }
+  routeQuery();
+  window.addEventListener("hashchange", routeQuery);
 
   window.__ragTab = tab; // per il debug dalla console e per gli screenshot automatici
 
+  /** Link diretto o risultato della ricerca globale: porta il tab su un passo, un'azione o un livello. */
+  async function goto({ kind, id }) {
+    if (kind === "step") return tab.menu.reveal(id, { sidebar }); // apre il Percorso sul passo
+    // Azioni e livelli si guardano nella scena: sul telefono il cassetto della sidebar la coprirebbe.
+    const showScene = () => phone.matches && sidebar.toggleCollapsed(true);
+    if (kind === "action") {
+      if (!ACTION_IDS.has(id)) return false;
+      sidebar.select("azioni");
+      showScene();
+      if (id === "ricerca") startSearch();
+      else player.start(id);
+      return true;
+    }
+    if (kind === "view") {
+      if (!Object.hasOwn(LEVEL_CAPTIONS, id)) return false;
+      // come scegliere un passo dal Percorso: l'azione in corso si chiude, altrimenti il suo passo
+      // successivo riporterebbe subito la camera altrove
+      if (player.action) player.stop();
+      // zoom automatico: il volo porta alla distanza del livello e lo studente può ancora zoomare
+      if (lod.mode !== "auto") lod.setMode("auto");
+      showScene();
+      tab.setCaption(LEVEL_CAPTIONS[id]);
+      await flyToLevel(id);
+      return true;
+    }
+    return false;
+  }
+
   return {
     tab,
+    goto,
     activate() {
       host.start();
       host.resize();

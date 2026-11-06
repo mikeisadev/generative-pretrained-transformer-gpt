@@ -2,21 +2,18 @@
  * Azioni "Architettura" (seconda parte, il lato inferenza): tokenizer BPE, KV cache,
  * FlashAttention e finestra scorrevole, decodifica speculativa.
  */
+import { actionInfo } from "./actionCatalog.js";
 import { FLASH_N, FLASH_TILE } from "./regionFlash.js";
 import { SPEC_ROUNDS } from "./regionSpec.js";
 import { tokenText } from "./sim.js";
 import { phase } from "./shapes.js";
 
-const CATEGORY = "Architettura";
 const shown = (s) => s.replace(/ /g, "␣");
 
 function bpeAction(tab) {
   const r = tab.regions.bpe;
   return {
-    id: "bpe",
-    title: "Tokenizer BPE a byte, fusione dopo fusione",
-    category: CATEGORY,
-    summary: "Algoritmo vero: dai byte UTF-8 si fonde ogni volta la coppia più frequente.",
+    ...actionInfo("bpe"),
     onStart() {
       tab.prepare("bpe");
     },
@@ -83,10 +80,7 @@ function kvAction(tab) {
     },
   });
   return {
-    id: "kv",
-    title: "KV cache: token dopo token",
-    category: CATEGORY,
-    summary: "Senza cache si ricalcola tutto il prefisso a ogni token; con la cache solo il token nuovo.",
+    ...actionInfo("kv"),
     onStart() {
       tab.prepare("kv", { charts: "kv" });
     },
@@ -136,10 +130,7 @@ function flashAction(tab) {
   const blocks = [];
   for (let bi = 0; bi < per; bi++) for (let bj = 0; bj <= bi; bj++) blocks.push(bi * per + bj);
   return {
-    id: "flash",
-    title: "FlashAttention e finestra scorrevole",
-    category: CATEGORY,
-    summary: "Attention esatta calcolata a blocchi nella memoria veloce; poi la maschera a finestra di Mistral 7B.",
+    ...actionInfo("flash"),
     onStart() {
       tab.prepare("flash");
     },
@@ -235,10 +226,7 @@ function specAction(tab) {
     },
   ]);
   return {
-    id: "spec",
-    title: "Decodifica speculativa",
-    category: CATEGORY,
-    summary: "Il piccolo propone, il grande verifica in un passaggio: più token per ogni passaggio costoso.",
+    ...actionInfo("spec"),
     onStart() {
       tab.prepare("spec", { charts: "inferenza" });
     },

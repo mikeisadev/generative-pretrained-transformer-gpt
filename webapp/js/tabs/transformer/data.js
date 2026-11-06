@@ -15,6 +15,7 @@ export async function loadModelSpec(url = "data/model.json") {
   if (!response.ok) throw new Error(`Impossibile caricare ${url} (HTTP ${response.status})`);
   const spec = await response.json();
   const cfg = spec.config;
+  const result = await loadTrainingResult(new URL("training/trace.json", new URL(url, location.href)));
   // Valori derivati usati dai testi ({{...}}): calcolati una volta sola qui.
   spec.vars = {
     ...cfg,
@@ -24,8 +25,27 @@ export async function loadModelSpec(url = "data/model.json") {
     total: spec.total_params.toLocaleString("it-IT", { useGrouping: "always" }),
     ln_vocab: Math.log(cfg.vocab_size).toFixed(2).replace(".", ","),
     prompt: escapeHtml(JSON.stringify(spec.example.prompt).slice(1, -1)),
+    // Esito del training registrato (cambia a ogni nuovo training: mai scritto a mano nei testi).
+    train_steps: result ? (result.steps + 1).toLocaleString("it-IT") : "5000",
+    train_loss: result ? italian(result.train) : "≈1,66",
+    val_loss: result ? italian(result.val) : "≈1,81",
   };
   return spec;
+}
+
+const italian = (x) => x.toFixed(2).replace(".", ",");
+
+/** Ultima valutazione del training registrato (data/training/trace.json), o null se manca. */
+async function loadTrainingResult(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const { evals } = await response.json();
+    const last = evals.steps.length - 1;
+    return { steps: evals.steps[last], train: evals.train[last], val: evals.val[last] };
+  } catch {
+    return null; // i testi useranno i valori indicativi
+  }
 }
 
 /** Sostituisce {{chiave}} con i valori del modello. */
