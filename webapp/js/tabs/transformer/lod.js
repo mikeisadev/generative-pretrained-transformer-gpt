@@ -179,7 +179,7 @@ function renderLodHelp(tab) {
       "details",
       { className: "deep tf-lod-help" },
       el("summary", {}, "Zoom semantico: cosa vedi a ogni livello"),
-      el("p", {}, "Come una mappa: da vicino le strade, da lontano solo le regioni. Usa la rotellina (selettore su Auto) oppure scegli un livello in alto a sinistra."),
+      el("p", {}, "Come una mappa: da vicino le strade, da lontano solo le regioni. Usa la rotellina, i tasti + e − o il pizzico sul telefono (selettore su Auto), oppure scegli un livello in alto a sinistra. Spostarsi di lato non cambia livello: cambia solo avvicinandosi o allontanandosi."),
       el(
         "ul",
         {},
@@ -277,7 +277,7 @@ function registerZoomAction(tab) {
       {
         title: "Tocca a te",
         duration: 3.5,
-        caption: "Il selettore in alto a sinistra torna su Auto: usa la rotellina per avvicinarti e allontanarti, il livello cambia da solo.",
+        caption: "Il selettore in alto a sinistra torna su Auto: avvicinati e allontanati con la rotellina (o + e −), il livello cambia da solo.",
         enter: () => {
           lod.controller.setMode("auto");
           tab.focus("overview", { duration: 1.4 });

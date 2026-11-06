@@ -10,12 +10,23 @@
  *   plots.js          grafici; sim.js matematica pura (formule pubblicate e simulazioni dichiarate)
  *   content.js        percorso didattico, schede dei modelli, fonti; snippets.js codice vero
  *   ourModel.js       numeri del nostro GPT (data/model.json) per i testi con segnaposto {{chiave}}
+ *   regionData.js, actionCatalog.js, palette.js   soli dati (li usa anche search.js, l'indice
+ *                     della ricerca globale, caricato senza la scena)
+ *   regionCompass.js  "Dove sei": la regione su cui si trova chi passeggia nella scena
+ *
+ * Navigazione libera (ui.nav, dal nucleo): "Centra" torna alla mappa dei 16 meccanismi, i confini
+ * sono la griglia (o la Panoramica); la camera non va dietro né sopra la parete, né dentro gli schemi.
+ * Link diretti e ricerca: goto({kind, id}) con
+ *   step:<id del Percorso>, action:<id dell'azione>, view:macro|blocks|detail|<id di una regione>.
  */
 import * as THREE from "three";
 import { el, fillTemplate, fmt, sleep } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
+import { installStepKeys } from "../../core/stepKeys.js";
 import { LODController } from "../../core/lod.js";
+import { parseHash } from "../../core/search.js";
 import { Menu } from "../../core/ui/menu.js";
+import { ACTION_CATALOG, ACTION_IDS } from "./actionCatalog.js";
 import { architectureActions } from "./actionsArch.js";
 import { beyondActions } from "./actionsBeyond.js";
 import { inferenceActions } from "./actionsInference.js";
@@ -41,7 +52,8 @@ import { buildRope } from "./regionRope.js";
 import { buildScaling } from "./regionScaling.js";
 import { buildSpec } from "./regionSpec.js";
 import { buildTraining } from "./regionTraining.js";
-import { gridBox, REGION_BY_ID, REGION_H, REGION_W, REGIONS, ROWS, regionBox, regionCenter, regionShell } from "./regions.js";
+import { RegionCompass } from "./regionCompass.js";
+import { gridBox, nearestRegionAt, REGION_BY_ID, REGION_H, REGION_W, REGIONS, ROWS, regionBox, regionCenter, regionShell, STEP_X, STEP_Y } from "./regions.js";
 import { Snippets } from "./snippets.js";
 
 const BUILDERS = {
@@ -76,19 +88,43 @@ const PLAYER_PAD_NARROW = 16;
 const LOD_DETAIL_MAX = 74;
 const LOD_BLOCKS_MAX = 235;
 /**
+ * La scena è una parete verticale (piano x-y) con testo, guardata di fronte: da sopra o da sotto si
+ * vedrebbe solo una linea, da dietro il testo a specchio, e troppo vicino si finisce dentro gli schemi.
+ * Si gira attorno e ci si avvicina liberamente, ma entro questi limiti (mouse, tasti, pad e touch);
+ * gli stessi del tab Audio, che ha una scena simile.
+ */
+const MAX_TURN_DEG = 75;
+const MAX_TILT_DEG = 60;
+const MIN_ZOOM_DISTANCE = 6;
+/**
  * Schermo stretto: stessa soglia di core/ui/charts.js. Sotto i 900 px i pannelli non stanno accanto
  * alla scena ma sopra (grafici a tutto schermo, codice in basso).
  */
 const NARROW = window.matchMedia("(max-width: 899px)");
+/** Confini della navigazione libera: la griglia dei meccanismi, oppure il diagramma della Panoramica. */
+const GRID_BOX = gridBox();
+const MACRO_BOX = macroBox();
+/**
+ * Fin dove può arrivare il punto guardato fuori dalla Panoramica: il riquadro dei centri delle
+ * regioni (il nucleo lo allarga del 12%, quindi il bordo cade circa sul bordo delle regioni esterne).
+ * Così, anche da vicino al livello Dettaglio, al confine metà dello schermo mostra ancora una regione;
+ * con l'intera griglia (GRID_BOX) si poteva scivolare di quasi una regione nel vuoto.
+ */
+const WALK_BOX = new THREE.Box3(new THREE.Vector3(-1.5 * STEP_X, -1.5 * STEP_Y, -1), new THREE.Vector3(1.5 * STEP_X, 1.5 * STEP_Y, 1));
+/** Primo passo del Percorso e prima azione che parlano di una regione (per "Leggi" e "▶ Anima"). */
+const STEP_OF_REGION = new Map();
+for (const section of PATH) for (const item of section.children) if (item.focus && !STEP_OF_REGION.has(item.focus)) STEP_OF_REGION.set(item.focus, item.id);
+const ACTION_OF_REGION = new Map();
+for (const a of ACTION_CATALOG) if (!ACTION_OF_REGION.has(a.region)) ACTION_OF_REGION.set(a.region, a.id);
 
 export async function createTab(root, app) {
   const ui = createTabLayout(root, {
     code: true,
     charts: true,
     player: true,
-    hint: "Segui il percorso o avvia un'azione. Rotellina: da vicino i componenti, più lontano un rettangolo per meccanismo, da lontanissimo la pipeline completa. Clic su una regione per avvicinarti.",
+    hint: "Segui il percorso o avvia un'azione. Rotellina: da vicino i componenti, più lontano un rettangolo per meccanismo, da lontanissimo la pipeline completa. Clic su una regione per avvicinarti; con W A S D (o tasto destro + trascina) passeggi tra i 16 meccanismi e in basso a sinistra leggi dove sei.",
   });
-  const { host, director, sidebar, codePanel, stage } = ui;
+  const { host, director, sidebar, codePanel, stage, nav } = ui;
   // numeri del nostro GPT per i testi (segnaposto {{chiave}}), dal model.json esportato
   const model = await loadModel();
   const vars = modelVars(model);
@@ -96,11 +132,12 @@ export async function createTab(root, app) {
   // --- scena: Dettaglio (16 regioni), Blocchi, Panoramica
   const detail = new THREE.Group();
   const regions = {};
+  const frames = {};
   for (const region of REGIONS) {
     const g = new THREE.Group();
     g.position.copy(regionCenter(region));
     g.userData.regionId = region.id;
-    regionShell(g, region);
+    frames[region.id] = regionShell(g, region);
     regions[region.id] = BUILDERS[region.id](g, vars);
     detail.add(g);
   }
@@ -109,18 +146,19 @@ export async function createTab(root, app) {
   blocks.children.forEach((child, i) => (child.userData.regionId = REGIONS[i]?.id));
   host.scene.add(detail, blocks, macro);
 
-  let lod = null;
-  lod = new LODController(host, {
+  const lod = new LODController(host, {
     levels: [
       { id: "detail", label: "Dettaglio", maxDistance: LOD_DETAIL_MAX, group: detail },
       { id: "blocks", label: "Blocchi", maxDistance: LOD_BLOCKS_MAX, group: blocks },
       { id: "macro", label: "Panoramica", maxDistance: Infinity, group: macro },
     ],
     widgetParent: stage,
-    onChange: (id) => {
-      if (lod && lod.mode !== "auto" && lod.mode === id) flyToLevel(id);
-    },
+    // Il clic dello studente su un livello lo inquadra sempre, anche se era già quello attivo
+    // (dopo una passeggiata "Blocchi" riporta alla mappa intera, "Dettaglio" alla regione dove sei).
+    onPick: (mode) => mode !== "auto" && flyToLevel(mode),
   });
+  /** "Dove sei" (regionCompass.js): creata più sotto, quando menu e player esistono. */
+  let compass = null;
 
   /**
    * Su uno stage stretto (telefono in verticale, pannelli aperti) la camera deve allontanarsi di più
@@ -138,24 +176,22 @@ export async function createTab(root, app) {
   ui.charts.onResize(scaleLodToStage);
   codePanel.onResize(scaleLodToStage);
 
-  /** Scelta manuale di un livello: la camera si porta a una distanza adatta. */
+  /** Scelta di un livello: la camera si porta a una distanza adatta ("Dettaglio": la regione dove sei). */
   function flyToLevel(id) {
-    if (id === "detail") {
-      const near = nearestRegion(host.controls.target);
-      return tab.focusRegion(near.id);
-    }
-    if (id === "blocks") return director.focus(gridBox(), { showFrame: false, margin: 1.02, direction: FRONT });
-    return director.focus(macroBox(), { showFrame: false, margin: 1.02, direction: FRONT });
+    if (id === "detail") return tab.focusRegion(nearestRegion().id);
+    return frameWhole(id === "blocks" ? GRID_BOX : MACRO_BOX);
   }
 
-  function nearestRegion(point) {
-    let best = REGIONS[0];
-    let bestD = Infinity;
-    for (const r of REGIONS) {
-      const d = regionCenter(r).distanceToSquared(point);
-      if (d < bestD) [best, bestD] = [r, d];
-    }
-    return best;
+  /** Inquadra tutta la griglia (o tutta la Panoramica) di fronte. */
+  function frameWhole(box, { duration } = {}) {
+    compass?.hide();
+    return director.focus(box, { showFrame: false, margin: 1.02, direction: FRONT, duration }); // undefined = durata predefinita
+  }
+
+  /** La regione più vicina al punto guardato: con la navigazione libera, quella su cui sei arrivato. */
+  function nearestRegion() {
+    const t = host.controls.target;
+    return nearestRegionAt(t.x, t.y);
   }
 
   // --- oggetto condiviso con i moduli delle azioni e dei grafici
@@ -171,6 +207,9 @@ export async function createTab(root, app) {
     focusRegion(id, { bottomPad = 0, duration = 1.1 } = {}) {
       const region = REGION_BY_ID.get(id);
       if (!region) return Promise.resolve();
+      compass?.hide();
+      // una regione si guarda al livello Dettaglio: un livello bloccato (Blocchi, Panoramica) torna automatico
+      if (lod.mode !== "auto" && lod.mode !== "detail") lod.setMode("auto");
       const box = regionBox(region, 0.4);
       box.min.y -= bottomPad;
       box.max.y += 2.5; // spazio per il selettore dello zoom in alto
@@ -184,8 +223,15 @@ export async function createTab(root, app) {
     prepare(id, { charts = null } = {}) {
       lod.setMode("auto");
       if (charts) tab.openCharts(charts);
-      return tab.focusRegion(id, { bottomPad: NARROW.matches ? PLAYER_PAD_NARROW : PLAYER_PAD });
+      tab.actionRegion = id;
+      return tab.focusAction();
     },
+    /** Inquadra la regione dell'azione in corso, lasciando spazio sotto per la barra del player. */
+    focusAction() {
+      return tab.focusRegion(tab.actionRegion, { bottomPad: NARROW.matches ? PLAYER_PAD_NARROW : PLAYER_PAD });
+    },
+    /** Regione inquadrata dall'azione in corso (per "Segui l'azione"). */
+    actionRegion: null,
     /**
      * Apre i grafici su una sezione. Con `auto` (aperture decise da un'azione o dal percorso) lo fa
      * solo se il pannello sta accanto alla scena: sugli schermi stretti la coprirebbe tutta e
@@ -236,6 +282,7 @@ export async function createTab(root, app) {
   }));
   let initial = true;
   tab.menu = new Menu(panePath, steps, {
+    tabId: "modern-llm",
     onSelect: (item) => {
       if (initial) return; // all'avvio si mostra la vista d'insieme, non la prima regione
       if (item.code) tab.showCode(item.code);
@@ -246,7 +293,8 @@ export async function createTab(root, app) {
     },
   });
 
-  paneViews.append(renderViews(tab, director));
+  const views = buildViews(tab, frameWhole);
+  paneViews.append(renderViews(tab, views));
   paneModels.append(renderModels(model));
   paneSources.append(renderSources());
 
@@ -258,42 +306,139 @@ export async function createTab(root, app) {
   ui.player.renderOverview(actionsList, { categories: CATEGORIES });
   ui.player.on("end", () => director.hideFrame());
 
+  // --- "Dove sei": etichetta della regione più vicina mentre lo studente passeggia
+  compass = new RegionCompass({
+    ui,
+    lod,
+    frames,
+    onFrame: (id) => tab.focusRegion(id),
+    stepFor: (id) => STEP_OF_REGION.get(id) ?? null,
+    actionFor: (id) => ACTION_OF_REGION.get(id) ?? null,
+    onRead: (stepId) => stepId && tab.menu.reveal(stepId, { sidebar }),
+    onAnimate: (actionId) => actionId && ui.player.start(actionId),
+  });
+  // Un'azione arrivata in fondo non è più "in corso": lo studente può passeggiare senza camera libera.
+  // Se poi la fa ripartire (▶ dall'ultimo passo) la camera torna sulla sua regione, come all'avvio:
+  // le azioni la inquadrano solo in onStart, che qui non viene richiamato.
+  let actionFinished = false;
+  ui.player.on("state", () => {
+    const p = ui.player;
+    if (!p.action) {
+      actionFinished = false;
+      return;
+    }
+    compass.hide();
+    const finished = !p.playing && p.steps.length > 0 && p.index >= p.steps.length - 1 && p.t >= 1;
+    if (actionFinished && !finished && tab.actionRegion) tab.focusAction();
+    actionFinished = finished;
+  });
+  // "Segui l'azione" dopo una passeggiata durante un'azione: le azioni di questo tab inquadrano la loro
+  // regione solo all'inizio (nessun volo da recuperare), quindi la si inquadra di nuovo qui.
+  director.onFollowChange((following) => {
+    if (following && director.actionActive && tab.actionRegion) tab.focusAction();
+  });
+
   // --- clic su una regione (senza trascinare): avvicinati
-  let down = null;
-  host.renderer.domElement.addEventListener("pointerdown", (e) => (down = { x: e.clientX, y: e.clientY }));
-  host.renderer.domElement.addEventListener("pointerup", (e) => {
-    if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
+  // Solo un clic sinistro (o un tocco) con un dito solo: un pizzico o un tasto destro sono navigazione.
+  // Nel livello Dettaglio un clic sulla regione dove sei già non fa niente: così il doppio clic del
+  // nucleo (centra il punto e avvicinati) funziona anche dentro una regione.
+  const presses = new Map();
+  let multiTouch = false;
+  const canvas = host.renderer.domElement;
+  canvas.addEventListener("pointerdown", (e) => {
+    presses.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (presses.size > 1) multiTouch = true;
+  });
+  canvas.addEventListener("pointercancel", (e) => {
+    presses.delete(e.pointerId);
+    if (!presses.size) multiTouch = false;
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    const down = presses.get(e.pointerId);
+    presses.delete(e.pointerId);
+    const gesture = multiTouch;
+    if (!presses.size) multiTouch = false;
+    if (!down || gesture || e.button !== 0 || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;
     const level = lod.current === "detail" ? detail : lod.current === "blocks" ? blocks : null;
     if (!level) return;
     for (const hit of host.pick(e, [level])) {
       let o = hit.object;
       while (o && !o.userData.regionId) o = o.parent;
-      if (o) {
-        tab.focusRegion(o.userData.regionId);
-        return;
-      }
+      if (!o) continue;
+      const id = o.userData.regionId;
+      if (lod.current === "detail" && id === nearestRegion().id) return;
+      tab.focusRegion(id);
+      return;
     }
   });
 
-  // --- tasti
-  root.tabIndex = -1;
-  root.addEventListener("keydown", (e) => {
-    if (e.target.closest("input, textarea, select")) return;
-    if (e.key === "ArrowDown") tab.menu.move(+1);
-    if (e.key === "ArrowUp") tab.menu.move(-1);
-    if (e.key === " " && ui.player.action) {
-      e.preventDefault();
-      ui.player.toggle();
-    }
-  });
+  // --- tasti: ↑/↓ scorrono il Percorso, Spazio mette in pausa l'azione (core/stepKeys.js); sui pulsanti
+  // di "Dove sei" Spazio attiva il pulsante
+  installStepKeys({ root, ui, menu: () => tab.menu, pathPane: panePath, spaceIgnore: ".mllm-where" });
 
-  tab.menu.select("idea.ponte");
+  // Aperto da un link diretto a un passo: si parte da quel passo (goto lo mostrerà subito dopo), così
+  // il primo passo del Percorso non viene segnato come visto senza che lo studente l'abbia letto.
+  const link = parseHash(location.hash);
+  const firstStep = link.tab === "modern-llm" && link.go?.kind === "step" && tab.menu.items.has(link.go.id) ? link.go.id : "idea.ponte";
+  tab.menu.select(firstStep, { scroll: false });
   initial = false;
   tab.hideCode();
-  director.focus(gridBox(), { showFrame: false, margin: 1.02, direction: FRONT, duration: 0.01 });
+  frameWhole(GRID_BOX, { duration: 0.01 });
+
+  // --- navigazione libera: "Centra" torna alla mappa dei meccanismi (zoom automatico), i confini
+  // sono le regioni (WALK_BOX) o, nella Panoramica, il suo diagramma (più largo)
+  nav.setHome(() => {
+    lod.setMode("auto");
+    return frameWhole(GRID_BOX);
+  });
+  nav.setBounds(() => (lod.current === "macro" ? MACRO_BOX : WALK_BOX));
+  nav.setOrbitLimits({ turn: MAX_TURN_DEG, tilt: MAX_TILT_DEG, minDistance: MIN_ZOOM_DISTANCE });
+
   window.__modernLlmTab = tab; // per il debug dalla console e per gli screenshot automatici
 
+  /**
+   * Ricerca globale e link diretti (#modern-llm/go=<kind>:<id>). Funziona anche alla prima apertura:
+   * il guscio la chiama dopo activate(). → false se l'id non esiste (il guscio avvisa lo studente).
+   */
+  async function goto({ kind, id }) {
+    director.noteUserIntent(1500); // i voli che seguono sono chiesti dallo studente
+    // Azioni e viste si guardano nella scena: sul telefono il cassetto della sidebar la coprirebbe.
+    const showScene = (pane) => (NARROW.matches ? sidebar.toggleCollapsed(true) : sidebar.select(pane));
+    if (kind === "step") {
+      if (!tab.menu.items.has(id)) return false;
+      // come scegliere un'altra strada: l'azione in corso si chiude (codice e camera sono del passo)
+      ui.player.stop();
+      return tab.menu.reveal(id, { sidebar });
+    }
+    if (kind === "action") {
+      if (!ACTION_IDS.has(id)) return false;
+      showScene("azioni");
+      ui.player.start(id);
+      return true;
+    }
+    if (kind === "view") {
+      const view = views.get(id);
+      if (!view) return false;
+      ui.player.stop();
+      showScene("viste");
+      pointAt(view.button);
+      tab.hideCode();
+      await view.run();
+      return true;
+    }
+    return false;
+  }
+
+  /** Mostra per un attimo il pulsante della vista scelta dalla ricerca (le viste qui sono voli, non modi). */
+  function pointAt(button) {
+    if (!button || NARROW.matches) return;
+    button.scrollIntoView({ block: "nearest" });
+    button.classList.add("active");
+    setTimeout(() => button.classList.remove("active"), 1800);
+  }
+
   return {
+    goto,
     activate() {
       host.start();
       host.resize();
@@ -305,14 +450,24 @@ export async function createTab(root, app) {
   };
 }
 
+/**
+ * Le viste del tab per id (pannello "Viste" e goto): i due livelli d'insieme, il Dettaglio della
+ * regione dove sei e una vista per meccanismo. `run()` restituisce la promessa del volo.
+ */
+function buildViews(tab, frameWhole) {
+  const views = new Map([
+    ["macro", { title: "Panoramica: dalla raccolta dei dati alla risposta", text: "Dati → Pre-training → Post-training → Modello → Inferenza.", run: () => (tab.lod.setMode("macro"), frameWhole(MACRO_BOX)) }],
+    ["blocks", { title: "Tutti i meccanismi (livello Blocchi)", text: "Un rettangolo per meccanismo con cosa fa.", run: () => (tab.lod.setMode("blocks"), frameWhole(GRID_BOX)) }],
+    ["detail", { title: "Dettaglio: il meccanismo dove sei", text: "I componenti della regione più vicina.", run: () => (tab.lod.setMode("auto"), tab.focusRegion(nearestRegionAt(tab.ui.host.controls.target.x, tab.ui.host.controls.target.y).id)) }],
+  ]);
+  for (const g of REGIONS) views.set(g.id, { title: g.title, text: g.sub, row: g.row, run: () => (tab.lod.setMode("auto"), tab.focusRegion(g.id)) });
+  return views;
+}
+
 /** Pannello "Viste": livelli di zoom e un pulsante per meccanismo, raggruppati per riga. */
-function renderViews(tab, director) {
-  const views = [
-    { title: "Panoramica: dalla raccolta dei dati alla risposta", text: "Dati → Pre-training → Post-training → Modello → Inferenza.", run: () => (tab.lod.setMode("macro"), director.focus(macroBox(), { showFrame: false, margin: 1.02, direction: FRONT })) },
-    { title: "Tutti i meccanismi (livello Blocchi)", text: "Un rettangolo per meccanismo con cosa fa.", run: () => (tab.lod.setMode("blocks"), director.focus(gridBox(), { showFrame: false, margin: 1.02, direction: FRONT })) },
-  ];
+function renderViews(tab, views) {
   const button = (v) =>
-    el(
+    (v.button = el(
       "button",
       {
         type: "button",
@@ -323,15 +478,13 @@ function renderViews(tab, director) {
       },
       el("strong", {}, v.title),
       v.text ? el("small", {}, v.text) : null,
-    );
+    ));
   return el(
     "div",
     { className: "view-switch mllm-views" },
-    ...views.map(button),
-    ...ROWS.flatMap((row, r) => [
-      el("h3", { className: "mllm-h3" }, row.title),
-      ...REGIONS.filter((g) => g.row === r).map((g) => button({ title: g.title, text: g.sub, run: () => (tab.lod.setMode("auto"), tab.focusRegion(g.id)) })),
-    ]),
+    button(views.get("macro")),
+    button(views.get("blocks")),
+    ...ROWS.flatMap((row, r) => [el("h3", { className: "mllm-h3" }, row.title), ...REGIONS.filter((g) => g.row === r).map((g) => button(views.get(g.id)))]),
   );
 }
 

@@ -14,6 +14,7 @@ import * as THREE from "three";
 import { meshBounds } from "../../core/director.js";
 import { el } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
+import { installStepKeys } from "../../core/stepKeys.js";
 import { Menu } from "../../core/ui/menu.js";
 import { installActions } from "./actions/index.js";
 import { buildArchitecture } from "./architecture.js";
@@ -27,7 +28,14 @@ import { installNeuronsView } from "./views/neurons.js";
 import { installWeightsView } from "./views/weights.js";
 import { modelSummaryTable, weightsTable } from "./weightsTables.js";
 
-/** Gestore delle viste: una sola attiva alla volta, elencate nel pannello "Viste" della sidebar. */
+/** Schermi stretti (telefono): sidebar a cassetto, codice in basso, due file di comandi in alto (core.css). */
+const narrowScreen = () => window.matchMedia("(max-width: 900px)").matches;
+
+/**
+ * Gestore delle viste: una sola attiva alla volta, elencate nel pannello "Viste" della sidebar.
+ * Ogni vista può dire qual è la sua inquadratura iniziale (`home`): la usano "Centra" della
+ * navigazione libera (tasto C) e il pulsante "Vista d'insieme".
+ */
 class ViewManager {
   constructor(tab, pane) {
     this.tab = tab;
@@ -38,7 +46,7 @@ class ViewManager {
     pane.append(this.list);
   }
 
-  /** view = { id, label, description, order?, enter(tab), exit(tab) } */
+  /** view = { id, label, description, order?, enter(tab), exit(tab), home?(tab) → Promise } */
   register(view) {
     this.views.push(view);
     this.views.sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
@@ -63,7 +71,20 @@ class ViewManager {
     this.current = id;
     this.list.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.view === id));
     await next.enter?.(this.tab);
+    // Sul telefono il codice è un foglio che coprirebbe metà della scena: in una vista conta la scena,
+    // il codice resta ridotto alla sua intestazione (un tocco lo riapre).
+    if (narrowScreen()) this.tab.ui.codePanel?.root.classList.add("minimized");
     this.tab.events.dispatchEvent(new CustomEvent("view", { detail: id }));
+  }
+
+  has(id) {
+    return this.views.some((v) => v.id === id);
+  }
+
+  /** Vola sull'inquadratura iniziale della vista attiva (predefinita: la pila intera). */
+  home() {
+    const view = this.views.find((v) => v.id === this.current);
+    return view?.home ? view.home(this.tab) : this.tab.focus("overview");
   }
 }
 
@@ -72,7 +93,7 @@ export async function createTab(root, app) {
     code: true,
     charts: true,
     player: true,
-    hint: "Scegli uno step o un'azione: la camera vola sul componente e a destra compare il codice. Rotellina per lo zoom: più ti allontani, più la vista si semplifica.",
+    hint: "Scegli uno step o un'azione: la camera vola sul componente e a destra compare il codice. Poi muoviti come vuoi: trascina per ruotare, tasto destro o W A S D per spostarti, doppio clic su un punto per avvicinarti, C per tornare alla vista d'insieme (? mostra tutti i comandi). Più ti allontani, più la vista si semplifica.",
   });
   const { host, director, sidebar, codePanel, stage } = ui;
   const spec = await loadModelSpec();
@@ -126,8 +147,9 @@ export async function createTab(root, app) {
     /** Vola su un componente per id del registro (vedi architecture.js) o su un oggetto. */
     focus(target, options) {
       const object = typeof target === "string" ? arch.registry.get(target) : target;
-      // 1.25: la riga di uscita in alto non finisce sotto la barra dei comandi dello stage
-      if (target === "overview") return director.focus(arch.registry.get("overview"), { showFrame: false, margin: 1.25, ...options });
+      // 1.25: la riga di uscita in alto non finisce sotto la barra dei comandi dello stage;
+      // sul telefono le due file di comandi in alto e il codice ridotto in basso tolgono ~1/3 dell'altezza
+      if (target === "overview") return director.focus(arch.registry.get("overview"), { showFrame: false, margin: narrowScreen() ? 1.6 : 1.25, ...options });
       return object ? director.focus(object, options) : Promise.resolve();
     },
     setCaption(text) {
@@ -155,7 +177,13 @@ export async function createTab(root, app) {
   }));
   tab.menu = new Menu(panePath, steps, {
     vars: spec.vars,
-    onSelect: (item, title) => {
+    tabId: "transformer",
+    onSelect: async (item, title) => {
+      // I passi parlano della pila: se la vista attiva la nasconde (Rete neurale), si torna all'Architettura.
+      if (!arch.root.visible) await tab.views.activate("architettura");
+      // un passo inquadra un componente da vicino: lo zoom torna su Auto, così si vede il dettaglio
+      // anche se prima lo studente aveva bloccato "Panoramica" (durante un'azione decide l'azione)
+      if (!ui.player?.action) tab.lod?.controller.setMode("auto");
       tab.focus(item.focus);
       tab.showCode(item.code, title, item.highlight ?? []);
     },
@@ -197,20 +225,13 @@ export async function createTab(root, app) {
 
   // --- controlli generali
   const playFlow = el("button", { type: "button", className: "flow-toggle", onclick: () => (playFlow.textContent = flow.toggle() ? "⏸ Flusso" : "▶ Flusso") }, "⏸ Flusso");
-  const overview = el("button", { type: "button", className: "overview-button", onclick: () => tab.focus("overview") }, "Vista d'insieme");
+  // "Vista d'insieme" fa la stessa cosa di "Centra" (tasto C): l'inquadratura iniziale della vista attiva.
+  const overview = el("button", { type: "button", className: "overview-button", title: "Torna alla vista d'insieme (tasto C)", onclick: () => ui.nav.home() }, "Vista d'insieme");
   stage.append(el("div", { className: "stage-toolbar" }, overview, playFlow));
-  root.addEventListener("keydown", (e) => {
-    if (e.target.closest("input, textarea, select")) return;
-    if (e.key === "ArrowDown") tab.menu.move(+1);
-    if (e.key === "ArrowUp") tab.menu.move(-1);
-    if (e.key === " " && ui.player?.action) {
-      e.preventDefault();
-      ui.player.toggle();
-    }
-  });
-  root.tabIndex = -1;
+  installStepKeys({ root, ui, menu: () => tab.menu, pathPane: tab.panes.path }); // ↑ ↓ Percorso, Spazio player
 
   installLevelPicking(tab);
+  installNavigation(tab);
 
   // Altri tab possono chiedere una vista precisa (es. il tab RAG apre la vista "contesto").
   // detail = id della vista, oppure { view, question } per passare anche la domanda alla vista Contesto.
@@ -224,7 +245,7 @@ export async function createTab(root, app) {
   tab.menu.select("data.dataset");
   tab.focus("overview");
   // Sul telefono il codice è un foglio in basso che coprirebbe metà della pila: all'avvio resta ridotto.
-  if (window.matchMedia("(max-width: 900px)").matches) codePanel.root.classList.add("minimized");
+  if (narrowScreen()) codePanel.root.classList.add("minimized");
   // Le azioni di questo tab (actions/, context/) inquadrano la scena sapendo che sul telefono il
   // codice è un foglio in basso: niente spostamento in alto durante le azioni (regola di core.css).
   root.classList.add("code-stays-bottom");
@@ -236,8 +257,103 @@ export async function createTab(root, app) {
       host.start();
       host.resize();
     },
-    deactivate: () => host.stop(),
+    deactivate: () => host.stop(), // la navigazione si ferma da sola (niente scivolate al ritorno)
+    goto: (target) => gotoTarget(tab, target),
   };
+}
+
+/**
+ * Navigazione libera (ui.nav del nucleo) adattata al tab:
+ * - "Centra" (C, Home, pulsante del pad) = l'inquadratura iniziale della vista attiva;
+ * - confini = ciò che si vede nella vista attiva, calcolato sui contenuti fissi della scena
+ *   (non sui livelli dello zoom che si accendono e spengono, così il bordo non cambia allo zoom).
+ */
+function installNavigation(tab) {
+  const { ui, arch } = tab;
+  ui.nav.setHome(() => tab.views.home());
+  const box = new THREE.Box3();
+  const part = new THREE.Box3();
+  const levelGroups = new Set(Object.values(tab.lod.levels));
+  const archLevels = new Set([arch.root, tab.lod.arch.blocks, tab.lod.arch.macro]);
+  const add = (object) => box.union(part.copy(meshBounds(object, { visibleOnly: true })));
+  ui.nav.setBounds(() => {
+    box.makeEmpty();
+    // La pila conta tutta, a ogni livello (i rettangoli di Blocchi/Panoramica stanno nelle stesse
+    // coordinate): il livello che si accende o si spegne zoomando non sposta i confini.
+    if (arch.root.visible) {
+      add(arch.root);
+      add(tab.lod.arch.macro);
+    }
+    for (const child of ui.host.scene.children) {
+      if (!child.visible) continue;
+      if (!levelGroups.has(child)) add(child); // binario, lavagna delle azioni…
+      // dentro i livelli: ciò che le viste aggiungono (rete neurale, diagramma del Contesto)
+      else for (const c of child.children) if (c.visible && !archLevels.has(c)) add(c);
+    }
+    return box;
+  });
+}
+
+/**
+ * Link diretti e ricerca globale (app.goto → instance.goto): porta il tab su un passo del Percorso,
+ * un'azione, una vista, un livello dello zoom o un passo della vista Contesto. Gli id sono quelli
+ * di search.js. Restituisce false se l'id non esiste (il guscio avvisa lo studente).
+ */
+async function gotoTarget(tab, { kind, id } = {}) {
+  const { ui } = tab;
+  // un salto chiesto dallo studente: i voli che seguono partono anche con la camera libera
+  ui.director.noteUserIntent(1500);
+  if (kind === "step") {
+    if (!tab.menu.items.has(id)) return false;
+    stopOtherAction(tab, null);
+    await tab.views.activate("architettura");
+    return tab.menu.reveal(id, { sidebar: ui.sidebar });
+  }
+  if (kind === "action") {
+    if (!ui.player?.actions.has(id)) return false;
+    ui.sidebar.select("azioni"); // l'azione può poi scegliere il suo pannello (es. Contesto, Viste)
+    showSceneOnPhone(tab);
+    void ui.player.start(id); // la preparazione può richiedere il motore: non la aspettiamo
+    return true;
+  }
+  if (kind !== "view") return false;
+  if (tab.views.has(id)) {
+    stopOtherAction(tab, null);
+    await tab.views.activate(id);
+    if (id !== "contesto") ui.sidebar.select("viste");
+    showSceneOnPhone(tab);
+    return true;
+  }
+  const level = /^zoom\.(detail|blocks|macro)$/.exec(id)?.[1];
+  if (level) {
+    stopOtherAction(tab, null);
+    // I testi di questi risultati parlano della pila (matrici, rettangoli, diagramma del paper): anche
+    // da Contesto o Pesi, dove la pila si vede ma il livello inquadrerebbe altro, si torna all'Architettura.
+    await tab.views.activate("architettura");
+    tab.lod.controller.pick(level); // come se lo studente lo scegliesse dal selettore: blocca il livello e lo inquadra
+    ui.sidebar.select("viste"); // lì c'è "Zoom semantico: cosa vedi a ogni livello"
+    showSceneOnPhone(tab);
+    return true;
+  }
+  if (id.startsWith("ctx.") && tab.contextView) {
+    stopOtherAction(tab, "context-pipeline");
+    return tab.contextView.reveal(id);
+  }
+  return false;
+}
+
+/**
+ * Sul telefono la sidebar è un cassetto sopra la scena: per una vista, un livello o un'azione
+ * conta la scena, quindi il cassetto si chiude (per un passo invece resta aperto sul suo testo).
+ */
+function showSceneOnPhone(tab) {
+  if (narrowScreen()) tab.ui.sidebar.toggleCollapsed(true);
+}
+
+/** Un salto della ricerca chiude l'azione in corso (tranne `keep`): la regia torna allo studente. */
+function stopOtherAction(tab, keep) {
+  const player = tab.ui.player;
+  if (player?.action && player.action.id !== keep) player.stop();
 }
 
 /**
@@ -256,7 +372,7 @@ function installLevelPicking(tab) {
         tab.focus(focus && focus !== "overview" ? focus : "blocks.0");
       } else {
         // sul telefono le due file di comandi in alto occupano ~100 px: serve più margine
-        const margin = window.matchMedia("(max-width: 900px)").matches ? 1.45 : 1.25;
+        const margin = narrowScreen() ? 1.45 : 1.25;
         tab.focus(tab.lod.arch[mode], { showFrame: false, margin, direction: FRONT });
       }
       return;

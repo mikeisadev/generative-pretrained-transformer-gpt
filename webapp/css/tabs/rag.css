@@ -81,8 +81,3 @@
   /* telefono: durante le azioni il codice sta in alto (ridotto all'intestazione, vedi index.js) */
   .rag-tab:has(.player-bar:not([hidden])) .code-panel { top: 104px; bottom: auto; max-height: 34vh; }
 }
-@media (max-width: 600px) {
-  /* il selettore dello zoom va a capo invece di finire sotto il pulsante "Grafici" */
-  .rag-tab .lod-switch { flex-wrap: wrap; right: 120px; }
-  .rag-tab .lod-switch .lod-title { width: 100%; }
-}

@@ -11,19 +11,9 @@
 import * as THREE from "three";
 import { makeArrow, makeBlock } from "../../core/diagram.js";
 import { label } from "../../core/visuals.js";
+import { PALETTE } from "./palette.js";
 
-export const PALETTE = {
-  ours: "#f59e0b", // il nostro GPT (come i pesi "appresi" del tab Transformer)
-  modern: "#38bdf8",
-  moe: "#a78bfa",
-  ok: "#4ade80",
-  bad: "#f87171",
-  warn: "#facc15",
-  text: "#e2e8f0",
-  muted: "#94a3b8",
-  data: "#f472b6",
-  tool: "#34d399",
-};
+export { PALETTE }; // chi costruisce la scena li prende da qui insieme ai mattoni
 
 /** Le etichette sprite delle regioni si leggono a ~40 unità di distanza: le ingrandiamo tutte. */
 const TEXT_SCALE = 1.45;
@@ -119,6 +109,7 @@ export function frame(parent, w, h, color = "#334155") {
   const back = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: "#0b1220", transparent: true, opacity: 0.55, depthWrite: false }));
   back.position.z = -0.35;
   back.userData.isFrame = true;
+  line.userData.back = back; // per "accendere" la regione su cui si trova lo studente (regionCompass.js)
   parent.add(back, line);
   return line;
 }

@@ -237,6 +237,14 @@ table.weights tfoot td { font-weight: 600; border-bottom: 0; }
   .brand strong { font-size: 13px; }
 }
 
+/* Finestre medie (901-1280 px): la barra strumenti del tab (in alto a destra) arriverebbe sopra il
+   selettore dello zoom. Come sul telefono: niente etichetta "Zoom:" (il pulsante attivo dice già il
+   livello) e pulsanti della barra più compatti; così da 1100 px in su stanno sulla stessa fila. */
+@media (min-width: 901px) and (max-width: 1280px) {
+  .tab:has(.stage-toolbar) .lod-switch .lod-title { display: none; }
+  .stage-toolbar button { font-size: 12px; padding: 5px 8px; white-space: nowrap; }
+}
+
 /* LOD: selettore del livello di dettaglio */
 .lod-switch {
   position: absolute;

@@ -77,20 +77,45 @@ fallisce se `webapp/data/` non è allineato al codice: dopo aver modificato il p
 
 ### Come si usa
 
-- **Sidebar a sinistra**: *Percorso* (gli step in ordine, con spiegazione, formule e tabella dei pesi), *Azioni* (panoramica delle animazioni, divise per categoria: prompt, training…), *Viste*, *Fonti*. Con la tastiera: ↑ ↓ cambiano step, lo spazio mette in pausa l'azione.
+- **Sidebar a sinistra**: *Percorso* (gli step in ordine, con spiegazione, formule e tabella dei pesi), *Azioni* (panoramica delle animazioni, divise per categoria: prompt, training…), *Viste*, *Fonti*. Con la tastiera: ↑ ↓ cambiano step, lo spazio mette in pausa l'azione (in tutti i tab).
 - **Zoom semantico**: rotellina per avvicinarsi o allontanarsi, oppure il selettore in alto a sinistra. *Dettaglio* mostra ogni elemento, *Blocchi* un rettangolo con titolo e descrizione per componente, *Panoramica* il diagramma a blocchi (nel Transformer un unico rettangolo con input sotto e output sopra).
 - **Azioni**: barra in basso con play/pausa, passo avanti/indietro, ricomincia, velocità e chiudi. Chiudendo un'azione la scena torna com'era.
 - **Grafici**: il pulsante in alto a destra apre i grafici che usano AI engineer e data scientist (loss, learning rate, norma dei gradienti, distribuzioni, attention…), che si riempiono mentre le azioni avanzano.
 - **Codice**: la finestra a destra mostra il codice vero dello step (Python del pacchetto `gpt`, Java delle lezioni Spring AI); "▁" la riduce.
 
+### Muoversi nella scena
+
+Ogni scena è come un plastico sul tavolo: ci giri attorno, ti sposti di lato, ti avvicini a un dettaglio e torni alla vista iniziale quando vuoi. Gli stessi comandi valgono in tutti i tab; `?` (o il pulsante con il punto di domanda) li mostra tutti.
+
+| Per… | Mouse | Trackpad | Tastiera | Touch |
+|---|---|---|---|---|
+| spostarti a destra, sinistra, su, giù | tasto destro (o Shift) + trascina | due dita in orizzontale, oppure modalità **Sposta** e trascina | `W` `A` `S` `D`, `←` `→` | due dita |
+| ruotare attorno al punto guardato | trascina | trascina | `Q` `E` (gira), `R` `F` (inclina) | un dito |
+| zoom | rotella (verso il puntatore) | pizzico o due dita in verticale | `+` `−` | pizzico |
+| centrare un punto | doppio clic | doppio clic | | doppio tocco |
+| tornare alla vista iniziale | pulsante ◎ "Centra" | pulsante ◎ | `C` o `Home` | pulsante ◎ |
+
+- Tenendo premuto un tasto o una freccia del pad ci si muove in continuo, con partenza e frenata morbide; `Shift` va più veloce, `Alt` più piano. `M` scambia Ruota e Sposta (scelta ricordata).
+- **Pad a schermo** (in basso a destra; sul telefono un pulsante): frecce, rotazione, zoom, "Centra", aiuto, schermo intero, foto della scena in PNG.
+- **Non ci si perde**: la scena ha dei bordi morbidi; se non si vede più niente compare "Ti sei perso? Torna al centro".
+- **Durante un'azione** puoi guardarti intorno: la camera diventa libera e il chip **"Segui l'azione"** la riporta sull'animazione (lo fanno anche la fine dell'azione e "⟲ Ricomincia").
+
+### Ricerca, link diretti, glossario e progressi
+
+- **Cerca** (`Ctrl/⌘+K` o `/`): trova passi, azioni, viste e termini in tutti i tab, anche quelli mai aperti; tollera accenti e un errore di battitura ("sofmax"). Invio apre il risultato, Maiusc+Invio copia il link.
+- **Link diretti**: `#transformer/go=step:head.qkv`, `#rag/go=action:ricerca`, `#diffusion/go=view:dit`… aprono il tab già sul punto giusto; ogni passo ha "Copia link a questo passo".
+- **Glossario**: 47 termini (token, embedding, softmax, HNSW, CFG, RVQ, MoE, KV cache…) con definizione semplice, un'analogia e il pulsante "Guarda nel tab".
+- **Progressi**: ✓ sui passi già visti e "n/m passi visti" per ogni tab (salvati nel browser; "Azzera" li cancella).
+
 ### Test della web app
 
 ```bash
-node --test webapp/tests/*.test.mjs            # motore GPT in JS, libreria RAG, HNSW, grafici, azioni
-NODE_PATH=$(npm root -g) node webapp/tests/screenshot.mjs http://127.0.0.1:8765/ /tmp/shots --lod
+node --test webapp/tests/*.test.mjs            # motore GPT in JS, libreria RAG, HNSW, grafici, navigazione, ricerca
+NODE_PATH=$(npm root -g) node webapp/tests/screenshot.mjs http://127.0.0.1:8765/ /tmp/shots --lod --nav
 ```
 
-Lo script di screenshot (Playwright con Chromium) apre tutti i tab e i livelli dello zoom e termina con
+Lo script di screenshot (Playwright con Chromium) apre tutti i tab e i livelli dello zoom (`--lod`), prova
+la navigazione con i tasti e "Centra" (`--nav`), usa il formato telefono con `--mobile` e termina con
 errore se la console ne segnala. L'architettura del codice è descritta in `webapp/ARCHITECTURE.md`.
 
 ## Bug corretti rispetto al notebook

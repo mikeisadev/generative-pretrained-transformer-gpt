@@ -75,7 +75,7 @@ export class ContextPane {
     info.append(
       el("h3", {}, "Contesto: dalla domanda all'LLM"),
       el("p", {}, "A sinistra della pila compare la fase che prepara l'input: guardrail, embedding, ricerca su pgvector, assemblaggio del prompt, strumenti e streaming della risposta. Una freccia entra nei token di input del transformer."),
-      el("p", { className: "hint" }, "Rotellina: da vicino le schede con i dati veri, poi un rettangolo per fase, da lontano il diagramma Contesto → LLM → Risposta."),
+      el("p", { className: "hint" }, "Rotellina (o doppio clic su una fase): da vicino le schede con i dati veri, poi un rettangolo per fase, da lontano il diagramma Contesto → LLM → Risposta."),
       el("button", { type: "button", className: "tf-start", onclick: () => this.handlers.onShow() }, "Apri il pannello Contesto"),
     );
     this.info = info;

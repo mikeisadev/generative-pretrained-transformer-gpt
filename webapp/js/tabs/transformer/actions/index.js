@@ -35,9 +35,12 @@ function safely(action, stage, tab) {
   const build = action.build;
   return {
     ...action,
-    // interrotta dall'utente: la scena è già ripristinata, la camera torna alla vista d'insieme
+    // interrotta dall'utente: la scena è già ripristinata, la camera torna alla vista d'insieme.
+    // Anche con la "camera libera" (lo studente si era mosso durante l'azione): la lavagna e i
+    // pezzi dell'azione sono spariti, restare a guardare il punto dove stavano non servirebbe.
     onStop(ctx) {
       action.onStop?.(ctx);
+      tab.ui.director.noteUserIntent();
       tab.focus("overview");
     },
     async build(ctx) {

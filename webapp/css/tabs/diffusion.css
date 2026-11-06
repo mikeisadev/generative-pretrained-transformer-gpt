@@ -55,13 +55,3 @@
    codice è aperto: in questo tab la barra sta sopra il pannello (vedi report: proposta per il nucleo). */
 .tab-root[data-tab="diffusion"] .player-bar { z-index: 16; }
 
-/* Schermi stretti: il selettore dello zoom va a capo sotto i pulsanti in alto, così il pulsante
-   "Grafici" non copre "Panoramica" (vedi report: proposta per il nucleo, vale per tutti i tab). */
-@media (max-width: 640px) {
-  .tab-root[data-tab="diffusion"] .lod-switch {
-    top: 56px;
-    left: 10px;
-    right: 10px;
-    flex-wrap: wrap;
-  }
-}

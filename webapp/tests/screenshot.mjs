@@ -3,6 +3,8 @@
 //     senza elenco dei tab: tutti, uno dopo l'altro (verifica anche il passaggio tra tab)
 //     --lod     uno screenshot in più per ogni livello dello zoom semantico (selettore in alto)
 //     --mobile  viewport 390×844 invece di 1600×900
+//     --nav     navigazione libera: spostamento con D e W tenuti premuti (screenshot "-nav-moved"),
+//               poi C (Centra) e uno screenshot "-nav-home" che deve tornare alla vista iniziale
 // Stampa gli errori e i warning della console e termina con codice 1 se ce ne sono.
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -29,6 +31,19 @@ for (const hash of hashes.split(",")) {
   await page.waitForTimeout(4000);
   const name = hash.replace(/[^\w-]/g, "_");
   await page.screenshot({ path: `${out}/${prefix}-${name}.png` });
+  if (flags.has("--nav")) {
+    await page.keyboard.down("d");
+    await page.waitForTimeout(1200);
+    await page.keyboard.up("d");
+    await page.keyboard.down("w");
+    await page.waitForTimeout(500);
+    await page.keyboard.up("w");
+    await page.waitForTimeout(1200); // frenata e bordo elastico
+    await page.screenshot({ path: `${out}/${prefix}-${name}-nav-moved.png` });
+    await page.keyboard.press("c");
+    await page.waitForTimeout(2200); // volo di "Centra"
+    await page.screenshot({ path: `${out}/${prefix}-${name}-nav-home.png` });
+  }
   if (!flags.has("--lod")) continue;
   const root = `.tab-root[data-tab="${hash.split("/")[0]}"]`;
   const modes = await page.$$eval(`${root} .lod-switch button`, (bs) => bs.map((b) => b.dataset.mode).filter((m) => m !== "auto"));

@@ -1,1 +1,296 @@
-/* Ricerca globale, glossario e progressi (vedi js/core/ui/palette.js). */
+/* Ricerca globale, glossario e progressi (vedi js/core/ui/palette.js, js/core/ui/menu.js). */
+
+kbd {
+  font: 11px/1 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #cbd5e1;
+  background: #0b1220;
+  border: 1px solid #334155;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+/* --- pulsante "Cerca" nella barra in alto ------------------------------------------------- */
+.search-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 5px 8px 5px 10px;
+  color: var(--muted);
+  background: #111c30;
+  border-radius: 9px;
+}
+.search-button:hover, .search-button:focus-visible { color: var(--text); }
+.search-button:focus-visible, .palette :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.search-button-icon { width: 17px; height: 17px; flex: none; }
+.search-button-label { font-weight: 500; }
+
+@media (max-width: 900px) {
+  .search-button { margin-left: auto; width: 40px; height: 40px; padding: 0; justify-content: center; }
+  .search-button-label, .search-button kbd { display: none; }
+  .search-button-icon { width: 20px; height: 20px; }
+}
+
+/* --- finestra della palette ------------------------------------------------------------- */
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 9vh 16px 16px;
+  background: rgba(2, 6, 23, 0.62);
+}
+.palette-backdrop[hidden] { display: none; }
+
+.palette {
+  width: min(680px, 100%);
+  max-height: min(640px, 82vh);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-solid);
+  border: 1px solid #334155;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.palette-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.palette-icon { width: 20px; height: 20px; color: var(--muted); flex: none; }
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 17px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  padding: 8px 0;
+}
+.palette-input:focus { outline: none; }
+.palette-input::placeholder { color: #64748b; }
+.palette-input::-webkit-search-cancel-button { filter: invert(0.7); cursor: pointer; }
+.palette-close { padding: 4px 8px; background: transparent; border-color: transparent; color: var(--muted); font-size: 12px; }
+.palette-close:hover { border-color: #334155; color: var(--text); }
+.palette-close-x { display: none; font-size: 18px; line-height: 1; }
+
+.palette-filters {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.palette-filter {
+  flex: none;
+  font-size: 12.5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+}
+.palette-filter[aria-pressed="true"] { color: #e0f2fe; background: rgba(56, 189, 248, 0.14); border-color: var(--accent); }
+
+.palette-head, .palette-filters, .palette-foot { flex: none; }
+.palette-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.palette-list, .palette-term-view { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px 8px 10px; }
+.palette-list[hidden], .palette-term-view[hidden] { display: none; }
+
+.palette-group { margin-top: 4px; }
+.palette-group-title {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  padding: 8px 8px 4px;
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--panel-solid);
+}
+
+.palette-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.palette-option[aria-selected="true"] { background: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.45); }
+.palette-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.palette-title { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-snippet { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-option mark { background: rgba(250, 204, 21, 0.22); color: #fef3c7; border-radius: 3px; padding: 0 1px; }
+.palette-more .palette-title { color: var(--accent); font-weight: 400; font-size: 13px; }
+.palette-more { min-height: 38px; }
+
+.palette-kind {
+  flex: none;
+  width: 62px;
+  text-align: center;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 0;
+  border-radius: 6px;
+  color: #cbd5e1;
+  background: #1e293b;
+}
+.palette-kind.kind-step { color: #bae6fd; background: rgba(56, 189, 248, 0.14); }
+.palette-kind.kind-action { color: #fde68a; background: rgba(245, 158, 11, 0.15); }
+.palette-kind.kind-view { color: #ddd6fe; background: rgba(167, 139, 250, 0.16); }
+.palette-kind.kind-term { color: #bbf7d0; background: rgba(74, 222, 128, 0.14); }
+.palette-kind.kind-tab { color: #e2e8f0; background: #334155; }
+
+.palette-visited { flex: none; color: #4ade80; font-size: 13px; }
+.palette-copy {
+  flex: none;
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+  opacity: 0;
+}
+.palette-option:hover .palette-copy, .palette-option[aria-selected="true"] .palette-copy { opacity: 1; }
+.palette-copy:hover { color: var(--text); border-color: #334155; }
+.icon { width: 15px; height: 15px; vertical-align: -2px; }
+
+.palette-empty { padding: 18px 12px; color: var(--muted); }
+.palette-empty p { margin: 0 0 6px; }
+.palette-tip { margin: 12px 8px 4px; color: var(--muted); font-size: 12.5px; }
+
+.palette-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+.palette-keys kbd { margin: 0 1px; }
+.palette-status { white-space: nowrap; }
+
+/* --- scheda di un termine del glossario ------------------------------------------------ */
+.palette-term { padding: 6px 8px 8px; }
+.palette-term h2 { margin: 8px 0 6px; font-size: 22px; color: #f1f5f9; }
+.palette-back { font-size: 12.5px; padding: 4px 10px; background: transparent; color: var(--muted); margin-bottom: 10px; display: block; }
+.palette-term-def { margin: 0 0 12px; font-size: 15px; line-height: 1.6; }
+.palette-term-analogy {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 3px solid #4ade80;
+  border-radius: 0 8px 8px 0;
+  background: rgba(74, 222, 128, 0.07);
+}
+.palette-term-analogy strong { display: block; font-size: 11.5px; letter-spacing: 0.05em; text-transform: uppercase; color: #86efac; margin-bottom: 2px; }
+.palette-term-analogy p { margin: 0; }
+.palette-term-related { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 16px; font-size: 13px; }
+.palette-chip { font-size: 12.5px; padding: 3px 10px; border-radius: 999px; }
+.palette-term-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.palette-primary { color: #0b1220; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.palette-primary:hover { background: #7dd3fc; }
+
+/* --- telefono: la palette occupa tutto lo schermo -------------------------------------- */
+@media (max-width: 640px) {
+  .palette-backdrop { padding: 0; }
+  .palette { width: 100%; height: 100%; max-height: none; border-radius: 0; border: 0; }
+  .palette-head { padding: 8px 8px 8px 16px; }
+  .palette-input { font-size: 16px; } /* 16 px: iOS non ingrandisce la pagina al fuoco */
+  .palette-close { width: 44px; height: 44px; }
+  .palette-close-key { display: none; }
+  .palette-close-x { display: inline; }
+  .palette-filter { padding: 7px 13px; font-size: 13px; }
+  .palette-option { min-height: 54px; }
+  .palette-copy { opacity: 1; width: 40px; height: 40px; }
+  .palette-kind { width: 54px; font-size: 10px; }
+  .palette-keys { display: none; }
+  .palette-foot { justify-content: flex-end; }
+  .palette-term-actions button { flex: 1 1 100%; min-height: 44px; }
+}
+@media (hover: none) {
+  .palette-copy { opacity: 1; }
+}
+
+/* --- avviso breve ("Link copiato") ---------------------------------------------------- */
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 110;
+  max-width: min(92vw, 560px);
+  transform: translate(-50%, 12px);
+  padding: 9px 16px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s, transform 0.18s;
+  overflow-wrap: anywhere;
+}
+.app-toast.visible { opacity: 1; transform: translate(-50%, 0); }
+.clipboard-helper { position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; }
+
+/* --- progressi nel Menu del Percorso ------------------------------------------------- */
+.menu-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.menu-progress-text { white-space: nowrap; }
+.menu-progress-bar { flex: 1; height: 5px; border-radius: 999px; background: #1e293b; overflow: hidden; }
+.menu-progress-fill { display: block; height: 100%; width: 0; background: #4ade80; border-radius: inherit; transition: width 0.3s ease; }
+.menu-progress-reset { font-size: 12px; padding: 2px 9px; background: transparent; color: var(--muted); }
+.menu-progress-reset.confirm { color: #fecaca; border-color: #f87171; }
+.menu-progress-reset[hidden] { display: none; }
+
+.step-header.tracked { display: flex; align-items: center; gap: 10px; }
+.step-header.tracked .step-title { flex: 1; min-width: 0; }
+.step-count { flex: none; font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.step.done .step-count { color: #4ade80; }
+.item-check { margin-left: 6px; color: #4ade80; font-size: 12px; }
+
+.item-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  padding: 3px 9px;
+  color: var(--muted);
+  background: transparent;
+}
+.item-link:hover { color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-toast, .menu-progress-fill { transition: none; }
+}
+
+/* Un passo aperto da un link o dalla ricerca scorre in cima lasciando vedere un po' di contesto sopra. */
+.step .item { scroll-margin-top: 48px; }

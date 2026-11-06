@@ -12,15 +12,23 @@
  *   labPane.js / content.js      sidebar: Laboratorio, Percorso, Fonti
  *   snippets.js / upstream.js    codice vero nel pannello di destra
  *   audioOut.js                  riproduzione con Web Audio
+ *   catalog.js / search.js       nomi di azioni e viste; indice della ricerca globale (solo dati)
+ *
+ * Navigazione libera (ui.nav, dal nucleo): "Centra" = "Vista d'insieme", confini = tutta la pipeline.
+ * Link diretti #audio/go=<kind>:<id> (ricerca globale) arrivano a goto():
+ *   step:<id del Percorso>, action:audio-sound|audio-rvq|audio-generate|audio-whisper,
+ *   view:overview|delayCore|rvq|whisperAll (pannello Viste) oppure detail|blocks|macro (livelli dello zoom).
  */
 import * as THREE from "three";
 import { fetchJson } from "../../core/binary.js";
 import { el, fmt } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
+import { installStepKeys } from "../../core/stepKeys.js";
 import { LODController } from "../../core/lod.js";
 import { Menu } from "../../core/ui/menu.js";
 import { installActions } from "./actions.js";
 import { AudioOut } from "./audioOut.js";
+import { ACTIONS, ACTION_CATEGORIES, LEVELS, VIEWS } from "./catalog.js";
 import { CODEC } from "./codec.js";
 import { SOURCES, STEPS } from "./content.js";
 import { createLab, formatPercent } from "./lab.js";
@@ -36,13 +44,42 @@ import { showSnippet } from "./snippets.js";
 
 const FRONT = new THREE.Vector3(0, 0.08, 1).normalize();
 const SLIGHT = new THREE.Vector3(0.1, 0.12, 1).normalize();
+const ACTION_IDS = new Set(Object.values(ACTIONS).map((a) => a.id));
+const VIEW_IDS = new Set(VIEWS.map((v) => v.id));
+const LEVEL_IDS = new Set(LEVELS.map((l) => l.id));
+/** Telefono e tablet stretto: la sidebar è un cassetto che copre la scena (stessa soglia di core.css). */
+const PHONE = "(max-width: 900px)";
+/**
+ * Rapporto larghezza/altezza della scena visibile su cui sono tarate le soglie del LOD (1600×900 con la
+ * sidebar aperta). Su una scena più stretta (codice aperto, telefono) per inquadrare lo stesso componente
+ * la camera si allontana di più: le soglie crescono nella stessa proporzione, così una vista mostra lo
+ * stesso livello su ogni schermo (es. la vista d'insieme con il codice aperto resta "Blocchi").
+ * La correzione si ferma a 2×: sul telefono (scena ~3 volte più stretta) il Dettaglio di mezza pipeline
+ * sarebbe illeggibile e pesante da disegnare, meglio i blocchi con i titoli.
+ */
+const REFERENCE_ASPECT = 1.44;
+const MAX_NARROWNESS = 2;
+/**
+ * Limiti della camera libera: distanza minima (il componente più piccolo, il decoder, riempie lo schermo
+ * già a ~15) e di quanto si può girare attorno (°) o inclinare (°) rispetto alla vista frontale.
+ */
+const MIN_ZOOM_DISTANCE = 6;
+const MAX_TURN_DEG = 60;
+const MAX_TILT_DEG = 45;
+/** Dispositivo senza mouse: le didascalie parlano di dita invece che di tasti. */
+const TOUCH = "(pointer: coarse)";
 
 export async function createTab(root, app) {
+  const touch = window.matchMedia(TOUCH);
   const ui = createTabLayout(root, {
     code: true,
     charts: true,
     player: true,
-    hint: "Scegli un punto del percorso o un'azione: la camera vola sul componente e a destra compare il codice. Rotellina: più ti allontani, più la vista si semplifica (dettaglio → blocchi → panoramica).",
+    hint:
+      "Scegli un punto del percorso o un'azione: la camera vola sul componente e a destra compare il codice. Più ti allontani, più la vista si semplifica (dettaglio → blocchi → panoramica). " +
+      (touch.matches
+        ? "Puoi anche muoverti da solo lungo la pipeline con due dita; il pulsante con le frecce in basso a destra apre i comandi."
+        : "Puoi anche muoverti da solo lungo la pipeline: tasto destro (o Shift) e trascina, oppure A/D; C riporta alla vista d'insieme."),
   });
   const { host, director, sidebar, stage, codePanel } = ui;
   root.classList.add("audio-tab");
@@ -92,6 +129,11 @@ export async function createTab(root, app) {
   const macro = buildMacro();
   sceneRoot.add(detail, blocks.group, macro);
 
+  // calcolato solo quando la scena cambia forma, non a ogni frame
+  let narrowness = 1;
+  const updateNarrowness = () => (narrowness = THREE.MathUtils.clamp(REFERENCE_ASPECT / host.visibleAspect(), 1, MAX_NARROWNESS));
+  updateNarrowness();
+  host.onResize(updateNarrowness);
   const lod = new LODController(host, {
     levels: [
       { id: "detail", label: "Dettaglio", maxDistance: LOD_DISTANCES.detail, group: detail },
@@ -99,10 +141,11 @@ export async function createTab(root, app) {
       { id: "macro", label: "Panoramica", maxDistance: Infinity, group: macro },
     ],
     widgetParent: stage,
+    distanceScale: () => narrowness,
     // Scelta a mano nel selettore: "Dettaglio" avvicina la camera al cuore del generatore,
     // gli altri livelli inquadrano tutta la pipeline (il livello resta quello scelto).
     onPick: (mode) => {
-      if (mode !== "auto") tab.focus(mode === "detail" ? "genCore" : "overview");
+      if (mode !== "auto") tab.focus(mode === "detail" ? "genCore" : "overview", { byUser: true });
     },
   });
 
@@ -119,6 +162,7 @@ export async function createTab(root, app) {
       return [id, plane];
     }),
   );
+  sceneRoot.updateMatrixWorld(true); // i rettangoli servono subito (primo volo e confini), prima del primo disegno
 
   const plots = createPlots(ui.charts, lab);
   let pendingCode = Promise.resolve(); // pannello del codice in arrivo (vedi tab.focus)
@@ -133,19 +177,29 @@ export async function createTab(root, app) {
     plots,
     state,
     lod,
+    /** Ultimo componente inquadrato (le azioni lo usano per non ripetere un volo inutile). */
+    focusedId: null,
+    /** Componente che l'azione in corso vuole inquadrare (per "Segui l'azione", vedi sotto). */
+    actionFocusId: null,
     /**
      * Vola su un rettangolo del registro. Aspetta che il pannello del codice chiesto nello stesso
      * passo sia comparso (cambia la parte visibile dello stage) e, se un'azione è in corso, lascia
      * spazio in basso per la barra del player.
+     * Con `byUser` il volo è una richiesta dello studente (menu, viste, "Centra", ricerca): parte anche
+     * con la camera libera, anche se il codice ha impiegato un po' ad arrivare, e durante un'azione la
+     * camera poi resta lì ("Camera libera · Segui l'azione") invece di essere riportata altrove dal
+     * passo successivo dell'azione.
      */
-    /** Ultimo componente inquadrato (le azioni lo usano per non ripetere un volo inutile). */
-    focusedId: null,
-    async focus(id, options = {}) {
+    async focus(id, { byUser = false, ...options } = {}) {
       const target = registry.get(id);
       if (!target) return;
       tab.focusedId = id;
       await Promise.resolve(); // lascia a tab.code(), chiamato subito dopo, il tempo di registrarsi
       await pendingCode;
+      if (byUser) {
+        director.noteUserIntent();
+        director.release(); // fuori da un'azione non fa niente
+      }
       const box = new THREE.Box3().setFromObject(target);
       const h = box.max.y - box.min.y;
       box.max.y += h * 0.14; // i titoli non finiscono sotto la barra degli strumenti
@@ -162,6 +216,9 @@ export async function createTab(root, app) {
     },
     /** Riporta la scena allo stato di riposo (fine o interruzione di un'azione). */
     resetScene({ keepStage = false } = {}) {
+      // Un'azione che parte (onStart) deve volare anche sul componente già inquadrato: lascia spazio
+      // alla barra del player, e lo studente può aver spostato la camera dopo l'ultimo volo.
+      tab.focusedId = null;
       P.audio.showLens(null);
       P.audio.setPlayhead(null);
       if (!keepStage) P.encoder.setStage(0);
@@ -248,10 +305,11 @@ export async function createTab(root, app) {
     gptVocab: await gptVocab.then((v) => (v ? fmt(v) : "poche decine di")),
   };
   panePath.append(el("p", { className: "audio-intro" }, "Il GPT della lezione genera caratteri. Qui vediamo come la stessa idea, il prossimo token, genera suono: prima bisogna trasformare l'audio in token e ritorno."));
-  new Menu(panePath, STEPS, {
+  tab.menu = new Menu(panePath, STEPS, {
     vars,
+    tabId: "audio",
     onSelect: (item) => {
-      tab.focus(item.focus);
+      tab.focus(item.focus, { byUser: true });
       tab.code(item.code, item.highlight ?? []);
       if (item.stage !== undefined && !ui.player.action) stageTarget = item.stage;
     },
@@ -267,7 +325,7 @@ export async function createTab(root, app) {
   );
 
   installActions(tab);
-  ui.player.renderOverview(paneActions, { categories: ["Rappresentare il suono", "Codec neurale", "Generazione", "Riconoscimento vocale"] });
+  ui.player.renderOverview(paneActions, { categories: ACTION_CATEGORIES });
   paneActions.append(el("button", { type: "button", className: "audio-link", onclick: () => app.open("transformer") }, "Rivedi il transformer del GPT"));
 
   const labPane = buildLabPane(paneLab, lab, {
@@ -313,18 +371,30 @@ export async function createTab(root, app) {
     }
   });
 
-  // viste: la stessa scena guardata da punti diversi
-  const views = [
-    { id: "overview", label: "Vista d'insieme", text: "Tutto il percorso: suono → token → suono, il prompt e Whisper." },
-    { id: "delayCore", label: "Generazione musicale", text: "Transformer e delay pattern: il cuore di MusicGen." },
-    { id: "rvq", label: "Codec: token audio", text: "Codebook, residui e griglia dei token." },
-    { id: "whisperAll", label: "Whisper: dalla voce al testo", text: "Vista alternativa: log-Mel → encoder → decoder → testo." },
-  ];
+  /**
+   * Vista d'insieme, la vista iniziale del tab: la usano il pulsante "Vista d'insieme", "Centra" della
+   * navigazione (C, Home, ◎, "Torna al centro") e la vista "overview". Anche lo zoom torna automatico:
+   * con un livello bloccato a mano (es. "Dettaglio") da lontano si vedrebbero ancora i dettagli.
+   */
+  function showOverview() {
+    if (lod.mode !== "auto") lod.setMode("auto");
+    return tab.focus("overview", { byUser: true });
+  }
+  const showView = (id) => (id === "overview" ? showOverview() : tab.focus(id, { byUser: true }));
+
+  // viste: la stessa scena guardata da punti diversi (catalog.js)
   paneViews.append(
     el(
       "div",
       { className: "view-switch" },
-      ...views.map((v) => el("button", { type: "button", dataset: { view: v.id }, onclick: () => tab.focus(v.id) }, el("strong", {}, v.label), el("small", {}, v.text))),
+      ...VIEWS.map((v) => el("button", { type: "button", dataset: { view: v.id }, onclick: () => showView(v.id) }, el("strong", {}, v.label), el("small", {}, v.text))),
+    ),
+    el(
+      "p",
+      { className: "hint audio-nav-hint" },
+      touch.matches
+        ? "Da una vista puoi proseguire da solo: un dito per girare attorno, due dita per spostarti e avvicinarti, doppio tocco su un componente per centrarlo."
+        : "Da una vista puoi proseguire da solo: trascina per girare attorno, tasto destro (o Shift) e trascina per spostarti, rotella per avvicinarti. Doppio clic su un componente per centrarlo.",
     ),
   );
 
@@ -345,7 +415,7 @@ export async function createTab(root, app) {
     el(
       "div",
       { className: "stage-toolbar" },
-      el("button", { type: "button", onclick: () => tab.focus("overview") }, "Vista d'insieme"),
+      el("button", { type: "button", title: "Torna alla vista iniziale (C)", onclick: showOverview }, "Vista d'insieme"),
       el("button", { type: "button", ariaLabel: "Ascolta il brano", onclick: () => play(lab.songs[state.style].samples, "originale", P.audio) }, "▶ Ascolta", el("span", { className: "audio-wide" }, " il brano")),
     ),
   );
@@ -364,14 +434,37 @@ export async function createTab(root, app) {
       if (playheadTarget === P.audio) plots?.waveAt(t);
     }
   });
-  root.tabIndex = -1;
-  root.addEventListener("keydown", (e) => {
-    if (e.target.closest("input, textarea, select")) return;
-    if (e.key === " " && ui.player.action) {
-      e.preventDefault();
-      ui.player.toggle();
-    }
+  // --- navigazione libera (ui.nav): "Centra" = vista d'insieme. Confini: il punto guardato può arrivare
+  // al centro di ogni componente (dall'Audio a sinistra all'Audio generato a destra, dal prompt in alto a
+  // Whisper in basso) e poco oltre (il nucleo allarga il box del 12%): anche al bordo il componente
+  // estremo resta in mezzo allo schermo, non si scivola nel vuoto. Box fisso, calcolato una volta: niente
+  // visite di tutta la scena del Dettaglio (pesante) per ricalcolarlo.
+  const navBox = new THREE.Box3();
+  const center = new THREE.Vector3();
+  for (const plane of registry.values()) navBox.expandByPoint(plane.getWorldPosition(center));
+  ui.nav.setBounds(navBox);
+  ui.nav.setHome(showOverview);
+  // La pipeline è una parete verticale (piano x-y) guardata da davanti: da sopra o da sotto si vedrebbe
+  // solo una linea, da dietro il testo a specchio, e oltre una certa vicinanza si finisce dentro i blocchi.
+  // Si gira attorno e ci si avvicina liberamente, ma entro questi limiti (valgono per mouse, tasti, pad, touch).
+  ui.nav.setOrbitLimits({ turn: MAX_TURN_DEG, tilt: MAX_TILT_DEG, minDistance: MIN_ZOOM_DISTANCE });
+  // Lo studente ha mosso la camera: non è più sul componente dell'ultimo volo, quindi un passo che lo
+  // inquadra di nuovo (actions.js → frame) deve rivolarci. "Centra" lo reimposta subito dopo (setHome).
+  ui.nav.on("input", () => (tab.focusedId = null));
+  // "Segui l'azione" dopo che lo studente si è mosso: se nel frattempo l'azione non ha chiesto voli
+  // (il passo inquadra ancora lo stesso componente) il director non ha un bersaglio in sospeso, e
+  // senza questo la camera resterebbe dov'è. Il controllo avviene dopo resumeFollow, che vola da solo
+  // se il bersaglio c'è.
+  director.onFollowChange((following) => {
+    if (!following || !director.actionActive || !tab.actionFocusId) return;
+    queueMicrotask(() => {
+      if (!director.flight && director.actionActive) tab.focus(tab.actionFocusId);
+    });
   });
+
+  // Tastiera: ↑ ↓ scorrono i passi del Percorso, Spazio mette in pausa l'azione (core/stepKeys.js).
+  // Le altre lettere e ← → sono della navigazione libera.
+  installStepKeys({ root, ui, menu: () => tab.menu, pathPane: panePath });
 
   plots?.setStyle(state.style);
   // una generazione di partenza: la scala del delay pattern e l'uscita non restano vuote
@@ -381,21 +474,58 @@ export async function createTab(root, app) {
   const firstStep = state.gen.steps[1][0];
   plots?.nextToken(firstStep.p, firstStep.token);
   codePanel.hide(); // all'inizio la scena intera: il codice compare quando scegli un passo
-  const idleCaption = "Suono → token → suono: zooma su un componente per il dettaglio, allontanati per il diagramma a blocchi.";
-  tab.setCaption(idleCaption);
+  // Didascalia di base: la scena è una pipeline orizzontale, quindi spostarsi a destra e a sinistra
+  // vuol dire "percorrerla" (dal suono ai token e di nuovo al suono). Testo diverso per il touch.
+  const idleCaption = () =>
+    touch.matches
+      ? "Suono → token → suono: allarga due dita per il dettaglio, trascina con due dita per percorrere la pipeline."
+      : "Suono → token → suono: rotella per il dettaglio o per il diagramma a blocchi; A/D (o tasto destro e trascina) per percorrere la pipeline.";
+  const refreshCaption = () => tab.setCaption(ui.player.action ? "" : idleCaption());
+  refreshCaption();
   // durante un'azione parla la barra del player: la didascalia di base si toglie
-  ui.player.on("state", () => tab.setCaption(ui.player.action ? "" : idleCaption));
+  ui.player.on("state", refreshCaption);
+  touch.addEventListener?.("change", refreshCaption);
   tab.focus("overview", { duration: 0.01 });
   window.__audioTab = tab; // per il debug dalla console e per i test automatici
 
+  const phone = window.matchMedia(PHONE);
+  /**
+   * Link diretto o risultato della ricerca globale: porta il tab su un passo, un'azione, una vista o
+   * un livello dello zoom. Restituisce false per un id sconosciuto (il guscio avvisa lo studente).
+   */
+  async function goto({ kind, id }) {
+    if (kind === "step") return tab.menu.reveal(id, { sidebar }); // apre il Percorso sul passo
+    // Azioni e viste si guardano nella scena: sul telefono il cassetto della sidebar la coprirebbe.
+    const showScene = () => phone.matches && sidebar.toggleCollapsed(true);
+    if (kind === "action") {
+      if (!ACTION_IDS.has(id)) return false;
+      sidebar.select("azioni");
+      showScene();
+      ui.player.start(id);
+      return true;
+    }
+    if (kind !== "view" || !(VIEW_IDS.has(id) || LEVEL_IDS.has(id))) return false;
+    // come una scelta dal pannello Viste, ma è un salto: l'azione in corso si chiude
+    ui.player.stop();
+    showScene();
+    if (LEVEL_IDS.has(id)) {
+      lod.pick(id); // come il selettore dello zoom: blocca il livello e lo inquadra
+    } else {
+      sidebar.select("viste");
+      await showView(id);
+    }
+    return true;
+  }
+
   return {
     tab,
+    goto,
     activate() {
       host.start();
       host.resize();
     },
     deactivate() {
-      host.stop();
+      host.stop(); // la navigazione si ferma da sola (niente scivolate al ritorno)
       out.stop();
     },
   };

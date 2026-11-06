@@ -18,6 +18,13 @@ import { buildEdges, buildNeuronLayout, explainNeuron, neuronValues, parameterBr
 import { createViewInfo, deepBox, formula, legend, sources, texNum, topChartsSection } from "./panel.js";
 
 const DISTANCES = { detail: 30, blocks: 95 }; // la rete è alta ~103 unità, colonne a 3-4 unità di distanza
+/**
+ * Rapporto larghezza/altezza della scena visibile per cui sono tarate le soglie (1600×900 con il codice
+ * aperto). Su uno stage più stretto (telefono) la camera deve stare più lontana per inquadrare le stesse
+ * colonne: le soglie crescono in proporzione, così la vista iniziale mostra gli strati anche lì
+ * (regola "LOD" di ARCHITECTURE.md; la vista Contesto fa lo stesso).
+ */
+const REFERENCE_ASPECT = 0.76;
 const FRACTIONS = [0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1];
 const DEFAULT_FRACTION = 3; // 2%
 const FRONT = new THREE.Vector3(0.04, 0.1, 1).normalize(); // quasi di fronte: le colonne restano dritte
@@ -70,7 +77,7 @@ export function installNeuronsView(tab) {
       el("h3", {}, "Rete neurale: tutti i neuroni"),
       el("p", {}, "Qui lo stesso modello è disegnato come una rete neurale classica. Ogni pallino è un neurone: un singolo numero calcolato mentre il modello legge il prompt. Ogni linea è un peso: il numero appreso che dice quanto un neurone influenza il successivo."),
       el("p", {}, el("b", {}, "Neuroni"), " = attivazioni, cambiano a ogni prompt. ", el("b", {}, "Pesi"), " = archi, fissi dopo il training. ", el("b", {}, "Bias"), " = un numero appreso che appartiene al neurone e si somma alla fine, come un punto di partenza."),
-      el("p", { className: "hint" }, "Da lontano vedi i rettangoli degli strati; avvicinati con la rotellina per vedere i neuroni. Clicca un neurone per vedere il suo calcolo."),
+      el("p", { className: "hint" }, "Da lontano vedi i rettangoli degli strati; avvicinati con la rotellina (o con un doppio clic sulla colonna che ti interessa) per vedere i neuroni. Clicca un neurone per vedere il suo calcolo."),
       summary,
       el(
         "div",
@@ -256,6 +263,18 @@ export function installNeuronsView(tab) {
     state.scene.macro.visible = v;
   }
 
+  /** Soglie del LOD della vista, scalate sulla forma dello stage visibile (vedi REFERENCE_ASPECT). */
+  const fitDistances = () => {
+    const scale = THREE.MathUtils.clamp(REFERENCE_ASPECT / host.visibleAspect(), 1, 3);
+    tab.lod.setDistances({ detail: DISTANCES.detail * scale, blocks: DISTANCES.blocks * scale });
+  };
+
+  /** Inquadratura iniziale della vista: l'ingresso e il primo blocco (livello Blocchi: gli strati con i nomi). */
+  const frameStart = () => {
+    fitDistances(); // lo stage può essere cambiato (finestra, codice, grafici) dall'ultima volta
+    return director.focus(state.scene.boxOf(["b0.x", "b0.resid2"]), { showFrame: false, margin: 1.5, direction: FRONT });
+  };
+
   tab.views.register({
     id: "neuroni",
     label: "Rete neurale",
@@ -268,7 +287,7 @@ export function installNeuronsView(tab) {
       arch.rail.visible = false;
       flow.packet.visible = false;
       flow.playing = false;
-      tab.lod.setDistances(DISTANCES);
+      fitDistances();
       director.hideFrame();
       if (!info.childNodes.length) renderInfo();
       info.hidden = false;
@@ -288,10 +307,12 @@ export function installNeuronsView(tab) {
       state.offFrame = host.onFrame((dt) => state.scene.tick(dt));
       canvas.addEventListener("pointerdown", onDown);
       canvas.addEventListener("pointerup", onUp);
-      tab.setCaption("Rete neurale: avvicinati per vedere i neuroni, clicca un neurone per il suo calcolo.");
+      tab.setCaption("Rete neurale: doppio clic su una colonna per avvicinarti, poi clic su un neurone per il suo calcolo.");
       tab.showCode("model.forward", "Rete neurale: il forward che accende i neuroni", ["tok_emb =", "pos_emb =", "x = self.blocks(x)", "x = self.ln_f(x)", "logits = self.lm_head(x)"]);
-      director.focus(state.scene.boxOf(["b0.x", "b0.resid2"]), { showFrame: false, margin: 1.5, direction: FRONT });
+      frameStart();
     },
+    // "Centra" e "Vista d'insieme": il primo blocco, come all'apertura della vista
+    home: () => (state.scene ? frameStart() : Promise.resolve()),
     exit: () => {
       state.active = false;
       // L'azione "passaggio in avanti" anima questa vista: lasciarla correre a vista nascosta

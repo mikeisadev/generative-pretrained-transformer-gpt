@@ -11,11 +11,15 @@
  *   denoiserSim.js denoiser simulato (dichiarato) per la generazione; imagery.js immagini e VAE simulato
  *   videoActions.js azione animata sul video
  *   plots.js      grafici (schedule, SNR, rumore per passo, guidance, coerenza tra frame)
+ *   sceneNav.js   navigazione libera: "Centra", confini, "Dettaglio" dove si guarda, didascalie delle zone
  *   content.js    percorso didattico, fonti; snippets.js frammenti di codice veri
+ *   search.js     indice della ricerca globale (passi, azioni, viste); i link diretti arrivano a goto()
  */
 import * as THREE from "three";
 import { el } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
+import { installStepKeys } from "../../core/stepKeys.js";
+import { parseHash } from "../../core/search.js";
 import { Menu } from "../../core/ui/menu.js";
 import { installActions } from "./actions.js";
 import { PATH, SOURCES } from "./content.js";
@@ -28,6 +32,7 @@ import { buildBlocks, buildMacro, VIDEO_Y } from "./overview.js";
 import { buildPipeline } from "./pipeline.js";
 import { framingBox } from "./shapes.js";
 import { installPlots } from "./plots.js";
+import { installSceneNav } from "./sceneNav.js";
 import { SNIPPETS } from "./snippets.js";
 import { installVideo } from "./videoActions.js";
 import { buildVideoScene } from "./videoScene.js";
@@ -40,15 +45,19 @@ const DETAIL_DIR = new THREE.Vector3(0.16, 0.2, 1).normalize();
 const NARROW = window.matchMedia("(max-width: 900px)");
 /** Altezza del banco di lavoro: abbastanza sopra la pipeline da non sovrapporsi alle sue etichette. */
 const LAB_Y = 48;
+/** In cima al Percorso: come si legge la scena e dove sta la parte video (si scopre spostandosi). */
+const PATH_HINT =
+  "Scegli un passo: la scena vola sul pezzo di cui si parla. Rotellina o pizzico per lo zoom (da vicino i blocchi interni, da lontano lo schema); tasto destro, due dita o W A S D per spostarti: sotto le immagini c'è la parte video.";
 
 export async function createTab(root, app) {
   const ui = createTabLayout(root, {
     code: true,
     charts: true,
     player: true,
-    hint: "Segui il percorso o avvia un'azione. Rotellina per lo zoom: da vicino vedi i blocchi interni, da lontano lo schema.",
+    hint: PATH_HINT,
   });
   const { host, director, sidebar, codePanel, stage } = ui;
+  let sceneNav = null; // installSceneNav, più sotto: serve già al selettore dello zoom
 
   // --- dati: immagine di riferimento e VAE simulato (tutto generato nel browser)
   const reference = renderScene(new Float32Array(IMAGE_SIZE * IMAGE_SIZE * 3), IMAGE_SIZE);
@@ -86,11 +95,9 @@ export async function createTab(root, app) {
     director,
     groups: { detail, blocks: blocks.group, macro: macro.group },
     widgetParent: stage,
-    // "Dettaglio" scelto a mano: se si stava guardando la parte video si resta lì, altrimenti il denoiser
-    focusDetail: () => {
-      const onVideo = host.controls.target.y < VIDEO_Y * 0.75;
-      return tab.focus(onVideo ? video.regions.intro() : tab.denoiser, { showFrame: false, margin: 1.05 });
-    },
+    // "Dettaglio" scelto a mano: il pezzo che si sta guardando (parte video, testo, denoiser o VAE)
+    focusDetail: () => sceneNav.focusDetail(),
+    onPick: (mode) => sceneNav.levelPicked(mode),
   });
 
   // --- oggetto condiviso dai moduli
@@ -168,15 +175,20 @@ export async function createTab(root, app) {
   };
 
   tab.resetPipeline();
+  sceneNav = installSceneNav(tab, levels);
 
   // --- sidebar
-  const panePath = sidebar.addPane({ id: "percorso", title: "Percorso" });
+  const panePath = sidebar.addPane({ id: "percorso", title: "Percorso", hint: PATH_HINT });
   const paneActions = sidebar.addPane({ id: "azioni", title: "Azioni", hint: "Animazioni passo per passo: usa i controlli in basso per pausa, passo avanti/indietro e velocità." });
   const paneViews = sidebar.addPane({ id: "viste", title: "Viste", hint: "Scegli quale denoiser mostrare e dove guardare." });
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Paper, codice ufficiale e documentazione da cui vengono numeri e formule." });
 
   tab.menu = new Menu(panePath, PATH, {
+    tabId: "diffusion",
     onSelect: (item, title) => {
+      // Un passo scelto durante un'azione: lo studente passa a leggere il Percorso. L'azione si chiude,
+      // altrimenti il suo passo successivo riporterebbe subito altrove camera, codice e didascalia.
+      if (ui.player.action) ui.player.stop();
       if (item.denoiser) tab.setDenoiser(item.denoiser);
       if (item.focus) tab.focus(item.focus, { margin: item.margin ?? 1.25 });
       if (item.code) tab.showCode(item.code, item.codeTitle ?? title, item.highlight ?? []);
@@ -188,7 +200,7 @@ export async function createTab(root, app) {
   const viewDefs = [
     { id: "unet", title: "Stable Diffusion: U-Net", text: "Encoder-decoder con skip connection, ResNet block, self- e cross-attention.", run: () => (tab.setDenoiser("unet"), tab.focus("unet")) },
     { id: "dit", title: "Diffusion Transformer (DiT)", text: "Il latente diventa una sequenza di patch: blocchi transformer con adaLN, come nel nostro GPT.", run: () => (tab.setDenoiser("dit"), tab.focus("dit")) },
-    { id: "pipeline", title: "Tutta la pipeline", text: "Dal prompt all'immagine, vista d'insieme (livello Blocchi).", run: () => levels.flyToLevel("blocks") },
+    { id: "pipeline", title: "Tutta la pipeline", text: "Dal prompt all'immagine, vista d'insieme (livello Blocchi).", run: () => sceneNav.overview() },
     { id: "video", title: "Video: latenti spazio-temporali", text: "Cubo di latenti, patch spazio-temporali, attention nello spazio e nel tempo.", run: () => tab.focus(video.regions.intro(), { showFrame: false, margin: 1.02, direction: FRONT }) },
   ];
   const viewButtons = el(
@@ -201,11 +213,7 @@ export async function createTab(root, app) {
           type: "button",
           dataset: { view: v.id },
           className: v.id === "unet" ? "active" : "",
-          onclick: () => {
-            tab.hideCode(); // le viste servono a guardare la scena: niente pannello sopra
-            tab.setCaption("");
-            v.run();
-          },
+          onclick: () => showView(v),
         },
         el("strong", {}, v.title),
         el("small", {}, v.text),
@@ -214,6 +222,17 @@ export async function createTab(root, app) {
   );
   paneViews.append(viewButtons);
 
+  /** Una vista del pannello "Viste" (pulsante o link diretto). */
+  function showView(v) {
+    // come un passo del Percorso: l'azione in corso si chiude, altrimenti il suo passo successivo
+    // riporterebbe subito la camera altrove
+    if (ui.player.action) ui.player.stop();
+    tab.hideCode(); // le viste servono a guardare la scena: niente pannello sopra
+    tab.setCaption("");
+    if (NARROW.matches) sidebar.toggleCollapsed(true); // sul telefono il cassetto coprirebbe la scena
+    return v.run();
+  }
+
   paneSources.append(renderSources());
 
   // --- moduli
@@ -221,25 +240,57 @@ export async function createTab(root, app) {
   installActions(tab, paneActions);
   installVideo(tab, paneActions);
   ui.player.renderOverview(tab.actionsList, { categories: ["Training", "Generazione (prompt)", "Video"] });
-
-  // --- tasti
-  root.tabIndex = -1;
-  root.addEventListener("keydown", (e) => {
-    if (e.target.closest("input, textarea, select")) return;
-    if (e.key === "ArrowDown") tab.menu.move(+1);
-    if (e.key === "ArrowUp") tab.menu.move(-1);
-    if (e.key === " " && ui.player?.action) {
-      e.preventDefault();
-      ui.player.toggle();
-    }
+  // Sul telefono la sidebar è un cassetto sopra la scena: un'azione appena avviata si guarda nella
+  // scena, quindi il cassetto si chiude (da "Avvia" come da un link diretto).
+  let runningAction = null;
+  ui.player.on("state", () => {
+    const id = ui.player.action?.id ?? null;
+    if (id && id !== runningAction && NARROW.matches) sidebar.toggleCollapsed(true);
+    runningAction = id;
   });
 
+  // --- tasti: ↑ ↓ scorrono i passi del Percorso, Spazio mette in pausa l'azione (core/stepKeys.js)
+  installStepKeys({ root, ui, menu: () => tab.menu, pathPane: panePath });
+
   tab.hideCode(); // si apre quando un passo del percorso o un'azione mostra del codice
-  tab.menu.select("idea.cosa");
+  // Aperto da un link diretto a un passo: si parte da quel passo (goto lo mostrerà subito dopo), così
+  // il primo passo del Percorso non viene segnato come visto senza che lo studente l'abbia letto.
+  const initial = parseHash(location.hash);
+  const linked = initial.tab === "diffusion" && initial.go?.kind === "step" && tab.menu.items.has(initial.go.id);
+  tab.menu.select(linked ? initial.go.id : "idea.cosa", { scroll: false });
   levels.flyToLevel("blocks", 0.01);
   window.__diffusionTab = tab; // per il debug dalla console e per gli screenshot automatici
 
+  const actionIds = new Set(ui.player.actions.keys());
+  /** Viste raggiungibili da un link diretto: quelle del pannello più i due livelli estremi dello zoom. */
+  const linkViews = new Map([
+    ...viewDefs.map((v) => [v.id, () => showView(v)]),
+    ["macro", () => showView({ run: () => sceneNav.overview("macro") })],
+    ["detail", () => showView({ run: () => sceneNav.detail() })],
+  ]);
+
+  /** Link diretto o risultato della ricerca globale: porta il tab su un passo, un'azione o una vista. */
+  async function goto({ kind, id }) {
+    if (kind === "step") return tab.menu.reveal(id, { sidebar }); // apre il Percorso sul passo
+    if (kind === "action") {
+      if (!actionIds.has(id)) return false;
+      sidebar.select("azioni");
+      ui.player.start(id);
+      return true;
+    }
+    if (kind === "view") {
+      const show = linkViews.get(id);
+      if (!show) return false;
+      sidebar.select("viste");
+      await show();
+      return true;
+    }
+    return false;
+  }
+
   return {
+    tab,
+    goto,
     activate() {
       host.start();
       host.resize();

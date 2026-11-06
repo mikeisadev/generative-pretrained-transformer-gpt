@@ -40,7 +40,7 @@ export class ActionPlayer {
     this.speed = 1;
     this.data = {};
     this.run = 0; // cresce a ogni start/stop: una preparazione (build) superata non deve partire
-    this.listeners = { step: new Set(), state: new Set(), end: new Set() };
+    this.listeners = { step: new Set(), state: new Set(), end: new Set(), restart: new Set() };
     this.renderBar(parent);
     host.onFrame((dt) => this.tick(dt));
   }
@@ -137,6 +137,7 @@ export class ActionPlayer {
 
   restart() {
     if (!this.action) return;
+    this.emit("restart"); // prima del primo passo: chi ascolta (la regia) torna a seguire l'azione
     this.goTo(0);
     this.playing = true;
     this.emit("state");
@@ -193,7 +194,7 @@ export class ActionPlayer {
   }
 
   // ---------------------------------------------------------------- eventi
-  /** type: "step" | "state" | "end" */
+  /** type: "step" | "state" | "end" | "restart" ("⟲ Ricomincia") */
   on(type, fn) {
     this.listeners[type].add(fn);
     return () => this.listeners[type].delete(fn);
