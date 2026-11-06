@@ -107,4 +107,4 @@ errore se la console ne segnala. L'architettura del codice è descritta in `weba
 
 Altre migliorie: checkpoint salvato e ricaricato in modo sicuro (`weights_only=True`), errore chiaro per caratteri fuori vocabolario o contesto più lungo di `block_size`, maschera `tril` non più salvata nel checkpoint (non è un peso).
 
-Risultato del training di riferimento (CPU, seed 1337, 5000 step, 162 s): train loss 1.6622, val loss 1.8208, 209.729 parametri.
+Risultato del training di riferimento (seed 1337, 5000 step, 209.729 parametri): train loss 1.6592, val loss 1.8081 su Apple MPS (i pesi in `webapp/data/`); su CPU 1.6622 / 1.8208. Lo stesso seed dà numeri leggermente diversi su hardware diverso: le operazioni in virgola mobile non vengono eseguite nello stesso ordine. La web app legge questi valori da `webapp/data/training/trace.json`, quindi dopo un nuovo training si aggiornano da soli.
