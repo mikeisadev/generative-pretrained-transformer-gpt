@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prova delle rappresentazioni</title>
+    <link rel="stylesheet" href="../vendor/katex/katex.min.css" />
+    <link rel="stylesheet" href="../vendor/highlight/github-dark.min.css" />
+    <link rel="stylesheet" href="../css/core.css" />
+    <link rel="stylesheet" href="../css/nav.css" />
+    <link rel="stylesheet" href="../css/palette.css" />
+    <link rel="stylesheet" href="../css/reps.css" />
+    <link rel="stylesheet" href="../css/neuralnet.css" />
+    <link rel="stylesheet" href="../css/brain.css" />
+    <script>
+      // Conta i contesti WebGL vivi (creati − persi): il livello alternativo deve liberare il suo
+      // quando lo si lascia o quando il tab si nasconde. Gira prima di three.js.
+      (() => {
+        const live = new Set();
+        const getContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
+          const context = getContext.call(this, type, ...rest);
+          if (context && /webgl/.test(String(type)) && !live.has(this) && !this.__glCounted) {
+            this.__glCounted = true;
+            live.add(this);
+            this.addEventListener("webglcontextlost", () => live.delete(this));
+            this.addEventListener("webglcontextrestored", () => live.add(this));
+          }
+          return context;
+        };
+        window.__webglContexts = () => live.size;
+      })();
+    </script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "../vendor/three/three.module.min.js",
+          "three/addons/": "../vendor/three/addons/"
+        }
+      }
+    </script>
+    <style>
+      /* Solo per questa pagina di prova: niente barra dei tab, il finto tab occupa tutta la finestra. */
+      #app { inset: 0; }
+      .demo-box { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; background: rgba(15, 23, 42, 0.6); }
+      .demo-box h3 { margin: 0 0 8px; font-size: 13px; color: #e0f2fe; }
+      .demo-box p { margin: 6px 0; }
+      .demo-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+      .demo-buttons button { font-size: 12.5px; padding: 5px 9px; }
+      .demo-status { font-size: 12.5px; color: var(--muted); }
+      .demo-status strong { color: #e0f2fe; font-variant-numeric: tabular-nums; }
+      .demo-log { margin: 6px 0 0; padding: 6px 8px; max-height: 150px; overflow: auto; background: #0b1324; border-radius: 6px; font: 11.5px/1.5 "JetBrains Mono", ui-monospace, monospace; color: #cbd5e1; white-space: pre-wrap; }
+      .demo-check { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; margin-top: 8px; }
+      /* Scheda delle viste finte: in alto a sinistra, sotto ☰ e il selettore (--rep-safe-top). */
+      .demo-view-card {
+        position: absolute;
+        top: var(--rep-safe-top, 56px);
+        left: 10px;
+        width: min(330px, calc(100% - 20px));
+        padding: 10px 12px;
+        background: var(--panel);
+        border: 1px solid #334155;
+        border-radius: 12px;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        font-size: 12.5px;
+      }
+      .demo-view-card strong { display: block; color: #e0f2fe; font-size: 13.5px; }
+      .demo-view-card p { margin: 4px 0 8px; color: var(--muted); }
+      .demo-view-card .demo-buttons button { font-size: 12px; padding: 4px 8px; }
+      .demo-analogy { border: 1px solid var(--border); border-left: 3px solid #f472b6; border-radius: 10px; padding: 8px 10px; margin: 10px 0; }
+      .demo-analogy h3 { margin: 0 0 4px; font-size: 13px; }
+      .demo-analogy p { margin: 4px 0; }
+      .demo-wide { width: 100%; }
+      @media (max-width: 900px) {
+        .demo-view-card p { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"><section class="tab-root" data-tab="prova" id="tab"></section></div>
+    <script type="module">
+      import * as THREE from "three";
+      import { makeArrow, makeBlock } from "../js/core/diagram.js";
+      import { el, sleep } from "../js/core/dom.js";
+      import { createTabLayout } from "../js/core/layout.js";
+      import { LODController } from "../js/core/lod.js";
+      import { installRepresentations } from "../js/core/representations.js";
+      import { installStepKeys } from "../js/core/stepKeys.js";
+      import { Menu } from "../js/core/ui/menu.js";
+
+      // ?viste=vere usa i moduli veri del nucleo (core/neuralNet, core/brain) invece delle viste finte;
+      // ?rete=vera solo la rete vera (cervello e pannello finti);
+      // ?rete=personalizzata prova la modalità { enter, exit } sulla scena del tab (come il Transformer);
+      // ?errore=modulo fa fallire il caricamento del modulo della rete (avviso e ritorno all'Architettura).
+      const params = new URLSearchParams(location.search);
+      const REAL_VIEWS = params.get("viste") === "vere";
+      const REAL_NETWORK = params.get("rete") === "vera";
+      const CUSTOM_NETWORK = params.get("rete") === "personalizzata";
+      const flags = { failModule: params.get("errore") === "modulo", failCreate: false };
+      const counts = { networkCreate: 0, networkShow: 0, networkHide: 0, networkDispose: 0, brainCreate: 0, brainShow: 0, brainHide: 0, brainDispose: 0, brainFocus: [], paneRender: 0, customEnter: 0, customExit: 0 };
+      const logLines = [];
+
+      // Generatore pseudo-casuale con seme (mulberry32): stessa scena a ogni caricamento.
+      function rng(seed) {
+        return () => {
+          seed |= 0;
+          seed = (seed + 0x6d2b79f5) | 0;
+          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+
+      // ------------------------------------------------------------------ finto tab
+      const root = document.getElementById("tab");
+      const ui = createTabLayout(root, {
+        code: true,
+        charts: true,
+        player: true,
+        hint: "Pagina di prova del selettore delle rappresentazioni: un finto tab con codice, grafici, azioni e zoom. Le viste Rete neurale e Cervello sono finte (o vere con ?viste=vere).",
+      });
+      const { host, director, stage, sidebar, codePanel, player } = ui;
+
+      const BLOCKS = [
+        { id: "ingresso", title: "Ingresso", text: "Il testo diventa una fila di token.", color: "#38bdf8" },
+        { id: "embedding", title: "Embedding", text: "Ogni token diventa un vettore di numeri.", color: "#a78bfa" },
+        { id: "attention", title: "Attention", text: "Ogni token guarda quelli che lo precedono.", color: "#f472b6" },
+        { id: "ffn", title: "Feed-forward", text: "Ogni vettore passa da solo in una piccola rete.", color: "#fbbf24" },
+        { id: "uscita", title: "Uscita", text: "Le probabilità del prossimo token.", color: "#34d399" },
+      ];
+      const CODE = Object.fromEntries(BLOCKS.map((b, i) => [b.id, `# ${b.title} (codice di prova)\ndef ${b.id}(x):\n    """${b.text}"""\n    return x  # passo ${i + 1} di ${BLOCKS.length}\n`]));
+      const FRONT = new THREE.Vector3(0, 0.08, 1).normalize();
+      const registry = new Map();
+      const detail = new THREE.Group();
+      BLOCKS.forEach((b, i) => {
+        const block = makeBlock({ title: b.title, text: b.text, width: 9, height: 5, color: b.color });
+        block.position.set((i - 2) * 12, 0, 0);
+        detail.add(block);
+        registry.set(b.id, block);
+        if (i > 0) detail.add(makeArrow(new THREE.Vector3((i - 3) * 12 + 4.7, 0, 0.2), new THREE.Vector3((i - 2) * 12 - 4.7, 0, 0.2)));
+      });
+      const blocksLevel = new THREE.Group();
+      const codifica = makeBlock({ title: "Codifica", text: "Ingresso, embedding e attention: il testo diventa contesto.", width: 33, height: 8, color: "#a78bfa" });
+      codifica.position.set(-12, 0, 0);
+      const generazione = makeBlock({ title: "Generazione", text: "Feed-forward e uscita: dal contesto al prossimo token.", width: 21, height: 8, color: "#34d399" });
+      generazione.position.set(18, 0, 0);
+      blocksLevel.add(codifica, generazione);
+      const macroLevel = new THREE.Group();
+      macroLevel.add(makeBlock({ title: "Il modello di prova", text: "Una scatola: entra testo, esce il prossimo token.", width: 57, height: 12, color: "#38bdf8" }));
+      // Neuroni sulla scena del tab: solo per la modalità personalizzata (?rete=personalizzata).
+      const tabNeurons = new THREE.Group();
+      {
+        const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.3, 10, 8), new THREE.MeshStandardMaterial({ color: 0x67e8f9, roughness: 0.4 }), 5 * 9);
+        const m = new THREE.Matrix4();
+        for (let c = 0; c < 5; c++) for (let r = 0; r < 9; r++) dots.setMatrixAt(c * 9 + r, m.makeTranslation((c - 2) * 12, (r - 4) * 1.1, 0));
+        tabNeurons.add(dots);
+        tabNeurons.position.y = -16;
+        tabNeurons.visible = false;
+      }
+      host.scene.add(detail, blocksLevel, macroLevel, tabNeurons);
+
+      const tab = {
+        focus(id, options = {}) {
+          const object = typeof id === "string" ? registry.get(id) : id;
+          return object ? director.focus(object, { margin: 1.35, direction: FRONT, ...options }) : Promise.resolve();
+        },
+        overview(options = {}) {
+          return director.focus(detail, { showFrame: false, margin: 1.12, direction: FRONT, ...options });
+        },
+      };
+      const lod = new LODController(host, {
+        levels: [
+          { id: "detail", label: "Dettaglio", maxDistance: 150, group: detail },
+          { id: "blocks", label: "Blocchi", maxDistance: 280, group: blocksLevel },
+          { id: "macro", label: "Panoramica", maxDistance: Infinity, group: macroLevel },
+        ],
+        widgetParent: stage,
+        onPick: (mode) => {
+          if (mode === "detail") tab.focus("attention");
+          else if (mode !== "auto") director.focus(mode === "blocks" ? blocksLevel : macroLevel, { showFrame: false, margin: mode === "macro" ? 1.6 : 1.15, direction: FRONT });
+        },
+      });
+      ui.nav.setHome(() => {
+        lod.setMode("auto");
+        return tab.overview();
+      });
+
+      // barra strumenti del tab (come quella del Transformer)
+      const packet = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), new THREE.MeshStandardMaterial({ color: 0xfde047, emissive: 0xca8a04, emissiveIntensity: 0.6 }));
+      packet.visible = false;
+      host.scene.add(packet);
+      let stopFlow = null;
+      const flowButton = el("button", { type: "button", onclick: () => toggleFlow() }, "▶ Flusso");
+      function toggleFlow() {
+        if (stopFlow) {
+          stopFlow();
+          stopFlow = null;
+          packet.visible = false;
+        } else {
+          packet.visible = true;
+          let t = 0;
+          stopFlow = host.onFrame((dt) => {
+            t = (t + dt * 0.25) % 1;
+            packet.position.set(-24 + 48 * t, 3.2, 0.6);
+          });
+        }
+        flowButton.textContent = stopFlow ? "⏸ Flusso" : "▶ Flusso";
+      }
+      stage.append(el("div", { className: "stage-toolbar" }, el("button", { type: "button", onclick: () => ui.nav.home() }, "Vista d'insieme"), flowButton));
+
+      // sidebar: Percorso, Azioni, Prove (il pannello Cervello lo aggiunge il nucleo)
+      const panePath = sidebar.addPane({ id: "percorso", title: "Percorso" });
+      const paneActions = sidebar.addPane({ id: "azioni", title: "Azioni", hint: "Un'azione si guarda nella scena del tab: avviarla da una vista alternativa riporta all'Architettura." });
+      const paneViews = CUSTOM_NETWORK ? sidebar.addPane({ id: "viste", title: "Viste" }) : null;
+      const paneTests = sidebar.addPane({ id: "prove", title: "Prove", hint: "Pulsanti per provare il selettore: ritorno automatico, contesti WebGL, errori." });
+
+      const menu = new Menu(
+        panePath,
+        [{ id: "sistema", title: "Il sistema di prova", children: BLOCKS.map((b) => ({ id: `passo.${b.id}`, title: b.title, text: `<p>${b.text} Scegliere un passo da una vista alternativa riporta all'Architettura.</p>`, focus: b.id })) }],
+        {
+          tabId: "prova",
+          onSelect: (item, title) => {
+            if (player.action) player.stop();
+            tab.focus(item.focus);
+            codePanel.show({ title, file: "prova.py", startLine: 1, code: CODE[item.focus], language: "python", highlight: ["def"] });
+            ui.caption.textContent = `Passo: ${title}`;
+          },
+        },
+      );
+      installStepKeys({ root, ui, menu: () => menu, pathPane: panePath });
+
+      player.register({
+        id: "giro",
+        title: "Giro della scena",
+        category: "Prove",
+        summary: "Tre voli della camera, un passo ciascuno.",
+        steps: ["embedding", "attention", "uscita"].map((id) => ({
+          title: BLOCKS.find((b) => b.id === id).title,
+          caption: `La camera vola su «${BLOCKS.find((b) => b.id === id).title}».`,
+          duration: 1.6,
+          enter: () => tab.focus(id),
+        })),
+      });
+      player.renderOverview(paneActions, { categories: ["Prove"] });
+
+      const training = ui.charts.section("prova", "Prova", "Dati inventati: servono solo a riempire il pannello.");
+      const random = rng(3);
+      training
+        .chart("loss", { type: "line", title: "Loss di prova (simulata)", description: "A cosa serve: a controllare che il selettore non copra il pannello dei grafici.", xLabel: "step", yLabel: "loss" })
+        .setData({ series: [{ name: "train", points: Array.from({ length: 60 }, (_, i) => [i * 10, 1.5 + 2.5 * Math.exp(-i / 14) + 0.05 * random()]) }] });
+
+      // ------------------------------------------------------------------ specifiche (soli dati)
+      const NETWORK_SPEC = {
+        title: "Rete neurale della pagina di prova",
+        intro: "Una rete piccola e inventata: serve solo a provare il selettore e il livello alternativo.",
+        scale: "1 sfera = 1 neurone della rete di prova (inventata, simulazione didattica).",
+        axes: { y: "neuroni", z: "token della frase" },
+        depth: { count: 6, label: "token", names: ["Il", "gatto", "dorme", "sul", "divano", "."] },
+        sections: [
+          { id: "in", label: "Ingresso", role: "input", neurons: 6, depth: true, text: "I token della frase, uno per fetta di profondità." },
+          { id: "attn", label: "Self-attention", role: "attention", neurons: 12, depth: true, heads: 2, text: "Ogni token guarda quelli che lo precedono." },
+          { id: "moe", label: "Esperti", role: "experts", neurons: 16, depth: true, experts: 4, active: 1, text: "Ogni token sceglie il suo esperto." },
+          { id: "out", label: "Uscita", role: "output", neurons: 8, depth: true, text: "Le probabilità del prossimo token." },
+        ],
+        links: [
+          { from: "in", to: "attn", pattern: "dense", density: 0.3 },
+          { within: "attn", pattern: "attention", causal: true },
+          { from: "attn", to: "moe", pattern: "route" },
+          { from: "moe", to: "out", pattern: "dense", density: 0.3 },
+          { from: "in", to: "out", pattern: "residual" },
+        ],
+      };
+      const BRAIN_SPEC = {
+        title: "Cervello della pagina di prova",
+        intro: "Testo segnaposto della pagina di prova: i tab veri hanno analogie verificate, con le fonti.",
+        regions: ["hippocampus", "v1"],
+        pathways: [{ id: "perforant_path", label: "Via perforante", through: ["entorhinal", "hippocampus"] }],
+        circuit: {
+          title: "Circuito di prova",
+          text: "Due gruppi di neuroni collegati: serve solo a esercitare la vista.",
+          groups: [
+            { id: "ec", label: "Corteccia entorinale", region: "entorhinal", type: "pyramidal", count: 4, ai: "Domanda" },
+            { id: "dg", label: "Giro dentato", region: "hippocampus", type: "granule", count: 4, ai: "Indice" },
+          ],
+          edges: [{ from: "ec", to: "dg", kind: "excitatory" }],
+        },
+        analogies: [
+          {
+            id: "indice",
+            ai: "Indice dei vettori",
+            brain: "Ippocampo",
+            regions: ["hippocampus"],
+            text: "Segnaposto: un indice che ritrova un ricordo da un indizio parziale.",
+            similar: "Segnaposto: entrambi ritrovano qualcosa da un indizio.",
+            different: "Segnaposto: il cervello non calcola distanze tra vettori.",
+            strength: "media",
+            sources: [{ title: "The hippocampal memory indexing theory", authors: "T. J. Teyler, P. DiScenna", year: 1986, url: "https://doi.org/10.1037/0735-7044.100.2.147" }],
+          },
+          {
+            id: "visione",
+            ai: "Filtri della prima convoluzione",
+            brain: "Corteccia visiva primaria",
+            regions: ["v1"],
+            text: "Segnaposto: neuroni che rispondono a bordi orientati.",
+            similar: "Segnaposto: rilevatori locali di bordi.",
+            different: "Segnaposto: V1 riceve anche segnali di ritorno dalle aree superiori.",
+            strength: "media",
+            sources: [{ title: "Receptive fields, binocular interaction and functional architecture in the cat's visual cortex", authors: "D. H. Hubel, T. N. Wiesel", year: 1962, url: "https://doi.org/10.1113/jphysiol.1962.sp006837" }],
+          },
+        ],
+        facts: [],
+        sources: [],
+      };
+
+      // ------------------------------------------------------------------ viste finte (iniettate con opts.loaders)
+      function card(layer, title, text, buttons) {
+        const node = el("div", { className: "demo-view-card" }, el("strong", {}, title), el("p", {}, text), el("div", { className: "demo-buttons" }, ...buttons));
+        layer.append(node);
+        return node;
+      }
+
+      /** Vista "rete" finta: sezioni da sinistra a destra, neuroni in y, token in profondità (z). */
+      function fakeNetworkView({ host: h, director: d, nav, layer, spec }) {
+        if (flags.failCreate) {
+          flags.failCreate = false;
+          throw new Error("errore simulato nella costruzione della vista");
+        }
+        counts.networkCreate++;
+        const D = spec.depth.count;
+        const group = new THREE.Group();
+        const geometry = new THREE.SphereGeometry(0.2, 10, 8);
+        const material = new THREE.MeshStandardMaterial({ roughness: 0.45 });
+        const total = spec.sections.reduce((s, sec) => s + sec.neurons * D, 0);
+        const mesh = new THREE.InstancedMesh(geometry, material, total);
+        const base = new Float32Array(total);
+        const xs = spec.sections.map((_, i) => (i - (spec.sections.length - 1) / 2) * 7);
+        const m = new THREE.Matrix4();
+        const color = new THREE.Color();
+        const rand = rng(11);
+        const where = [];
+        let k = 0;
+        spec.sections.forEach((sec, i) => {
+          for (let z = 0; z < D; z++) {
+            for (let n = 0; n < sec.neurons; n++, k++) {
+              const p = new THREE.Vector3(xs[i], (n - (sec.neurons - 1) / 2) * 0.55, (z - (D - 1) / 2) * 1.1);
+              where.push({ section: i, p });
+              mesh.setMatrixAt(k, m.makeTranslation(p.x, p.y, p.z));
+              base[k] = rand();
+              mesh.setColorAt(k, color.setHSL(0.58 - 0.45 * base[k], 0.75, 0.32 + 0.3 * base[k]));
+            }
+          }
+        });
+        const segments = [];
+        for (let a = 0; a < where.length; a++) {
+          for (let b = a + 1; b < where.length; b++) {
+            if (where[b].section !== where[a].section + 1 || where[b].p.z !== where[a].p.z || rand() > 0.18) continue;
+            segments.push(where[a].p.x, where[a].p.y, where[a].p.z, where[b].p.x, where[b].p.y, where[b].p.z);
+          }
+        }
+        const lineGeometry = new THREE.BufferGeometry();
+        lineGeometry.setAttribute("position", new THREE.Float32BufferAttribute(segments, 3));
+        const lines = new THREE.LineSegments(lineGeometry, new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.18 }));
+        group.add(mesh, lines);
+        h.scene.add(group);
+
+        let wave = null;
+        const animate = el("button", { type: "button", onclick: () => startWave() }, "▶ Anima");
+        const side = el("button", { type: "button", onclick: () => home() }, "Di lato");
+        const thick = el("button", { type: "button", onclick: () => d.focus(bounds, { showFrame: false, margin: 1.0, direction: new THREE.Vector3(0.95, 0.45, 0.75) }) }, "Guarda lo spessore");
+        const node = card(layer, spec.title, `${spec.scale} Di lato vedi la rete, girando la camera lo spessore (${D} ${spec.depth.label}).`, [animate, side, thick]);
+        // meshBounds (director.js) conta un InstancedMesh come una sola istanza: box esplicito per
+        // inquadrature e confini della navigazione
+        const bounds = new THREE.Box3().setFromPoints(where.map((w) => w.p)).expandByScalar(0.3);
+        const home = () => d.focus(bounds, { showFrame: false, margin: 1.08, direction: new THREE.Vector3(0, 0.06, 1) });
+        nav.setHome(home);
+        nav.setBounds(bounds);
+
+        function startWave() {
+          if (wave) return;
+          let t = 0;
+          wave = h.onFrame((dt) => {
+            t += dt * 1.5;
+            for (let i = 0; i < total; i++) {
+              const lit = Math.max(0, 1 - Math.abs(where[i].section - t + 0.5));
+              mesh.setColorAt(i, color.setHSL(0.58 - 0.45 * base[i], 0.75, 0.32 + 0.3 * base[i] + 0.35 * lit));
+            }
+            mesh.instanceColor.needsUpdate = true;
+            if (t > spec.sections.length + 1) {
+              wave();
+              wave = null;
+            }
+          });
+        }
+
+        return {
+          ready: sleep(250).then(() => home()),
+          focus(target) {
+            const i = spec.sections.findIndex((s) => s.id === target);
+            if (i < 0) return;
+            const half = (spec.sections[i].neurons * 0.55) / 2;
+            d.focus(new THREE.Box3(new THREE.Vector3(xs[i] - 1, -half, -D * 0.55), new THREE.Vector3(xs[i] + 1, half, D * 0.55)), { showFrame: true, margin: 1.3, direction: new THREE.Vector3(0.5, 0.2, 1) });
+          },
+          onShow: () => counts.networkShow++,
+          onHide: () => counts.networkHide++,
+          dispose() {
+            counts.networkDispose++;
+            wave?.();
+            h.scene.remove(group);
+            geometry.dispose();
+            material.dispose();
+            mesh.dispose();
+            lineGeometry.dispose();
+            lines.material.dispose();
+            node.remove();
+          },
+        };
+      }
+
+      /** Vista "cervello" finta: due emisferi, un cervelletto e qualche regione da evidenziare. */
+      function fakeBrainView({ host: h, director: d, nav, layer, spec }) {
+        counts.brainCreate++;
+        const group = new THREE.Group();
+        const owned = [];
+        const own = (x) => (owned.push(x), x);
+        const hemisphere = own(new THREE.SphereGeometry(1, 40, 28));
+        const cortex = own(new THREE.MeshStandardMaterial({ color: 0xf0a8b8, roughness: 0.75, transparent: true, opacity: 0.32, depthWrite: false }));
+        for (const sideSign of [-1, 1]) {
+          const hemi = new THREE.Mesh(hemisphere, cortex);
+          hemi.scale.set(3.1, 3.4, 5.4);
+          hemi.position.x = sideSign * 3.15;
+          group.add(hemi);
+        }
+        const cerebellum = new THREE.Mesh(own(new THREE.SphereGeometry(1, 28, 20)), own(new THREE.MeshStandardMaterial({ color: 0xd98ea0, roughness: 0.8 })));
+        cerebellum.scale.set(4.2, 1.6, 2);
+        cerebellum.position.set(0, -3.4, -4.4);
+        group.add(cerebellum);
+        // posizioni a occhio nel modello stilizzato della pagina di prova (non coordinate MNI)
+        const REGIONS = { hippocampus: [-2.4, -1.4, -0.8], entorhinal: [-2.9, -2.2, 0.4], v1: [-0.9, 0.3, -5.2], pfc_dl: [-2.8, 2.2, 3.6], broca: [-4.6, 0.1, 2.4] };
+        const markers = new Map();
+        const marker = own(new THREE.SphereGeometry(0.45, 18, 12));
+        for (const [id, p] of Object.entries(REGIONS)) {
+          const lit = spec.regions.includes(id);
+          const mesh = new THREE.Mesh(marker, own(new THREE.MeshStandardMaterial({ color: lit ? 0xfacc15 : 0x64748b, emissive: lit ? 0xa16207 : 0x000000, emissiveIntensity: 0.5 })));
+          mesh.position.set(...p);
+          group.add(mesh);
+          markers.set(id, mesh);
+        }
+        h.scene.add(group);
+        const SIDE = new THREE.Vector3(-1, 0.35, 0.35);
+        const home = () => d.focus(group, { showFrame: false, margin: 1.02, direction: SIDE });
+        nav.setHome(home);
+        const node = card(layer, spec.title, "Vista finta: emisferi trasparenti e qualche regione. I tab veri usano core/brain/view.js.", [
+          el("button", { type: "button", onclick: () => focus(["hippocampus"]) }, "Ippocampo"),
+          el("button", { type: "button", onclick: () => focus(["v1"]) }, "V1"),
+          el("button", { type: "button", onclick: () => home() }, "Tutto il cervello"),
+        ]);
+        let pulse = null;
+        function focus(ids) {
+          counts.brainFocus.push([...ids]);
+          const list = ids.map((id) => markers.get(id)).filter(Boolean);
+          if (!list.length) return;
+          d.focus({ userData: { members: list } }, { showFrame: false, margin: 4, minDistance: 9, direction: SIDE });
+          pulse?.();
+          let t = 0;
+          pulse = h.onFrame((dt) => {
+            t += dt;
+            const s = 1 + 0.35 * Math.sin(t * 8) * Math.max(0, 1 - t / 2.4);
+            for (const mesh of list) mesh.scale.setScalar(s);
+            if (t > 2.4) {
+              pulse();
+              pulse = null;
+            }
+          });
+        }
+        return {
+          ready: sleep(150).then(() => home()),
+          focus,
+          onShow: () => counts.brainShow++,
+          onHide: () => counts.brainHide++,
+          dispose() {
+            counts.brainDispose++;
+            pulse?.();
+            h.scene.remove(group);
+            for (const x of owned) x.dispose();
+            node.remove();
+          },
+        };
+      }
+
+      /** Pannello "Cervello" finto (come renderBrainPane: solo DOM). */
+      function fakeBrainPane(container, spec, { onShow3D }) {
+        counts.paneRender++;
+        container.append(
+          el("p", {}, spec.intro),
+          el("button", { type: "button", className: "demo-wide", onclick: () => onShow3D() }, "Mostra il cervello in 3D"),
+          ...spec.analogies.map((a) =>
+            el(
+              "article",
+              { className: "demo-analogy", dataset: { analogy: a.id } },
+              el("h3", {}, `${a.ai} ↔ ${a.brain}`),
+              el("p", {}, a.text),
+              el("p", { className: "hint" }, `Dove non regge: ${a.different}`),
+              el("button", { type: "button", onclick: () => onShow3D(a.regions) }, "Mostra nel modello 3D"),
+            ),
+          ),
+        );
+      }
+
+      // ------------------------------------------------------------------ rappresentazioni
+      /** La "vista" del tab sulla sua scena (come neuroni/architettura nel Transformer). */
+      function showTabNeurons(on) {
+        tabNeurons.visible = on;
+        return director.focus(on ? tabNeurons : detail, { showFrame: false, margin: 1.12, direction: FRONT });
+      }
+      const reps = installRepresentations(ui, {
+        tabId: "prova",
+        network: CUSTOM_NETWORK
+          ? {
+              enter: () => (counts.customEnter++, showTabNeurons(true)),
+              exit: () => (counts.customExit++, showTabNeurons(false)),
+              description: "Modalità personalizzata: la vista è sulla scena del tab (come la Rete neurale del Transformer).",
+            }
+          : { load: () => sleep(120).then(() => NETWORK_SPEC) },
+        brain: { load: () => Promise.resolve(BRAIN_SPEC) },
+        loaders: REAL_VIEWS
+          ? undefined
+          : {
+              network: REAL_NETWORK
+                ? () => import("../js/core/neuralNet/view.js").then((m) => m.createNetworkView)
+                : () => (flags.failModule ? Promise.reject(new Error("modulo della rete non trovato (simulato)")) : Promise.resolve(fakeNetworkView)),
+              brain: () => Promise.resolve(fakeBrainView),
+              pane: () => Promise.resolve(fakeBrainPane),
+            },
+        onChange: (id, previous) => log(`change: ${previous} → ${id}`),
+      });
+
+      if (paneViews) {
+        // come il pannello Viste del Transformer: il tab cambia vista da solo e lo dice al selettore
+        paneViews.append(
+          el(
+            "div",
+            { className: "view-switch" },
+            el("button", { type: "button", onclick: () => (showTabNeurons(false), reps.sync("main")) }, el("strong", {}, "Architettura"), el("small", {}, "I blocchi del sistema di prova")),
+            el("button", { type: "button", onclick: () => (showTabNeurons(true), reps.sync("network")) }, el("strong", {}, "Rete neurale (sulla scena del tab)"), el("small", {}, "Chiama reps.sync(\"network\")")),
+          ),
+        );
+      }
+
+      // ------------------------------------------------------------------ pannello Prove
+      const status = el("p", { className: "demo-status", role: "status" });
+      const logBox = el("pre", { className: "demo-log", ariaLabel: "Eventi" });
+      function log(text) {
+        logLines.push(`${(performance.now() / 1000).toFixed(1)} s · ${text}`);
+        logBox.textContent = logLines.slice(-12).join("\n");
+        updateStatus();
+      }
+      function updateStatus() {
+        status.replaceChildren("Rappresentazione: ", el("strong", { dataset: { current: "" } }, reps.current), " · contesti WebGL vivi: ", el("strong", { dataset: { contexts: "" } }, String(window.__webglContexts())));
+      }
+      setInterval(updateStatus, 500);
+
+      let unaskedTimer = 0;
+      const button = (text, onclick, data) => el("button", { type: "button", onclick, dataset: { test: data } }, text);
+      const failBox = el("input", { type: "checkbox", onchange: (e) => (flags.failCreate = e.target.checked) });
+      paneTests.append(
+        el(
+          "section",
+          { className: "demo-box" },
+          el("h3", {}, "Rappresentazioni"),
+          el(
+            "div",
+            { className: "demo-buttons" },
+            button("Architettura", () => reps.show("main"), "main"),
+            button("Rete neurale", () => reps.show("network"), "network"),
+            button("Cervello", () => reps.show("brain"), "brain"),
+            button("Cervello → ippocampo", () => reps.show("brain", { focus: ["hippocampus"] }), "brain-focus"),
+          ),
+          status,
+        ),
+        el(
+          "section",
+          { className: "demo-box" },
+          el("h3", {}, "Ritorno automatico all'Architettura"),
+          el("p", { className: "hint" }, "Da una vista alternativa: un'azione o un volo chiesto dallo studente riportano all'Architettura; un volo non chiesto viene scartato (al ritorno la camera è ferma dov'era)."),
+          el(
+            "div",
+            { className: "demo-buttons" },
+            button("Avvia l'azione", () => player.start("giro"), "action"),
+            button("Volo chiesto (Attention)", () => tab.focus("attention"), "asked"),
+            button("Volo NON chiesto tra 1,5 s", () => {
+              clearTimeout(unaskedTimer);
+              unaskedTimer = setTimeout(() => {
+                log("volo non chiesto: director.focus(Uscita)");
+                tab.focus("uscita");
+              }, 1500);
+            }, "unasked"),
+          ),
+        ),
+        el(
+          "section",
+          { className: "demo-box" },
+          el("h3", {}, "Contesti WebGL ed errori"),
+          el(
+            "div",
+            { className: "demo-buttons" },
+            button("Nascondi il tab per 2 s", () => hideTab(2000), "hide"),
+            button("Link view:cervello", () => reps.goto({ kind: "view", id: "cervello" }), "goto"),
+          ),
+          el("label", { className: "demo-check" }, failBox, el("span", {}, "La prossima apertura della rete fallisce (errore nella vista: avviso e ritorno all'Architettura)")),
+          logBox,
+        ),
+      );
+
+      /** Come il guscio quando si cambia tab: radice nascosta, deactivate() → host.stop(); poi activate(). */
+      async function hideTab(ms) {
+        root.hidden = true;
+        player.stop();
+        host.stop();
+        log(`tab nascosto · contesti: ${window.__webglContexts()}`);
+        await sleep(ms);
+        root.hidden = false;
+        host.start();
+        host.resize();
+        log("tab di nuovo visibile");
+      }
+
+      // ------------------------------------------------------------------ avvio (come activate() del tab)
+      menu.select("passo.ingresso", { scroll: false });
+      tab.overview({ duration: 0.01 });
+      host.start();
+      host.resize();
+      updateStatus();
+      window.demo = { ui, reps, tab, menu, lod, registry, counts, flags, logLines, hideTab, contexts: () => window.__webglContexts(), tabNeurons };
+    </script>
+  </body>
+</html>

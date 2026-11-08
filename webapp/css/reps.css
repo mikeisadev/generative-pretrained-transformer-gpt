@@ -1,1 +1,204 @@
-/* reps: stili condivisi (vedi ARCHITECTURE.md). Riempito dal round E. */
+/* Rappresentazioni di un tab (js/core/representations.js, js/core/ui/repSwitch.js): il selettore
+   "Architettura · Rete neurale · Cervello", il livello delle viste alternative e il pannello Cervello.
+   La posizione del selettore la calcola repSwitch.js (left/top in px): qui aspetto e regole.
+
+   Ordine sopra la scena: livello alternativo 11, ☰ 12, selettore 13, codice 15, player e pad 16,
+   chip della navigazione 17, grafici 18, aiuto 25. */
+
+/* ---------------------------------------------------------------- selettore */
+.rep-switch {
+  position: absolute;
+  top: 10px;
+  left: 0;
+  z-index: 13;
+  width: max-content; /* non dipende dal posto: repSwitch.js misura ogni variante per scegliere */
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  background: var(--panel);
+  border: 1px solid #334155;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+/* Suggerimento o menu aperti: sopra codice, chip, grafici e cassetto (sotto solo l'aiuto, 25). Il
+   selettore da solo non tocca niente; quello che si apre sotto di lui sì. */
+.rep-switch:has(.rep-tip.visible), .rep-switch.open { z-index: 24; }
+.rep-options { display: flex; gap: 2px; }
+.rep-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  white-space: nowrap;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+.rep-option:hover { color: var(--text); border-color: #475569; }
+.rep-option[aria-checked="true"] { color: #e0f2fe; background: rgba(56, 189, 248, 0.16); border-color: var(--accent); }
+.rep-option:focus-visible, .rep-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rep-icon, .rep-trigger-icon, .rep-chevron { display: inline-flex; flex: none; }
+.rep-icon svg, .rep-trigger-icon svg { width: 16px; height: 16px; }
+.rep-text { display: inline-flex; flex-direction: column; text-align: left; }
+.rep-desc { display: none; }
+.rep-trigger { display: none; }
+
+/* Voce in preparazione (la vista si sta caricando): l'icona "respira" finché è pronta. */
+.rep-option[aria-busy] .rep-icon, .rep-trigger[aria-busy] .rep-trigger-icon { animation: rep-busy 0.9s ease-in-out infinite alternate; }
+@keyframes rep-busy { from { opacity: 1; } to { opacity: 0.3; } }
+
+/* Solo icone: l'etichetta resta per gli screen reader e nel suggerimento. */
+.rep-switch[data-variant="icons"] .rep-option { padding: 0 7px; }
+.rep-switch[data-variant="icons"] .rep-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Menu compatto: un pulsante con l'icona della vista attuale; l'elenco si apre sotto, con le descrizioni. */
+.rep-switch[data-variant="menu"] { padding: 0; border: 0; background: none; box-shadow: none; }
+.rep-switch[data-variant="menu"] .rep-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  height: 34px;
+  padding: 0 5px 0 9px;
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.rep-switch[data-variant="menu"] .rep-chevron svg { width: 14px; height: 14px; color: var(--muted); }
+.rep-switch[data-variant="menu"].open .rep-trigger { border-color: var(--accent); }
+.rep-switch[data-variant="menu"] .rep-options {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  flex-direction: column;
+  width: min(290px, calc(100vw - 24px));
+  padding: 5px;
+  background: var(--panel-solid);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+}
+.rep-switch[data-variant="menu"][data-align="end"] .rep-options { left: auto; right: 0; }
+.rep-switch[data-variant="menu"].open .rep-options { display: flex; }
+.rep-switch[data-variant="menu"] .rep-option { height: auto; padding: 8px 10px; align-items: flex-start; white-space: normal; }
+.rep-switch[data-variant="menu"] .rep-icon { margin-top: 1px; }
+.rep-switch[data-variant="menu"] .rep-label { font-size: 13.5px; }
+.rep-switch[data-variant="menu"] .rep-desc { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+
+/* In cima al cassetto della sidebar (telefono, cassetto aperto): tutta la larghezza, icona sopra l'etichetta. */
+.rep-switch[data-variant="sidebar"] {
+  position: static;
+  width: auto;
+  flex: none;
+  margin: 10px 12px 0;
+  box-shadow: none;
+  background: #0b1324;
+}
+.rep-switch[data-variant="sidebar"] .rep-options { flex: 1; }
+.rep-switch[data-variant="sidebar"] .rep-option {
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  height: auto;
+  min-height: 46px;
+  padding: 5px 4px;
+  font-size: 12px;
+}
+.rep-switch[data-variant="sidebar"] .rep-text { align-items: center; }
+.rep-switch[data-variant="sidebar"] .rep-tip { display: none; }
+
+/* Suggerimento: etichetta e "che cosa vedrai", sotto la voce indicata dal mouse o dal focus. */
+.rep-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 24px));
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #020617;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 0.12s, transform 0.12s;
+  pointer-events: none;
+}
+.rep-tip strong { display: block; margin-bottom: 2px; color: #e0f2fe; }
+.rep-tip.visible { opacity: 1; transform: none; }
+.rep-switch[data-variant="menu"] .rep-tip { display: none; }
+
+/* Selettore nella seconda fila: i chip della navigazione (in alto al centro) scendono sotto di lui. */
+.tab.rep-switch-low .nav-hud { top: max(60px, var(--rep-safe-top, 60px)); }
+@media (max-width: 900px) {
+  .tab.rep-switch-low .nav-hud { top: max(104px, var(--rep-safe-top, 104px)); }
+}
+
+/* ---------------------------------------------------------------- livello alternativo */
+/* Contesto di sovrapposizione proprio: i comandi della vista (qualunque z-index) restano sotto ☰ e il selettore. */
+.rep-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  overflow: hidden;
+  background: var(--bg);
+}
+.rep-layer[hidden] { display: none; }
+/* L'aiuto della navigazione è una finestra modale: copre anche ☰ e il selettore, come nei tab. */
+.rep-layer:has(> .nav-help:not([hidden])) { z-index: 30; }
+
+.rep-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--muted);
+  text-align: center;
+}
+.rep-loading strong { color: #e0f2fe; font-size: 15px; font-weight: 600; }
+.rep-loading-bar {
+  width: 180px;
+  height: 4px;
+  border-radius: 4px;
+  background: #1e293b linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
+  background-size: 45% 100%;
+  animation: rep-loading 1.1s linear infinite;
+}
+@keyframes rep-loading { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+
+/* La scena del tab sotto il livello: nascosta ma con le sue misure (al ritorno tutto è com'era, e il
+   selettore non salta perché gli ostacoli restano dove sono). Restano ☰, il selettore e la sidebar. */
+.tab.rep-alt-active > :not(.tab-sidebar):not(.tab-stage),
+.tab.rep-alt-active > .tab-stage > :not(.rep-layer):not(.rep-switch):not(.sidebar-toggle) {
+  visibility: hidden;
+  transition: none;
+}
+
+/* ---------------------------------------------------------------- pannello Cervello (prima del contenuto) */
+.rep-pane-status { margin: 8px 2px; color: var(--muted); }
+.rep-pane-error { color: #fca5a5; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rep-option, .rep-tip { transition: none; }
+  .rep-option[aria-busy] .rep-icon, .rep-trigger[aria-busy] .rep-trigger-icon, .rep-loading-bar { animation: none; }
+}

@@ -1,1 +1,125 @@
-/* neuralnet: stili condivisi (vedi ARCHITECTURE.md). Riempito dal round E. */
+/* Rete neurale orizzontale con profondità (js/core/neuralNet/): scheda, legenda, etichetta al passaggio
+   del mouse. Classi con prefisso .nn-. La scheda vive nel livello della rappresentazione (ctx.layer):
+   chi lo ospita può spostarla con --nn-top (desktop) e --nn-top-narrow (telefono), per esempio sotto
+   il proprio selettore. Niente backdrop-filter (con il rendering software costa 18-30 ms per frame). */
+
+.nn-card {
+  position: absolute;
+  top: var(--nn-top, 56px);
+  left: 12px;
+  z-index: 14;
+  width: min(clamp(270px, 36%, 340px), calc(100% - 24px)); /* più stretta negli stage medi */
+  max-height: calc(100% - var(--nn-top, 56px) - 16px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel, rgba(15, 23, 42, 0.94));
+  border: 1px solid #334155;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text, #e2e8f0);
+  pointer-events: auto;
+}
+.nn-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 10px 12px 6px; }
+.nn-head-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.nn-title { margin: 0; font-size: 14.5px; line-height: 1.3; }
+.nn-badge { align-self: flex-start; font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.nn-badge.sim { background: rgba(250, 204, 21, 0.14); color: #fde68a; border: 1px solid rgba(250, 204, 21, 0.35); }
+.nn-badge.real { background: rgba(74, 222, 128, 0.12); color: #bbf7d0; border: 1px solid rgba(74, 222, 128, 0.35); }
+.nn-collapse { flex: none; font-size: 12px; padding: 3px 9px; }
+
+.nn-controls { padding: 0 12px 8px; border-bottom: 1px solid var(--border, #1e293b); display: grid; gap: 6px; }
+.nn-buttons { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.nn-btn { font-size: 12.5px; padding: 5px 10px; white-space: nowrap; }
+.nn-primary { border-color: var(--accent, #38bdf8); color: #e0f2fe; background: rgba(56, 189, 248, 0.12); }
+.nn-primary[aria-pressed="true"] { background: rgba(56, 189, 248, 0.24); }
+.nn-select { font: inherit; font-size: 12.5px; color: var(--text, #e2e8f0); background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 4px 6px; max-width: 100%; }
+.nn-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 12.5px; }
+.nn-row-label { color: var(--muted, #94a3b8); white-space: nowrap; }
+.nn-slice { min-width: 0; }
+.nn-range { width: 100%; min-width: 0; accent-color: var(--accent, #38bdf8); }
+.nn-range-value { color: var(--muted, #94a3b8); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12px; }
+.nn-status { margin: 0; min-height: 1.3em; font-size: 12px; color: #a5f3fc; }
+.nn-status:empty { display: none; }
+:is(.nn-btn, .nn-select, .nn-range, .nn-collapse, .nn-index-item, .nn-close):focus-visible { outline: 2px solid var(--accent, #38bdf8); outline-offset: 2px; }
+
+.nn-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 12px; overscroll-behavior: contain; }
+.nn-text { margin: 0 0 8px; }
+.nn-muted { color: var(--muted, #94a3b8); }
+.nn-more { border-top: 1px solid var(--border, #1e293b); padding: 6px 0; }
+.nn-more > summary { cursor: pointer; font-weight: 600; font-size: 12.5px; color: #cbd5e1; padding: 2px 0; }
+.nn-more > summary:focus-visible { outline: 2px solid var(--accent, #38bdf8); outline-offset: 2px; border-radius: 4px; }
+.nn-h { margin: 10px 0 4px; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted, #94a3b8); }
+.nn-keys { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.nn-key { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #cbd5e1; }
+.nn-swatch { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 3px; border: 1px solid transparent; }
+.nn-line { display: inline-block; flex: none; width: 22px; height: 3px; border-radius: 2px; margin: 0 7px 3px 0; vertical-align: middle; }
+.nn-patterns, .nn-axes, .nn-sources { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+.nn-pattern { font-size: 12px; }
+.nn-axes li { font-size: 12px; color: #cbd5e1; }
+.nn-axes b { display: inline-block; width: 1.1em; }
+.nn-sources li { font-size: 12px; }
+.nn-sources a { color: #7dd3fc; }
+
+.nn-detail { border: 1px solid var(--accent, #38bdf8); background: rgba(56, 189, 248, 0.06); border-radius: 10px; padding: 8px 10px 10px; margin: 0 0 10px; }
+.nn-detail[hidden] { display: none; }
+.nn-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.nn-role { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted, #94a3b8); }
+.nn-close { padding: 0 8px; font-size: 16px; line-height: 1.4; }
+.nn-detail-title { margin: 2px 0 0; font-size: 14px; }
+.nn-sub { margin: 0 0 6px; color: var(--muted, #94a3b8); font-size: 12px; }
+.nn-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; margin: 6px 0 8px; font-size: 12px; }
+.nn-facts dt { color: var(--muted, #94a3b8); }
+.nn-facts dd { margin: 0; }
+
+.nn-index { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.nn-index-item { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; font-size: 12.5px; padding: 4px 8px; background: transparent; border-color: transparent; }
+.nn-index-item:hover { border-color: #334155; background: #111c30; }
+
+.nn-errors { margin: 0; padding: 0 12px 12px 30px; color: #fca5a5; font-size: 12px; }
+.nn-card-error .nn-text { padding: 0 12px; }
+
+/* Etichetta al passaggio del mouse (o al tocco): vicino al puntatore, mai sotto il dito */
+.nn-tip {
+  position: absolute;
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 300px;
+  padding: 6px 9px;
+  background: var(--panel-solid, #0f172a);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.4;
+  color: #cbd5e1;
+  pointer-events: none;
+}
+.nn-tip[hidden] { display: none; }
+.nn-tip strong { color: var(--text, #e2e8f0); font-size: 12.5px; }
+.nn-tip-value { color: #fde68a; font-variant-numeric: tabular-nums; }
+
+/* Ridotta: solo titolo e comandi (sul telefono parte così) */
+.nn-card.collapsed .nn-body { display: none; }
+.nn-card.collapsed .nn-controls { border-bottom: 0; }
+
+/* Telefono: la scheda è una fascia in alto, larga quanto lo stage; aperta scorre dentro di sé */
+@media (max-width: 640px) {
+  .nn-card {
+    top: var(--nn-top-narrow, 100px);
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: min(58vh, calc(100% - var(--nn-top-narrow, 100px) - 12px));
+    font-size: 12.5px;
+  }
+  .nn-head { padding: 8px 10px 4px; }
+  .nn-title { font-size: 13.5px; }
+  .nn-controls { padding: 0 10px 8px; }
+  .nn-btn, .nn-select { font-size: 12px; padding: 5px 8px; }
+  .nn-card.collapsed .nn-controls .nn-row:not(:has(.nn-slice)) { display: none; }
+  .nn-tip { max-width: min(280px, calc(100% - 12px)); }
+}
