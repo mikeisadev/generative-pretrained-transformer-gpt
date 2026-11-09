@@ -72,6 +72,12 @@ export class NetworkSpecError extends Error {
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v) && !ArrayBuffer.isView(v);
 const isInt = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
 const isArrayLike = (v) => Array.isArray(v) || ArrayBuffer.isView(v);
+/**
+ * Float32Array da un elenco di numeri, o null se un elemento non è un numero. Il controllo va fatto
+ * PRIMA della copia: Float32Array.from trasforma null in 0 e "1" in 1 senza dire niente (e un NaN
+ * passato da JSON.stringify diventa proprio null).
+ */
+const toFloats = (v) => (v instanceof Float32Array ? v : Array.prototype.some.call(v, (x) => typeof x !== "number") ? null : Float32Array.from(v));
 const optString = (v) => (typeof v === "string" ? v : "");
 const show = (v) => {
   try {
@@ -354,9 +360,9 @@ function parseSection(entry, path, problems, globalDepth, byId) {
     if (!isArrayLike(entry.values)) fail(at("values"), "valori veri: Float32Array o elenco di numeri (lastra, neurone, posizione)");
     else if (entry.values.length !== units) fail(at("values"), `servono ${units} valori (${slabs} lastre × ${neurons} neuroni × ${depth.count} posizioni), trovati ${entry.values.length}`);
     else {
-      values = entry.values instanceof Float32Array ? entry.values : Float32Array.from(entry.values);
-      const bad = values.findIndex((v) => !Number.isFinite(v));
-      if (bad >= 0) fail(at("values"), `valore non finito all'indice ${bad}`);
+      values = toFloats(entry.values);
+      const bad = values ? values.findIndex((v) => !Number.isFinite(v)) : Array.prototype.findIndex.call(entry.values, (v) => typeof v !== "number");
+      if (bad >= 0) fail(at("values"), `valore non numerico o non finito all'indice ${bad} (${show(entry.values[bad])})`);
     }
   }
 
@@ -373,18 +379,21 @@ function parseSection(entry, path, problems, globalDepth, byId) {
     if (role !== "experts") fail(at("routes"), 'routes vale solo con role: "experts"');
     else if (!isArrayLike(entry.routes) || entry.routes.length !== depth.count * active) fail(at("routes"), `servono ${depth.count} × ${active} indici di esperto (posizione per posizione)`);
     else {
-      routes = Int32Array.from(entry.routes);
+      // i valori grezzi si controllano PRIMA di copiarli (Int32Array trasformerebbe 2.5 in 2 e "x" in 0)
+      const raw = entry.routes;
       for (let d = 0; d < depth.count; d++) {
         const seen = new Set();
         for (let k = 0; k < active; k++) {
-          const e = routes[d * active + k];
-          if (!isInt(e, 0, experts - 1)) fail(at("routes"), `indice di esperto ${e} fuori da 0…${experts - 1} (posizione ${d})`);
+          const e = raw[d * active + k];
+          if (!isInt(e, 0, experts - 1)) fail(at("routes"), `indice di esperto ${show(e)} fuori da 0…${experts - 1} (posizione ${d})`);
           else if (seen.has(e)) fail(at("routes"), `esperto ${e} ripetuto alla posizione ${d}`);
           seen.add(e);
         }
       }
+      routes = Int32Array.from(raw);
       if (entry.gates !== undefined) {
         if (!isArrayLike(entry.gates) || entry.gates.length !== routes.length) fail(at("gates"), "un peso per ogni voce di routes");
+        else if (Array.from(entry.gates).some((g) => typeof g !== "number" || !Number.isFinite(g) || g < 0)) fail(at("gates"), "i pesi del router sono numeri finiti ≥ 0");
         else gates = Float32Array.from(entry.gates);
       }
     }
@@ -524,8 +533,8 @@ function parseLink(entry, path, problems, byId) {
         const n = heads * D(to) * D(from);
         if (!isArrayLike(entry.weights) || entry.weights.length !== n) fail(`${label}.weights`, `servono ${n} pesi (head × query ${D(to)} × key ${D(from)})`);
         else {
-          link.weights = entry.weights instanceof Float32Array ? entry.weights : Float32Array.from(entry.weights);
-          if (link.weights.some((w) => !(w >= 0) || !Number.isFinite(w))) fail(`${label}.weights`, "i pesi di attention sono probabilità ≥ 0");
+          link.weights = toFloats(entry.weights);
+          if (!link.weights || link.weights.some((w) => !(w >= 0) || !Number.isFinite(w))) fail(`${label}.weights`, "i pesi di attention sono probabilità: numeri finiti ≥ 0");
         }
       }
       break;

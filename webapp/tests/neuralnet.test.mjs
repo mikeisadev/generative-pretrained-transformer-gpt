@@ -193,6 +193,35 @@ test("spec: valori veri accettati (anche come elenco) e rete non più simulata",
   assert.match(errorsOf({ title: "v", sections: [{ id: "a", label: "A", neurons: 1, values: [NaN] }] }).join(), /non finito/);
 });
 
+test("spec: i numeri veri si controllano prima della copia in array tipizzati (null, stringhe, decimali)", () => {
+  // Float32Array.from([null]) darebbe 0 e Int32Array.from([2.5]) darebbe 2, senza dire niente; un NaN
+  // passato da JSON.stringify diventa proprio null
+  const one = (extra) => ({ title: "v", scale: "s", sections: [{ id: "a", label: "A", role: "mlp", neurons: 2, depth: 1, ...extra }] });
+  assert.match(errorsOf(one({ values: [1, null] })).join(), /values \(a\): valore non numerico o non finito all'indice 1 \(null\)/);
+  assert.match(errorsOf(one({ values: ["1", 2] })).join(), /all'indice 0 \("1"\)/);
+  const moe = (routes, gates) => ({
+    title: "m",
+    scale: "s",
+    depth: { count: 2, label: "token" },
+    sections: [{ id: "e", label: "E", role: "experts", neurons: 2, experts: 4, active: 1, depth: true, routes, gates }],
+  });
+  assert.equal(normalizeSpec(moe([1, 3])).sections[0].routes[1], 3);
+  assert.match(errorsOf(moe([2.5, 1])).join(), /indice di esperto 2.5 fuori/);
+  assert.match(errorsOf(moe(["x", 1])).join(), /indice di esperto "x" fuori/);
+  assert.match(errorsOf(moe([null, 1])).join(), /indice di esperto null fuori/);
+  assert.match(errorsOf(moe([1, 3], [0.5, null])).join(), /gates.*numeri finiti/);
+  assert.match(errorsOf(moe([1, 3], [0.5, -1])).join(), /gates.*≥ 0/);
+  const attention = (weights) => ({
+    title: "a",
+    scale: "s",
+    depth: { count: 2, label: "token" },
+    sections: [{ id: "q", label: "Q", role: "attention", neurons: 2, depth: true }],
+    links: [{ within: "q", pattern: "attention", weights }],
+  });
+  assert.ok(normalizeSpec(attention([1, 0, 0.5, 0.5])).links[0].weights instanceof Float32Array);
+  assert.match(errorsOf(attention([1, null, 0.5, 0.5])).join(), /probabilità: numeri finiti ≥ 0/);
+});
+
 // ------------------------------------------------------------------------------------------ layout
 test("layout: sezioni da sinistra a destra, centrate su y, fette allineate in profondità", () => {
   const { net, layout } = build(tinySpec());

@@ -557,9 +557,10 @@ export function installRepresentations(ui, opts = {}) {
       });
       return filling;
     };
-    sidebar.onSelect((id) => !disposed && id === "cervello" && fill());
+    const onSelect = (id) => !disposed && id === "cervello" && fill();
+    sidebar.onSelect(onSelect);
     if (!pane.hidden) void fill(); // unico pannello della sidebar: è già quello aperto
-    return { pane, fill };
+    return { pane, fill, onSelect };
   }
 
   /** "Mostra il cervello in 3D" / "Mostra nel modello 3D" dal pannello. */
@@ -585,6 +586,7 @@ export function installRepresentations(ui, opts = {}) {
       sidebar.nav.querySelector(':scope > [data-pane="cervello"]')?.remove();
       brainPane.pane.remove();
       sidebar.panes?.delete?.("cervello");
+      sidebar.listeners?.delete?.(brainPane.onSelect); // Sidebar.onSelect non restituisce la funzione di rimozione
     }
     listeners.clear();
     if (ui.reps === api) delete ui.reps;
