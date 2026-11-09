@@ -258,7 +258,7 @@ const mapSection = ({ res, channels }, o) => ({ neurons: shown(channels), depth:
 function resText(L, { decoder, entering }) {
   const pixels = 512 / L.res;
   const ENTER = {
-    down: "All'ingresso la griglia si è dimezzata (Downsample: una convoluzione con passo 2) e i canali sono cresciuti. ",
+    down: "All'ingresso la griglia si è dimezzata (Downsample: una convoluzione con passo 2, che lascia i canali come sono); è il primo ResNet block del livello a raddoppiarli. ",
     "down-hidden": `All'ingresso la griglia si dimezza ancora (16 → ${L.res}): qui non si vede, perché la griglia ridotta resta 2 × 2. `,
     up: "All'ingresso la griglia è raddoppiata (Upsample: ogni posizione copiata in un blocco 2 × 2, poi una convoluzione 3 × 3). ",
     "up-hidden": `All'ingresso la griglia raddoppia (8 → ${L.res}): qui non si vede, perché la griglia ridotta era già 2 × 2. `,
@@ -299,7 +299,7 @@ function level(p, L, { decoder = false, entering = null } = {}) {
     links.push(
       { from: `${p}_res`, to: `${p}_attn`, pattern: "dense", density: 0.25, label: "GroupNorm e proiezione 1 × 1" },
       { within: `${p}_attn`, pattern: "attention" }, // nessuna maschera: tutte le posizioni con tutte
-      { from: "txt_out", to: `${p}_attn`, pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L.res)), label: "cross-attention al testo (schema illustrativo)" }, // dai token alle posizioni
+      { from: "txt_out", to: `${p}_attn`, pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L.res)), label: "cross-attention al testo, schema illustrativo" }, // dai token alle posizioni
     );
   }
   const ids = sections.map((s) => s.id);
@@ -374,7 +374,7 @@ function unet() {
     { from: previous, to: "un_m_res1", pattern: "conv", density: 0.2 },
     { from: "un_m_res1", to: "un_m_attn", pattern: "dense", density: 0.25, label: "GroupNorm e proiezione 1 × 1" },
     { within: "un_m_attn", pattern: "attention" },
-    { from: "txt_out", to: "un_m_attn", pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L3.res)), label: "cross-attention al testo (schema illustrativo)" },
+    { from: "txt_out", to: "un_m_attn", pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L3.res)), label: "cross-attention al testo, schema illustrativo" },
     { from: "un_m_attn", to: "un_m_res2", pattern: "conv", density: 0.2 },
   );
   resBlocks.push("un_m_res1", "un_m_res2");
