@@ -44,8 +44,8 @@ Schema di ``run.json`` (testi in italiano; un campo facoltativo può valere ``nu
       "training": {"steps", "snapshots": [0, 50, ...], "eval_step", "train_loss", "val_loss",
                    "device", "duration_s"} | null,      # riassunto di trace.json, se copiato
       "engine_compatible": false,               # c'è solo se dichiarato (vedi sotto)
-      "notes": ["..."]                          # note dell'autore, poi gli avvisi dell'export
-    }
+      "notes": ["..."]                          # note dell'autore, poi quelle di trace.json con il prefisso
+    }                                           # "storia del training: ", poi gli avvisi dell'export
 
 Albero dei moduli, dai nomi puntati dello state_dict (come ``moduleTree.js`` nel browser)::
 
@@ -125,6 +125,16 @@ _VOCAB_KEYS = ("chars", "vocab")
 _POSITIVE_INT_KEYS = ("vocab_size", "block_size", "n_embd", "n_head", "n_layer")
 _SNAPSHOT_NAME = re.compile(r"^snap_\d{5,}\.f16\.bin$")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+# Un surrogato UTF-16 spaiato ("\ud800" scritto in un JSON, o un byte non UTF-8 di un argomento della riga
+# di comando) è un str valido ma non si scrive in UTF-8: write_text fallirebbe alla fine dell'export, con
+# pesi e storia già scritti e run.json vuoto. Nei testi che finiscono in run.json diventa "�" (U+FFFD),
+# come fa toWellFormed() nel browser (js/tabs/lab/runs/describe.js).
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+# Le note di trace.json (gpt/recording.py) arrivano in run.json con questo prefisso, così nella scheda
+# del run si capisce da dove vengono; il Laboratorio usa lo stesso (js/tabs/lab/runs/describe.js).
+TRAINING_NOTE_PREFIX = "storia del training: "
+# Il registratore scrive al più una nota per argomento: di più vuol dire un trace scritto a mano.
+MAX_TRAINING_NOTES = 20
 
 
 # --------------------------------------------------------------------------- tensori di un run
@@ -347,7 +357,7 @@ class TrainingHistory:
             "eval_step": last("steps"),
             "train_loss": last("train"),
             "val_loss": last("val"),
-            "device": device if isinstance(device, str) else None,
+            "device": _one_line(device) if isinstance(device, str) else None,  # testo del file: "cpu", "cuda"…
             "duration_s": duration if _is_number(duration) else None,
         }
 
@@ -400,6 +410,26 @@ def snapshot_tensors(history: TrainingHistory, entry: Mapping[str, Any]) -> dict
     return {p["name"]: _tensor_from_flat(flat, p) for p in history.layout}
 
 
+def training_notes(trace: Mapping[str, Any]) -> list[str]:
+    """Le note di ``trace.json`` pronte per ``run.json``: ``"storia del training: …"``, una per nota.
+
+    Sono le spiegazioni di gpt/recording.py su che cosa si è adattato all'architettura (gruppi nuovi,
+    pesi condivisi, attention saltata, valori non finiti). Il trace è un file letto dal disco: si tengono
+    solo i testi, su una riga (``_one_line``: spazi al posto dei caratteri di controllo, "�" al posto dei
+    surrogati spaiati, che run.json non potrebbe contenere), accorciati al limite che il browser legge
+    (``MAX_TEXT_CHARS``) e al più ``MAX_TRAINING_NOTES`` (le altre si contano in una nota).
+    """
+    raw = trace.get("notes")
+    items = [raw] if isinstance(raw, str) else raw if isinstance(raw, list) else []
+    texts = [_one_line(item) for item in items if isinstance(item, str)]
+    texts = [text for text in texts if text]
+    notes = [_shorten(TRAINING_NOTE_PREFIX + text, MAX_TEXT_CHARS) for text in texts[:MAX_TRAINING_NOTES]]
+    if len(texts) > MAX_TRAINING_NOTES:
+        notes.append(f"{TRAINING_NOTE_PREFIX}altre {len(texts) - MAX_TRAINING_NOTES} note in "
+                     f"{TRAINING_DIR}/{TRAINING_TRACE}")
+    return notes
+
+
 # --------------------------------------------------------------------------- export
 
 
@@ -420,7 +450,9 @@ def export_run(
 
     Args:
         training_dir: cartella con ``trace.json`` e gli snapshot (``scripts/record_training.py --out``),
-            copiata in ``training/``.
+            copiata in ``training/``. Le note del trace (``notes``: che cosa la registrazione ha adattato
+            all'architettura) finiscono anche in ``run.json``, dopo quelle dell'autore, con il prefisso
+            ``"storia del training: "`` (``training_notes``).
         benchmark: il risultato di ``gpt.benchmark`` (diventa ``benchmark.json``).
         engine_compatible: ``False`` se il calcolo è diverso da quello del GPT del corso anche con
             le stesse forme (es. GELU invece di ReLU); ``None`` (predefinito) lascia decidere al browser.
@@ -444,7 +476,8 @@ def export_run(
         export_notes += _copy_history(history, out_dir / TRAINING_DIR, module)
     # La stessa funzione dei dati della web app: weights.json punta a training/trace.json se c'è.
     vocab = types.SimpleNamespace(chars=weights.vocab)  # export_weights legge solo tokenizer.chars
-    export_weights(module, vocab, out_dir, weights.source, weights.trained)
+    source = _well_formed(weights.source)  # il percorso del checkpoint: anche un nome di file non UTF-8
+    export_weights(module, vocab, out_dir, source, weights.trained)
     if benchmark_text is not None:
         (out_dir / BENCHMARK_FILE).write_text(benchmark_text, encoding="utf-8")
 
@@ -453,7 +486,7 @@ def export_run(
         "name": name,
         "description": description,
         "created": (created or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
-        "source": weights.source,
+        "source": source,
         "config": weights.config,
         "total_params": weights.total_values,
         "tensor_count": len(weights.tensors),
@@ -469,7 +502,8 @@ def export_run(
     }
     if engine_compatible is not None:
         info["engine_compatible"] = bool(engine_compatible)
-    info["notes"] = author_notes + export_notes
+    history_notes = training_notes(history.trace) if history is not None else []
+    info["notes"] = author_notes + history_notes + export_notes
     (out_dir / RUN_FILE).write_text(readable_json(info) + "\n", encoding="utf-8")
     return info
 
@@ -701,12 +735,28 @@ def _is_flat(value: dict | list) -> bool:
 def _check_text(value: Any, what: str, max_chars: int, required: bool = False) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{what} deve essere un testo")
-    value = value.strip()
+    value = _well_formed(value.strip())  # un byte non UTF-8 della riga di comando non blocca run.json
     if required and not value:
         raise ValueError(f"{what} non può essere vuoto")
     if len(value) > max_chars:
         raise ValueError(f"{what} è lungo {len(value)} caratteri: il massimo è {max_chars}")
     return value
+
+
+def _shorten(text: str, max_chars: int) -> str:
+    """``text`` di al più ``max_chars`` caratteri, con "…" se è stato tagliato (testi letti da file)."""
+    return text if len(text) <= max_chars else text[: max_chars - 1] + "…"
+
+
+def _well_formed(text: str) -> str:
+    """``text`` scrivibile in UTF-8: "�" al posto dei surrogati spaiati (vedi ``_LONE_SURROGATE``)."""
+    return _LONE_SURROGATE.sub("\ufffd", text)
+
+
+def _one_line(text: str) -> str:
+    """Un testo letto da un file su una riga: spazi al posto di caratteri di controllo e a capo, scrivibile
+    in UTF-8. Le stesse regole di ``oneLine`` nel browser: una nota copiata in run.json si riconosce."""
+    return " ".join(_well_formed(_CONTROL_CHARS.sub(" ", text)).split())
 
 
 def _prepare_folder(out_dir: Path, overwrite: bool) -> list[str]:

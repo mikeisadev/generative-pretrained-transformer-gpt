@@ -419,7 +419,12 @@ def open_source(path: Path, *, name: str | None = None, with_history: bool = Tru
 
 
 def build_model(weights: RunWeights) -> GPTLanguageModel:
-    """Il modello del codice ATTUALE con i pesi del run: nomi e forme devono coincidere esattamente."""
+    """Il modello del codice ATTUALE con i pesi del run: nomi e forme devono coincidere esattamente.
+
+    Si confrontano i tensori in virgola mobile dello state_dict, gli unici che un run contiene (l'export
+    salta quelli interi, come ``num_batches_tracked`` di una BatchNorm, e lo scrive in ``skipped``): un
+    tensore intero resta quello del modello appena costruito, invece di rendere il run "non ricostruibile".
+    """
     if weights.config is None:
         raise ValueError("manca la config del modello (gli iperparametri): il codice non sa che forme creare")
     try:
@@ -427,14 +432,15 @@ def build_model(weights: RunWeights) -> GPTLanguageModel:
     except TypeError as error:
         raise ValueError(f"la config del run non va bene per GPTConfig del codice attuale: {error}") from None
     model = GPTLanguageModel(config)
-    expected = {n: tuple(t.shape) for n, t in model.state_dict().items()}
+    state = model.state_dict()
+    expected = {n: tuple(t.shape) for n, t in state.items() if t.is_floating_point()}
     got = {n: tuple(t.shape) for n, t in weights.tensors.items()}
     missing = [n for n in expected if n not in got]
     extra = [n for n in got if n not in expected]
     mismatched = [(n, got[n], expected[n]) for n in expected if n in got and got[n] != expected[n]]
     if missing or extra or mismatched:
         raise ArchitectureMismatch(missing, extra, mismatched)
-    model.load_state_dict(weights.tensors)
+    model.load_state_dict({**state, **weights.tensors})  # stretto: tutto lo state_dict, i pesi del run sopra
     return model.eval()
 
 
@@ -524,7 +530,7 @@ def _benchmark_model(model, tokenizer, *, name, source, validation, excerpt, his
 
     params = sum(p.numel() for p in model.parameters())
     vocab_size = len(tokenizer.chars)
-    code_files = _code_files(model)
+    sources = code_files(model)
     config = getattr(model, "config", None)
     return {
         "format_version": BENCHMARK_FORMAT_VERSION,
@@ -540,8 +546,8 @@ def _benchmark_model(model, tokenizer, *, name, source, validation, excerpt, his
             "params": params,
             "vocab_size": vocab_size,
             "weights_sha256": (weights or weights_from_model(model)).sha256(),
-            "code_sha256": _code_sha256(code_files),
-            "code_files": [f.relative_to(PROJECT_ROOT).as_posix() for f in code_files],
+            "code_sha256": code_sha256(sources),
+            "code_files": [f.relative_to(PROJECT_ROOT).as_posix() for f in sources],
         },
         "metrics": {
             **scores.metrics(),
@@ -588,8 +594,14 @@ def benchmark_path(
     excerpt = None
     if excerpt_path is not None and Path(excerpt_path).is_file():
         excerpt = read_excerpt(excerpt_path, validation)
-    return benchmark_model(model, tokenizer, name=src.name, source=src.source, validation=validation,
-                           excerpt=excerpt, history=src.history, weights=src.weights, settings=settings)
+    bench = benchmark_model(model, tokenizer, name=src.name, source=src.source, validation=validation,
+                            excerpt=excerpt, history=src.history, weights=src.weights, settings=settings)
+    # Un run non ha tensori interi: build_model li lascia come li crea il codice, e lo si dice.
+    rebuilt = [n for n, t in model.state_dict().items() if not t.is_floating_point()]
+    if rebuilt:
+        bench["notes"].append(f"tensori interi o booleani che il run non contiene ({_few_names(rebuilt)}): "
+                              "misurati con il valore che dà loro il codice")
+    return bench
 
 
 def load_benchmark(path: Path) -> dict[str, Any]:
@@ -911,22 +923,37 @@ def _text_section(model, tokenizer, text: EvalText, block_size, token_chars, set
 
 
 def _snapshot_models(model: nn.Module, history: TrainingHistory, notes: list[str]):
-    """``(voce, modello)`` per ogni snapshot del training, con la stessa classe del modello misurato."""
-    expected = {n: tuple(t.shape) for n, t in model.state_dict().items()}
+    """``(voce, modello)`` per ogni snapshot del training, con la stessa classe del modello misurato.
+
+    Uno snapshot contiene i tensori IN VIRGOLA MOBILE dello state_dict (``snapshot_state`` di
+    gpt/recording.py): si confrontano e si caricano solo quelli. Un tensore intero o booleano, come
+    ``num_batches_tracked`` di una BatchNorm, negli snapshot non c'è e non deve farli saltare tutti:
+    resta quello del modello misurato, e una nota lo dice.
+    """
+    state = model.state_dict()
+    expected = {n: tuple(t.shape) for n, t in state.items() if t.is_floating_point()}
     if {p["name"]: tuple(p["shape"]) for p in history.layout} != expected:
         notes.append("snapshot del training saltati: hanno tensori diversi da quelli del modello")
         return
+    others = [n for n, t in state.items() if not t.is_floating_point()]
+    if others:
+        notes.append(f"snapshot: i tensori interi o booleani dello state_dict ({_few_names(others)}) non "
+                     "sono negli snapshot, che hanno solo quelli in virgola mobile: misurando gli snapshot "
+                     "restano quelli del modello misurato")
     if history.missing:
         notes.append(f"snapshot senza file, non misurati: step {', '.join(map(str, history.missing))}")
     for entry in history.snapshots:
         snap = copy.deepcopy(model)
-        snap.load_state_dict(snapshot_tensors(history, entry))
+        # Caricamento stretto: lo state_dict completo, con i tensori dello snapshot al posto dei loro.
+        snap.load_state_dict({**snap.state_dict(), **snapshot_tensors(history, entry)})
         yield entry, snap
 
 
-def _code_files(model: nn.Module) -> list[Path]:
+def code_files(model: nn.Module) -> list[Path]:
     """I file del progetto che definiscono le classi dei moduli del modello (gpt/model.py, gpt/block.py…).
 
+    Con ``code_sha256`` è l'impronta del codice scritta in ``benchmark.json`` (``model.code_files``,
+    ``model.code_sha256``); ``scripts/record_training.py`` la usa per riconoscere il codice del corso.
     Le classi di PyTorch (nn.Linear…) non contano: non sono codice del corso e la .venv, che sta
     dentro la cartella del progetto, le farebbe sembrare tali.
     """
@@ -945,7 +972,12 @@ def _code_files(model: nn.Module) -> list[Path]:
     return sorted(files)
 
 
-def _code_sha256(files: list[Path]) -> str | None:
+def code_sha256(files: list[Path]) -> str | None:
+    """sha256 dei file di ``code_files`` (nome relativo al progetto e contenuto), o None senza file.
+
+    Cambia con qualunque modifica di quei file, anche un commento: dice "codice diverso", non "calcolo
+    diverso".
+    """
     if not files:
         return None
     digest = hashlib.sha256()
@@ -953,6 +985,17 @@ def _code_sha256(files: list[Path]) -> str | None:
         name = file.relative_to(PROJECT_ROOT).as_posix().encode("utf-8")
         digest.update(name + b"\0" + file.read_bytes() + b"\0")
     return digest.hexdigest()
+
+
+# I nomi di prima, per chi li importava (scripts/record_training.py fino a questo cambiamento).
+_code_files = code_files
+_code_sha256 = code_sha256
+
+
+def _few_names(names: list[str], limit: int = 3) -> str:
+    """I primi nomi di un elenco per una nota: "a, b, c e altri 4"."""
+    more = f" e altri {len(names) - limit}" if len(names) > limit else ""
+    return ", ".join(names[:limit]) + more
 
 
 def _is_number(value: Any) -> bool:

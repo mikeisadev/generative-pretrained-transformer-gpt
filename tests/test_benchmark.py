@@ -47,8 +47,16 @@ from gpt.config import GPTConfig, TrainConfig
 from gpt.data import CharTokenizer, train_val_split
 from gpt.export import EXAMPLE_PROMPT, PROJECT_ROOT, WEBAPP_DATA_DIR
 from gpt.model import GPTLanguageModel
+from gpt import benchmark
 from gpt.recording import RecorderConfig, TrainingRecorder
-from gpt.runs import export_run, snapshot_tensors, weights_from_model, weights_from_state_dict
+from gpt.runs import (
+    export_run,
+    read_run_folder,
+    read_training_history,
+    snapshot_tensors,
+    weights_from_model,
+    weights_from_state_dict,
+)
 from gpt.training import save_checkpoint, train
 
 TEXT = ("ROMEO:\n" + EXAMPLE_PROMPT + " to be or not to be, that is the question.\n\n") * 12
@@ -239,6 +247,71 @@ def test_checkpoint_and_run_folder_give_the_same_benchmark(tmp_path, tokenizer):
     final = from_run["snapshots"][-1]["metrics"]  # lo snapshot finale è la copia float16 dei pesi
     assert final["loss"] == pytest.approx(from_run["metrics"]["loss"], abs=1e-2)
     assert from_run["snapshots"][0]["metrics"]["loss"] > final["loss"]  # il training ha imparato qualcosa
+
+
+class TokenBatchNorm(nn.BatchNorm1d):
+    """Una BatchNorm sui canali di (B, T, C): nello state_dict ha un tensore intero, num_batches_tracked."""
+
+    def forward(self, x):
+        return super().forward(x.transpose(1, 2)).transpose(1, 2)
+
+
+class BatchNormGPT(GPTLanguageModel):
+    """Il GPT del corso con una BatchNorm al posto di ln_f, come in un gpt/model.py modificato."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.ln_f = TokenBatchNorm(config.n_embd)
+
+
+def test_an_integer_buffer_does_not_stop_the_benchmark_or_its_snapshots(tmp_path, tokenizer, monkeypatch):
+    """Snapshot e run hanno solo i tensori in virgola mobile: num_batches_tracked non li fa più saltare."""
+    monkeypatch.setattr(benchmark, "GPTLanguageModel", BatchNormGPT)  # il "codice attuale" di build_model
+    torch.manual_seed(1337)
+    model = BatchNormGPT(small_model(tokenizer).config)
+    splits = train_val_split(torch.tensor(tokenizer.encode(TEXT)))
+    recorder_cfg = RecorderConfig(log_every=10, snapshot_steps=(0, 10), sample_length=10, eval_batch_size=4)
+    recorder = TrainingRecorder(tokenizer, splits.val, 8, recorder_cfg)
+    train(model, splits, 8, TrainConfig(batch_size=8, max_iters=20, eval_interval=10, eval_iters=2),
+          torch.device("cpu"), log=lambda _msg: None, callbacks=[recorder])
+    history = read_training_history(recorder.save(tmp_path / "trace").parent)
+    layout = {p["name"] for p in history.layout}
+    assert model.state_dict()["ln_f.num_batches_tracked"].item() > 0  # un contatore int64 vero
+    assert "ln_f.running_mean" in layout and "ln_f.num_batches_tracked" not in layout
+
+    # 1. il modello in memoria (scripts/record_training.py, una classe propria)
+    bench = benchmark_model(model, tokenizer, name="BatchNorm", source="memoria",
+                            validation=validation_text(TEXT), history=history, settings=QUICK)
+    assert [s["step"] for s in bench["snapshots"]] == [0, 10, 20]  # prima: [] e "snapshot ... saltati"
+    assert not any("saltati" in n for n in bench["notes"])
+    assert any("ln_f.num_batches_tracked" in n for n in bench["notes"])  # lo si dice
+    final = bench["snapshots"][-1]["metrics"]["loss"]  # lo snapshot finale è la copia float16 dei pesi
+    assert final == pytest.approx(bench["metrics"]["loss"], abs=1e-2)
+    assert bench["snapshots"][0]["metrics"]["loss"] > final  # i pesi di ogni snapshot, statistiche comprese
+
+    # 2. il run esportato (export_run.py --benchmark, benchmark_path): build_model lo ricostruisce
+    weights = weights_from_model(model, vocab=tokenizer.chars)
+    assert "ln_f.num_batches_tracked" in weights.skipped  # l'export salta il contatore
+    export_run(weights, tmp_path / "run", name="BatchNorm", training_dir=tmp_path / "trace")
+    rebuilt = build_model(read_run_folder(tmp_path / "run"))  # prima: ArchitectureMismatch ("mancano …")
+    assert rebuilt.state_dict()["ln_f.num_batches_tracked"].item() == 0  # il valore iniziale del codice
+    assert torch.equal(rebuilt.ln_f.running_var, model.ln_f.running_var)  # pesi del run, statistiche comprese
+    from_run = benchmark_path(tmp_path / "run", text=TEXT, excerpt_path=None, settings=QUICK)
+    # in eval la BatchNorm usa le statistiche (nel run), non il contatore: i numeri del modello in memoria
+    assert from_run["metrics"]["loss"] == pytest.approx(bench["metrics"]["loss"], abs=1e-6)
+    assert [s["step"] for s in from_run["snapshots"]] == [0, 10, 20]
+    assert any(n.startswith("tensori interi o booleani che il run non contiene (ln_f.num_batches_tracked)")
+               for n in from_run["notes"])
+
+
+def test_the_code_fingerprint_is_public_and_keeps_its_old_names():
+    """record_training.py importa code_files e code_sha256; i nomi privati restano per chi li usava."""
+    assert benchmark._code_files is benchmark.code_files and benchmark._code_sha256 is benchmark.code_sha256
+    files = benchmark.code_files(small_model(CharTokenizer.from_text(TEXT)))
+    assert [f.relative_to(PROJECT_ROOT).as_posix() for f in files] == [
+        "gpt/attention.py", "gpt/block.py", "gpt/feedforward.py", "gpt/model.py"]
+    digest = benchmark.code_sha256(files)
+    assert len(digest) == 64 and benchmark.code_sha256([]) is None
 
 
 def test_benchmark_needs_the_current_architecture(tmp_path, tokenizer):

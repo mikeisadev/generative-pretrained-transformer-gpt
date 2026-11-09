@@ -1,12 +1,14 @@
 """Training, checkpoint e inventario dei pesi."""
 
+import os
+
 import pytest
 import torch
 
 from gpt.config import GPTConfig, TrainConfig
 from gpt.data import CharTokenizer, train_val_split
 from gpt.model import GPTLanguageModel
-from gpt.training import load_checkpoint, save_checkpoint, train
+from gpt.training import CHECKPOINT_FORMAT_VERSION, load_checkpoint, save_checkpoint, train
 from gpt.weights import count_by_prefix, edited_weight, next_token_distribution, weight_inventory
 
 TEXT = "to be or not to be, that is the question. " * 40
@@ -39,6 +41,73 @@ def test_checkpoint_roundtrip(tmp_path, tiny_model, tokenizer):
     tiny_model.eval()
     assert torch.allclose(tiny_model(idx)[0], loaded(idx)[0])
     assert loaded_tok.chars == tokenizer.chars
+
+
+def test_checkpoint_bytes_are_those_of_a_direct_torch_save(tmp_path, tiny_model, tokenizer):
+    """La scrittura atomica non cambia il file: torch.save mette il nome del file nell'archivio."""
+    save_checkpoint(tmp_path / "atomico" / "gpt.pt", tiny_model, tokenizer)
+    (tmp_path / "diretto").mkdir()
+    payload = {"format_version": CHECKPOINT_FORMAT_VERSION, "config": tiny_model.config.to_dict(),
+               "chars": tokenizer.chars, "state_dict": tiny_model.state_dict()}
+    torch.save(payload, tmp_path / "diretto" / "gpt.pt")  # com'era save_checkpoint prima
+    assert (tmp_path / "atomico" / "gpt.pt").read_bytes() == (tmp_path / "diretto" / "gpt.pt").read_bytes()
+    assert sorted(os.listdir(tmp_path / "atomico")) == ["gpt.pt"]  # nessun temporaneo rimasto
+
+
+def test_checkpoint_replaces_a_symlink_instead_of_following_it(tmp_path, tiny_model, tokenizer):
+    outside = tmp_path / "fuori" / "segreto.pt"
+    outside.parent.mkdir()
+    outside.write_bytes(b"non toccare")
+    folder = tmp_path / "checkpoints"
+    folder.mkdir()
+    (folder / "gpt.pt").symlink_to(outside)
+    (folder / "rotto.pt").symlink_to(tmp_path / "fuori" / "non-esiste.pt")  # anche uno che non punta a niente
+
+    save_checkpoint(folder / "gpt.pt", tiny_model, tokenizer)
+    save_checkpoint(str(folder / "rotto.pt"), tiny_model, tokenizer)  # anche un percorso come testo
+    assert outside.read_bytes() == b"non toccare"  # il file fuori dalla cartella è intatto
+    assert sorted(p.name for p in (tmp_path / "fuori").iterdir()) == ["segreto.pt"]
+    for name in ("gpt.pt", "rotto.pt"):
+        assert not (folder / name).is_symlink() and (folder / name).is_file()  # il collegamento è un file
+        assert load_checkpoint(folder / name)[1].chars == tokenizer.chars
+    assert sorted(p.name for p in folder.iterdir()) == ["gpt.pt", "rotto.pt"]
+
+
+def test_an_interrupted_save_keeps_the_previous_checkpoint(tmp_path, tiny_model, tokenizer, monkeypatch):
+    path = tmp_path / "gpt.pt"
+    save_checkpoint(path, tiny_model, tokenizer)
+    before = path.read_bytes()
+
+    def broken_save(obj, file, *args, **kwargs):  # scrive metà file e si interrompe (Ctrl-C, disco pieno…)
+        with open(file, "wb") as handle:
+            handle.write(before[: len(before) // 2])
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(torch, "save", broken_save)
+    with pytest.raises(KeyboardInterrupt):
+        save_checkpoint(path, tiny_model, tokenizer)
+    assert path.read_bytes() == before  # il checkpoint di prima è intero
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["gpt.pt"]  # e il file a metà è sparito
+
+
+def test_a_folder_is_not_a_checkpoint(tmp_path, tiny_model, tokenizer):
+    with pytest.raises(IsADirectoryError, match="è una cartella"):
+        save_checkpoint(tmp_path, tiny_model, tokenizer)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="permessi e lunghezza dei nomi alla POSIX")
+def test_overwriting_keeps_the_permissions_and_long_names_work(tmp_path, tiny_model, tokenizer):
+    """Come torch.save sul posto: un checkpoint privato resta privato; e un nome lungo quanto il disco
+    permette si salva (prima "File name too long": la cartella temporanea aveva il nome intero + 14 caratteri)."""
+    path = tmp_path / "privato.pt"
+    save_checkpoint(path, tiny_model, tokenizer)
+    os.chmod(path, 0o600)
+    save_checkpoint(path, tiny_model, tokenizer)
+    assert path.stat().st_mode & 0o777 == 0o600
+    long = tmp_path / ("x" * (os.pathconf(tmp_path, "PC_NAME_MAX") - 3) + ".pt")
+    save_checkpoint(long, tiny_model, tokenizer)
+    assert load_checkpoint(long)[1].chars == tokenizer.chars
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(["privato.pt", long.name])  # nessun temporaneo
 
 
 def test_inventory_separates_learned_weights_from_fixed_buffers():

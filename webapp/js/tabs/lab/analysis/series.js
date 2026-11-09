@@ -9,7 +9,9 @@
  *   groupFamilies(trace)         → famiglie di gruppi (attention dei blocchi, …) per i grafici per gruppo
  *   snapshotSeries(trace, "top1") → [[step, valore]…]                     (metriche degli snapshot)
  *   attentionEntropy(trace)      → heatmap (blocco·head × step)
+ *   missingAttentionText(trace)  → perché la heatmap non c'è (con la nota del trace), o null
  */
+import { isolate, traceNotes } from "../runs/describe.js";
 
 const MAX_POINTS = 200_000; // un trace enorme o malevolo non deve bloccare la pagina
 
@@ -81,16 +83,53 @@ const OUTSIDE = { token_embedding: "embedding dei token", position_embedding: "e
 const MAX_SERIES = 8; // la palette dei grafici ha 8 colori: oltre servirebbero grigi indistinguibili
 
 /**
+ * La famiglia di un gruppo che sta in un blocco numerato: il nome con "*" al posto dell'indice del blocco
+ * (o del contenitore numerato), cioè del primo livello fatto solo di cifre. Le cifre DENTRO i nomi dei
+ * moduli restano: blocks.0.norm1 e blocks.0.norm2 sono due famiglie, ln1 non è "il blocco 1".
+ * @returns {{id: string, index: string}|null} null se il gruppo non ha un livello numerato
+ */
+export function blockFamily(group) {
+  const parts = group.split(".");
+  const i = parts.findIndex((p) => /^\d+$/.test(p));
+  if (i === -1) return null;
+  const index = parts[i];
+  parts[i] = "*";
+  return { id: parts.join("."), index };
+}
+
+/**
+ * La famiglia di un gruppo dentro un modulo senza indice (block.ln1, block.sa… di un blocco solo riusato;
+ * transformer.wte): il primo livello del nome, con il resto come etichetta della serie. null per un gruppo
+ * di un livello solo (norm_f) o con un livello numerato (quello è di `blockFamily`).
+ * @returns {{id: string, label: string}|null}
+ */
+export function moduleFamily(group) {
+  const dot = group.indexOf(".");
+  if (dot <= 0 || dot === group.length - 1 || blockFamily(group)) return null;
+  return { id: group.slice(0, dot), label: group.slice(dot + 1) };
+}
+
+/**
  * I gruppi del trace raccolti in famiglie, per grafici leggibili (al più 8 serie ciascuno): per il GPT
  * del corso "attention", "feed-forward", "LayerNorm" (una serie per blocco) e "fuori dai blocchi"
- * (embedding, ln_f, lm_head). Per nomi sconosciuti la famiglia è il nome con i numeri al posto di "*"
- * (transformer.h.*.attn), i gruppi senza numeri vanno in "fuori dai blocchi".
+ * (embedding, ln_f, lm_head). Per nomi sconosciuti la famiglia è il nome con "*" al posto dell'indice del
+ * blocco (transformer.h.*.attn, blocks.*.norm1: una serie per blocco, `blockFamily`); i gruppi di un
+ * modulo senza indice, se sono almeno due, hanno una famiglia loro con il nome del modulo (un blocco solo
+ * riusato: "block" con ln1, sa, ln2, ffwd, `moduleFamily`), come i blocchi numerati; gli altri gruppi
+ * senza un livello numerato (norm_f, ln1) vanno con quelli fuori dai blocchi, e allora la famiglia si
+ * chiama "fuori dai blocchi numerati".
  * @returns {{id: string, label: string, members: {group: string, label: string}[], truncated: number}[]}
  */
 export function groupFamilies(trace) {
   const groups = list(trace?.groups).filter((g) => typeof g === "string" && g.length <= 200);
   const families = new Map();
   const outside = { id: "outside", label: "fuori dai blocchi", members: [], truncated: 0 };
+  // Quanti gruppi ha ogni modulo senza indice: un modulo con un gruppo solo non merita due grafici suoi.
+  const perModule = new Map();
+  for (const group of groups) {
+    const module = moduleFamily(group);
+    if (module) perModule.set(module.id, (perModule.get(module.id) ?? 0) + 1);
+  }
   for (const group of groups) {
     const course = /^blocks\.(\d+)\.(attention|ffwd|layernorm)$/.exec(group);
     if (course) {
@@ -101,11 +140,15 @@ export function groupFamilies(trace) {
       outside.members.push({ group, label: OUTSIDE[group] });
       continue;
     }
-    const numbers = group.match(/\d+/g);
-    if (numbers) add(families, group.replace(/\d+/g, "*"), group.replace(/\d+/g, "*"), { group, label: numbers.length === 1 ? `blocco ${numbers[0]}` : numbers.join(".") });
+    const family = blockFamily(group);
+    const module = family ? null : moduleFamily(group);
+    // "module:" nell'id: un modulo che si chiama come una famiglia del corso (ffwd) resta una famiglia a parte
+    if (family) add(families, family.id, family.id, { group, label: `blocco ${family.index}` });
+    else if (module && perModule.get(module.id) > 1) add(families, `module:${module.id}`, module.id, { group, label: module.label });
     else outside.members.push({ group, label: group });
   }
   const out = [...families.values()];
+  if (outside.members.some((m) => !Object.hasOwn(OUTSIDE, m.group))) outside.label = "fuori dai blocchi numerati";
   if (outside.members.length) out.push(outside);
   for (const f of out) {
     if (f.members.length > MAX_SERIES) {
@@ -169,6 +212,26 @@ export function attentionEntropy(trace) {
   const rowLabels = [];
   for (let l = 0; l < layers; l++) for (let h = 0; h < heads; h++) rowLabels.push(`b${l}h${h}`); // corte: il margine delle etichette della heatmap è stretto
   return { rows, cols, values, rowLabels, colLabels: snaps.map((s) => String(s.step)), steps: snaps.map((s) => s.step) };
+}
+
+const ATTENTION_NOTE = /^attention\s*:\s*/i; // le note di gpt/recording.py sull'attention cominciano così
+
+/**
+ * Perché la heatmap dell'entropia dell'attention non c'è (attentionEntropy(trace) è null), in parole per
+ * lo studente e con le note del trace che lo spiegano («attention: …» di gpt/recording.py, per esempio
+ * un'attention con F.scaled_dot_product_attention che non espone le probabilità), tra «» e isolate
+ * (`isolate`). null se il trace non c'è o l'entropia c'è. Testo semplice: le note vengono dal file, chi lo
+ * mostra usa textContent.
+ */
+export function missingAttentionText(trace) {
+  if (!trace || typeof trace !== "object" || attentionEntropy(trace)) return null;
+  // prima il fatto (non è stata misurata), poi dove lo si vede nel file, poi il perché con le parole del trace
+  const missing = "la registrazione del training non ha misurato l'entropia dell'attention (in trace.json manca attention_entropy)";
+  // le note tra «» si distinguono dalla frase; isolate: un U+202E in una nota non rovescia il resto
+  const notes = traceNotes(trace).filter((n) => ATTENTION_NOTE.test(n)).map((n) => `«${isolate(n.replace(ATTENTION_NOTE, ""))}»`);
+  if (notes.length) return `${missing} e la sua nota dice perché: ${notes.slice(0, 3).join(" ")}`;
+  if (!list(trace.snapshots).length) return `${missing}: il trace non ha snapshot, e l'entropia si misura a ogni snapshot.`;
+  return `${missing} e non dice perché: di solito il modello non espone il metodo attention_weights (capture_attention in gpt/export.py), oppure il trace viene da un registratore più vecchio.`;
 }
 
 /**

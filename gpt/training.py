@@ -132,18 +132,48 @@ def train(
     return history
 
 
-def save_checkpoint(path: Path, model: GPTLanguageModel, tokenizer: CharTokenizer) -> None:
-    """Salva pesi, configurazione e vocabolario: tutto ciò che serve per rigenerare testo."""
+def save_checkpoint(path: Path | str, model: GPTLanguageModel, tokenizer: CharTokenizer) -> None:
+    """Salva pesi, configurazione e vocabolario: tutto ciò che serve per rigenerare testo.
+
+    La scrittura è atomica e non segue i collegamenti simbolici, come quelle di ``gpt/recording.py``
+    (``TrainingRecorder.save``): il file nasce in una cartella temporanea nuova accanto a ``path`` e
+    poi ne prende il posto con ``os.replace``. Un'interruzione lascia intero il checkpoint di prima, e
+    un collegamento simbolico che si chiama come il checkpoint viene sostituito, non seguito: niente si
+    scrive fuori dalla cartella scelta. Il file temporaneo ha lo STESSO nome del checkpoint perché
+    ``torch.save`` mette il nome del file dentro l'archivio: così i byte sono identici a quelli di un
+    ``torch.save(…, path)`` diretto. Il file nuovo ha i permessi del checkpoint che sostituisce, come
+    quando ``torch.save`` lo riscriveva sul posto (un checkpoint privato resta privato), altrimenti quelli
+    normali di un file appena creato.
+    """
+    # Import qui e non in cima al file: una riga in più lassù sposterebbe il codice di train(), che la
+    # web app mostra con i suoi numeri di riga (webapp/data/model.json, tests/test_webapp_data.py).
+    import os
+    import shutil
+    import tempfile
+
+    path = Path(path)
+    if path.is_dir() and not path.is_symlink():
+        raise IsADirectoryError(f"{path} è una cartella: il checkpoint è un file (es. {path / 'gpt.pt'})")
+    payload = {
+        "format_version": CHECKPOINT_FORMAT_VERSION,
+        "config": model.config.to_dict(),
+        "chars": tokenizer.chars,
+        "state_dict": model.state_dict(),
+    }
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "format_version": CHECKPOINT_FORMAT_VERSION,
-            "config": model.config.to_dict(),
-            "chars": tokenizer.chars,
-            "state_dict": model.state_dict(),
-        },
-        path,
-    )
+    # Solo un file vero: di un collegamento simbolico non si leggono i permessi del file a cui punta.
+    old = path.lstat() if path.is_file() and not path.is_symlink() else None
+    # mkdtemp crea una cartella nuova, solo nostra (0700): lì dentro il nome non può essere un
+    # collegamento preparato da altri, e la cartella sta sullo stesso disco, quindi os.replace è atomico.
+    # Il prefisso è corto: con il nome intero un checkpoint di 250 caratteri darebbe "File name too long".
+    staging = Path(tempfile.mkdtemp(prefix=f".{path.name[:40]}.", suffix=".tmp", dir=path.parent))
+    try:
+        torch.save(payload, staging / path.name)
+        if old is not None:
+            os.chmod(staging / path.name, old.st_mode & 0o777)  # solo i permessi rwx, mai setuid
+        (staging / path.name).replace(path)  # os.replace: la voce della cartella cambia in un colpo solo
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)  # dopo os.replace è vuota; dopo un errore, il file a metà
 
 
 def load_checkpoint(

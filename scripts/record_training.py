@@ -50,9 +50,9 @@ from typing import Any, NoReturn
 import torch
 import torch.nn as nn
 
-# _code_files e _code_sha256 sono l'impronta del codice dei moduli che gpt/benchmark.py scrive in
+# code_files e code_sha256 sono l'impronta del codice dei moduli che gpt/benchmark.py scrive in
 # benchmark.json: usare le stesse funzioni garantisce che il confronto con builtin.json sia alla pari.
-from gpt.benchmark import BENCHMARK_DATA_DIR, BUILTIN_FILE, _code_files, _code_sha256
+from gpt.benchmark import BENCHMARK_DATA_DIR, BUILTIN_FILE, code_files, code_sha256
 from gpt.config import GPTConfig, TrainConfig
 from gpt.data import CharTokenizer, load_text, train_val_split
 from gpt.device import resolve_device
@@ -230,8 +230,8 @@ def reference_differences(
         to_dict = getattr(getattr(model, "config", None), "to_dict", None)
         architecture += _changes("config", to_dict() if callable(to_dict) else {}, course.get("config") or {})
     if course_code is not None:
-        files = _code_files(model)
-        if _code_sha256(files) != course_code:
+        files = code_files(model)
+        if code_sha256(files) != course_code:
             names = ", ".join(f.relative_to(PROJECT_ROOT).as_posix() for f in files) or "nessun file"
             architecture.append(
                 f"codice dei moduli del modello ({names}) diverso da quello del GPT del corso misurato in "

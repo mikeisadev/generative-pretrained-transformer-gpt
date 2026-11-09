@@ -11,6 +11,7 @@
  * cambiando i run (A blu, B arancione quando le serie sono due).
  */
 import { prefersReducedMotion } from "../../../core/dom.js";
+import { isolate } from "../runs/describe.js";
 import { CHARTS, EXAMPLE_CONTINUATIONS } from "./content.js";
 import { fixed, int, num, pct } from "./format.js";
 import { barData, logitPairs, sharedIds } from "./probe.js";
@@ -25,13 +26,17 @@ import {
   isConstant,
   lossSeries,
   metricSeries,
+  missingAttentionText,
   movingAverage,
   pointAt,
   snapshotSeries,
 } from "./series.js";
 
 const SURPRISAL_WINDOW = 64;
-const SECTIONS = { training: "lab-an-training", groups: "lab-an-groups", snapshots: "lab-an-snapshots", prompt: "lab-an-prompt", bench: "lab-an-bench" };
+const SECTIONS = { training: "lab-an-training", groups: "lab-an-groups", snapshots: "lab-an-snapshots", attention: "lab-an-attention", prompt: "lab-an-prompt", bench: "lab-an-bench" };
+const ATTENTION_TITLE = "Entropia dell'attention di ogni head";
+const ATTENTION_DESC = "Misurata a ogni snapshot sullo stesso batch fisso, quando il modello espone le probabilità di attention (il metodo attention_weights, come Head in gpt/attention.py).";
+const HEAT_DESC = "Una riga per head (b1h2 = blocco 1, head 2), una colonna per snapshot. Chiaro = l'head guarda molti token insieme, scuro = si concentra su pochi.";
 const percentPoints = (points) => points.map(([x, y]) => [x, y * 100]);
 const pctFormat = (v) => `${v.toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
 
@@ -54,8 +59,9 @@ export function installAnalysisCharts(tab, { bench }) {
   const snapAcc = snaps.chart("acc", { type: "line", title: "Accuratezza: top-1 e top-5", description: "Quante volte il carattere giusto è il primo (top-1) o tra i primi 5 (top-5) della distribuzione prevista.", xLabel: "step", yLabel: "% giuste", format: pctFormat });
   const snapEntropy = snaps.chart("entropy", { type: "line", title: "Entropia della previsione", description: "Quanto il modello è indeciso sul prossimo carattere (nat): all'inizio vicino a ln 65 = 4,17 (tira a caso), poi scende.", xLabel: "step", yLabel: "entropia (nat)" });
   const example = snaps.chart("example", { type: "line", title: "Il carattere giusto della frase d'esempio", description: "", xLabel: "step", yLabel: "probabilità", percent: true });
-  const attA = snaps.chart("att-a", { type: "heatmap", title: "Entropia dell'attention di ogni head · A", description: "Una riga per head (b1h2 = blocco 1, head 2), una colonna per snapshot. Chiaro = l'head guarda molti token insieme, scuro = si concentra su pochi.", xLabel: "step", yLabel: "head" });
-  const attB = snaps.chart("att-b", { type: "heatmap", title: "Entropia dell'attention di ogni head · B", description: "Come sopra, per il run B.", xLabel: "step", yLabel: "head" });
+  // Le heatmap in una sezione loro, ricostruita quando cambia quali ci sono (drawAttention): dove il
+  // trace non ha l'entropia, al posto di una heatmap vuota la descrizione della sezione dice perché.
+  const attention = charts.section(SECTIONS.attention, ATTENTION_TITLE, ATTENTION_DESC);
   const prompt = charts.section(SECTIONS.prompt, CHARTS.promptTitle, CHARTS.promptDesc);
   const probsA = prompt.chart("probs-a", { type: "bar", title: "Probabilità del prossimo carattere · A", description: "", percent: true, xLabel: "carattere", yLabel: "probabilità", highlightLabel: "il più probabile" });
   const probsB = prompt.chart("probs-b", { type: "bar", title: "Probabilità del prossimo carattere · B", description: "Gli stessi caratteri del grafico di A, nello stesso ordine: le barre si confrontano a colpo d'occhio.", percent: true, xLabel: "carattere", yLabel: "probabilità", highlightLabel: "il più probabile" });
@@ -73,7 +79,8 @@ export function installAnalysisCharts(tab, { bench }) {
 
   // ---------------------------------------------------------------- dati dai trace
   const traceOf = (id) => (id ? state.run(id)?.trace ?? null : null);
-  const nameOf = (id) => state.entry(id)?.name ?? "";
+  // il nome viene da run.json e finisce dentro frasi: isolato, così un U+202E non rovescia il resto
+  const nameOf = (id) => isolate(state.entry(id)?.name ?? "");
   /** A e B sono due momenti dello stesso training: una storia sola, B è un punto su quella curva. */
   const sameRun = () => Boolean(state.runB) && state.runB === state.runA;
   /** Lo step di B sull'asse x dei grafici (i pesi finali sono l'ultimo step del training). */
@@ -175,15 +182,7 @@ export function installAnalysisCharts(tab, { bench }) {
     snapAcc.setData({ series: [...abSeries(top1A, [], "top-1"), ...abSeries(top5A, [], "top-5"), ...abSeries([], top1B, "top-1"), ...abSeries([], top5B, "top-5")] });
     snapEntropy.setData({ series: abSeries(...snap("entropy")) });
     drawExample(ta, tb);
-    drawHeat(attA, ta);
-    // stesso run: l'entropia di B è la stessa heatmap di A (una colonna per snapshot)
-    if (sameRun()) {
-      attB.clear();
-      snaps.chart("att-b", { type: "heatmap", title: "Entropia dell'attention di ogni head · B", description: "B è un momento dello stesso training di A: la sua colonna è nella heatmap di A." });
-    } else {
-      drawHeat(attB, tb);
-      snaps.chart("att-b", { type: "heatmap", title: "Entropia dell'attention di ogni head · B", description: tb ? "Come sopra, per il run B." : "B non ha la storia del training (o non c'è B)." });
-    }
+    drawAttention(ta, tb);
   }
 
   /** La frase d'esempio del training: la probabilità del carattere che viene davvero dopo (se lo sappiamo). */
@@ -212,10 +211,40 @@ export function installAnalysisCharts(tab, { bench }) {
     example.setData({ series: abSeries(pa, pb) });
   }
 
-  function drawHeat(chart, trace) {
-    const h = attentionEntropy(trace);
-    if (!h) chart.clear();
-    else chart.setData({ rows: h.rows, cols: h.cols, values: h.values, rowLabels: h.rowLabels, colLabels: h.colLabels });
+  // ---------------------------------------------------------------- entropia dell'attention
+  let attentionCards = ""; // quali heatmap ha la sezione ora: "AB", "A", "B" o ""
+
+  /** Le heatmap di A e di B che ci sono; per chi non ce l'ha, il perché nella descrizione della sezione. */
+  function drawAttention(ta, tb) {
+    const same = sameRun(); // stesso run: la colonna di B è nella heatmap di A
+    const ha = attentionEntropy(ta);
+    const hb = same ? null : attentionEntropy(tb);
+    const cards = `${ha ? "A" : ""}${hb ? "B" : ""}`;
+    if (cards !== attentionCards) {
+      attention.clear(); // l'unico modo di togliere una card: poi si ricreano quelle che servono
+      attentionCards = cards;
+    }
+    if (ha) heat("att-a", "A", HEAT_DESC, ha);
+    if (hb) heat("att-b", "B", ha ? "Come sopra, per il run B." : HEAT_DESC, hb);
+    charts.section(SECTIONS.attention, ATTENTION_TITLE, attentionText(ta, tb, ha, hb, same));
+  }
+
+  function heat(id, side, description, h) {
+    const chart = attention.chart(id, { type: "heatmap", title: `${ATTENTION_TITLE} · ${side}`, description, xLabel: "step", yLabel: "head" });
+    chart.setData({ rows: h.rows, cols: h.cols, values: h.values, rowLabels: h.rowLabels, colLabels: h.colLabels });
+  }
+
+  /** La descrizione della sezione: che cosa misura e, per A e per B senza heatmap, perché manca. */
+  function attentionText(ta, tb, ha, hb, same) {
+    if (!ta && !tb) return CHARTS.noTrace;
+    const parts = [ATTENTION_DESC];
+    const why = (side, id, trace) => `Nessuna heatmap per ${side} (${nameOf(id)}): ${missingAttentionText(trace)}`;
+    if (!ta) parts.push("A non ha la storia del training (trace.json).");
+    else if (!ha) parts.push(why("A", state.runA, ta));
+    if (same) parts.push(ha ? "B è un momento dello stesso training di A: la sua colonna è nella heatmap di A." : "B è un momento dello stesso training di A: vale lo stesso.");
+    else if (state.runB && !tb) parts.push("B non ha la storia del training (trace.json).");
+    else if (tb && !hb) parts.push(why("B", state.runB, tb));
+    return parts.join(" ");
   }
 
   // ---------------------------------------------------------------- benchmark

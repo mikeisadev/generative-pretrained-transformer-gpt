@@ -119,6 +119,77 @@ export function originText(entry, run) {
   return `${where}${files.length ? ` (${few(files, 2)})` : ""}${saved}`;
 }
 
+/**
+ * Un testo dei file dello studente (nome di un run, nota) DENTRO una frase: tra FSI e PDI (U+2068 … U+2069),
+ * i caratteri invisibili che ne isolano la direzione di scrittura. Senza, un U+202E (da destra a sinistra)
+ * nel nome rovescerebbe anche il resto della frase ("ilanif isep" al posto di "pesi finali"). Un testo da
+ * solo in un elemento (una voce dell'elenco delle note, il titolo della scheda) non ne ha bisogno.
+ */
+export const isolate = (text) => `\u2068${text}\u2069`;
+
+/** Il prefisso delle note di trace.json copiate in run.json (TRAINING_NOTE_PREFIX di gpt/runs.py). */
+export const TRAINING_NOTE_PREFIX = "storia del training: ";
+const MAX_NOTE_CHARS = 2000; // come parseRunInfo (shared/weights/formats.js) e MAX_TEXT_CHARS di gpt/runs.py
+const MAX_TRACE_NOTES = 20; // come MAX_TRAINING_NOTES di gpt/runs.py
+const CARD_NOTES = 12;
+
+// Caratteri di controllo e spazi di Python (str.split()): gli stessi che training_notes di gpt/runs.py
+// toglie scrivendo run.json, così una nota copiata là si riconosce qui (e non compare due volte).
+const BLANKS = /[\u0000-\u001f\u007f\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000 ]+/g;
+
+/**
+ * Una riga semplice: uno spazio al posto di a capo, tabulazioni, caratteri di controllo, e "�" al posto dei
+ * surrogati spaiati (un "\ud800" scritto nel JSON), come _one_line di gpt/runs.py.
+ */
+const oneLine = (text) => wellFormed(text).replace(BLANKS, " ").trim();
+// toWellFormed (ES2024) manca nei browser più vecchi: lì il testo resta com'è (textContent lo mostra lo stesso).
+const wellFormed = (text) => (typeof text.toWellFormed === "function" ? text.toWellFormed() : text);
+
+/** Le stringhe di una lista presa da un file (o una stringa sola), accorciate e su una riga. */
+function texts(value, max) {
+  const items = typeof value === "string" ? [value] : Array.isArray(value) ? value.slice(0, 10 * max) : [];
+  const out = [];
+  for (const item of items) {
+    if (typeof item !== "string") continue;
+    // prima si taglia, poi si pulisce: un testo enorme non passa intero dalla regex
+    const text = oneLine(item.slice(0, 2 * MAX_NOTE_CHARS)).slice(0, MAX_NOTE_CHARS);
+    if (text) out.push(text);
+    if (out.length === max) break;
+  }
+  return out;
+}
+
+/**
+ * Le note di trace.json (gpt/recording.py: gruppi nuovi, pesi condivisi, attention saltata, valori non
+ * finiti), senza prefisso. Il trace è un file dello studente: solo testi non vuoti, accorciati, al più 20.
+ */
+export function traceNotes(trace) {
+  return texts(trace?.notes, MAX_TRACE_NOTES);
+}
+
+/**
+ * Le note della scheda di un run, in ordine: quelle di run.json (dell'autore, della storia del training,
+ * dell'export), poi le note di trace.json che run.json non riporta già (un run esportato prima che
+ * export_run le copiasse, o una cartella con il solo trace) con il prefisso «storia del training: », poi
+ * gli avvisi del caricamento. Testo semplice: chi le mostra usa textContent.
+ * @returns {{notes: string[], hidden: number}} `hidden` = quante restano fuori dalle prime `limit`
+ */
+export function runNotes(run, { limit = CARD_NOTES } = {}) {
+  const fromInfo = texts(run?.meta?.notes, 200);
+  const fromTrace = traceNotes(run?.trace)
+    .map((n) => `${TRAINING_NOTE_PREFIX}${n}`)
+    .filter((n) => !fromInfo.some((info) => sameNote(info, n)));
+  const all = [...fromInfo, ...fromTrace, ...texts(run?.meta?.warnings, 200)];
+  return { notes: all.slice(0, limit), hidden: Math.max(0, all.length - limit) };
+}
+
+/** `copy` (da run.json) è la nota `note`, anche accorciata da chi l'ha scritta o letta (testi lunghi). */
+function sameNote(copy, note) {
+  if (copy === note) return true;
+  const cut = copy.replace(/…$/, "");
+  return cut.length >= MAX_NOTE_CHARS / 2 && note.startsWith(cut);
+}
+
 /** Il training del run in una riga: snapshot, durata, loss finali (dai dati, se ci sono). */
 export function trainingText(run) {
   const steps = run.steps ?? [];

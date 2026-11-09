@@ -19,7 +19,10 @@ from gpt.model import GPTLanguageModel
 from gpt.recording import RecorderConfig, TrainingRecorder
 from gpt.runs import (
     BENCHMARK_FILE,
+    MAX_TEXT_CHARS,
+    MAX_TRAINING_NOTES,
     RUN_FILE,
+    TRAINING_NOTE_PREFIX,
     display_path,
     export_run,
     module_tree,
@@ -28,6 +31,7 @@ from gpt.runs import (
     read_training_history,
     readable_json,
     slugify,
+    training_notes,
     weights_from_model,
     weights_from_state_dict,
 )
@@ -258,6 +262,63 @@ def test_training_history_is_copied_and_matched_to_the_weights(tmp_path, recorde
     different = weights_from_state_dict({"w": torch.ones(3)})
     info = export_run(different, tmp_path / "diverso", name="Diverso", training_dir=recorded["trace"])
     assert any("tensori diversi" in n for n in info["notes"])
+
+
+def test_trace_notes_go_into_run_json_after_the_author_notes(tmp_path, recorded):
+    """Le note della registrazione (gpt/recording.py) si leggono anche nella scheda del run."""
+    trace_file = recorded["trace"] / "trace.json"
+    trace = json.loads(trace_file.read_text(encoding="utf-8"))
+    assert "notes" not in trace  # il GPT del corso non ne ha: run.json resta com'era
+    weights = read_checkpoint(recorded["ckpt"])
+    plain = export_run(weights, tmp_path / "corso", name="Corso", training_dir=recorded["trace"])
+    assert not any(n.startswith(TRAINING_NOTE_PREFIX) for n in plain["notes"])
+
+    trace["notes"] = ["attention: nessun modulo del modello espone il metodo attention_weights",
+                      "gruppi: 2 parametri\tnuovi\n(norm1)"]
+    trace_file.write_text(json.dumps(trace), encoding="utf-8")
+    other = weights_from_model(small_model(CharTokenizer.from_text(TEXT), seed=7))  # + un avviso dell'export
+    info = export_run(other, tmp_path / "run", name="Con note", notes=["mia nota"],
+                      training_dir=recorded["trace"])
+    assert info["notes"][:3] == ["mia nota",
+                                 "storia del training: attention: nessun modulo del modello espone il metodo "
+                                 "attention_weights",
+                                 "storia del training: gruppi: 2 parametri nuovi (norm1)"]
+    assert any("non coincide" in n for n in info["notes"][3:])  # poi gli avvisi dell'export, come prima
+    assert json.loads((tmp_path / "run" / RUN_FILE).read_text(encoding="utf-8"))["notes"] == info["notes"]
+    # trace.json resta la copia esatta: le note pulite stanno solo in run.json
+    assert (tmp_path / "run" / "training" / "trace.json").read_bytes() == trace_file.read_bytes()
+
+
+def test_trace_notes_are_read_as_untrusted_text():
+    assert training_notes({}) == [] and training_notes({"notes": None}) == []
+    assert training_notes({"notes": {"a": 1}}) == [] and training_notes({"notes": [1, None, "", "  "]}) == []
+    assert training_notes({"notes": "una sola"}) == [f"{TRAINING_NOTE_PREFIX}una sola"]
+    assert training_notes({"notes": ["a\x00b\x1b[31m"]}) == [f"{TRAINING_NOTE_PREFIX}a b [31m"]
+    long = training_notes({"notes": ["x" * 5000]})[0]
+    assert len(long) == MAX_TEXT_CHARS and long.endswith("…")  # il limite che il browser legge
+    many = training_notes({"notes": [f"nota {i}" for i in range(MAX_TRAINING_NOTES + 5)]})
+    assert len(many) == MAX_TRAINING_NOTES + 1
+    assert many[-1] == f"{TRAINING_NOTE_PREFIX}altre 5 note in training/trace.json"
+    # un surrogato spaiato ("\ud800" nel JSON) non si scrive in UTF-8: diventa "�"; le coppie valide restano
+    assert training_notes(json.loads('{"notes": ["a \\ud800 b \\udfff c \\ud83d\\ude00"]}')) == [
+        f"{TRAINING_NOTE_PREFIX}a \ufffd b \ufffd c \U0001f600"]
+
+
+def test_strange_trace_notes_never_leave_a_run_half_written(tmp_path, recorded):
+    """Prima: un surrogato spaiato in una nota del trace faceva fallire run.json DOPO pesi e storia, e
+    run.json restava vuoto (0 byte) accanto ai pesi; ora il run è intero e la nota ha "�"."""
+    trace_file = recorded["trace"] / "trace.json"
+    text = trace_file.read_text(encoding="utf-8")  # JSON scritto a mano: json.dumps non darebbe "\ud800"
+    strange = ',"device":"cpu\\ud800","notes":["<img src=x onerror=alert(1)> \\ud800 \\u202efine"]}'
+    trace_file.write_text(text[:-1] + strange, encoding="utf-8")
+    # "\udcff": un byte non UTF-8 di un argomento della riga di comando (surrogateescape)
+    info = export_run(read_checkpoint(recorded["ckpt"]), tmp_path / "run", name="Nome \udcff",
+                      notes=["nota \udcff"], training_dir=recorded["trace"])
+    written = json.loads((tmp_path / "run" / RUN_FILE).read_text(encoding="utf-8"))
+    assert written == info and written["name"] == "Nome \ufffd" and written["training"]["device"] == "cpu\ufffd"
+    html = f"{TRAINING_NOTE_PREFIX}<img src=x onerror=alert(1)> \ufffd \u202efine"  # testo: lo mostra textContent
+    assert written["notes"][:2] == ["nota \ufffd", html]
+    assert (tmp_path / "run" / "training" / "trace.json").read_bytes() == trace_file.read_bytes()  # copia esatta
 
 
 def test_training_history_is_validated_before_copying(tmp_path, recorded):

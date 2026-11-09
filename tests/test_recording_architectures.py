@@ -302,20 +302,46 @@ def test_new_names_go_to_their_module():
         "logit_scale": "logit_scale",
         "0.weight": "0",
         "0.1.weight": "0.1",
+        "0.attn.qkv.weight": "0.attn",  # il modello è un nn.Sequential di blocchi
+        "h.0.attn.c_attn.weight": "h.0.attn",
+        # Un solo blocco riusato (nessun contenitore numerato di blocchi): gli indici sono di head e strati.
+        "block.sa.heads.0.key.weight": "block.sa",
+        "block.sa.heads.3.value.weight": "block.sa",
+        "block.sa.proj.bias": "block.sa",
+        "block.ffwd.net.0.weight": "block.ffwd",
+        "block.ffwd.net.2.bias": "block.ffwd",
+        "block.ln1.weight": "block.ln1",
+        "block.mlp.0.weight": "block.mlp",  # lo 0 è il modulo del parametro: uno strato di nn.Sequential
+        "blocks.0.mlp.0.weight": "blocks.0.mlp",
     }
     assert {name: module_group(name) for name in cases} == cases
     assert {name: group_of(name) for name in cases} == cases
     assert group_of("blocks.0.sa.c_attn.weight") == "blocks.0.attention"  # dentro sa: attention del corso
 
 
+def test_a_single_reused_block_is_grouped_by_its_modules(tokenizer):
+    """Prima: block.sa.heads.0.key, block.ffwd.net.0… (gli indici di head e strati presi per blocchi)."""
+    model = SharedBlockGPT(tiny_config(tokenizer))
+    groups = parameter_groups(model)
+    # l'ordine di Block in gpt/block.py: ln1, sa, ln2, ffwd
+    assert list(groups) == ["token_embedding", "position_embedding", "block.ln1", "block.sa", "block.ln2",
+                            "block.ffwd", "ln_f", "lm_head"]
+    assert groups["block.sa"] == [n for n, _ in model.named_parameters() if n.startswith("block.sa.")]
+    assert groups["block.ffwd"] == [f"block.ffwd.net.{i}.{p}" for i in (0, 2) for p in ("weight", "bias")]
+
+
 @pytest.mark.skipif(NODE is None, reason="serve Node.js")
-def test_group_of_is_the_same_as_groupOf_of_the_web_app():
+def test_group_of_is_the_same_as_groupOf_of_the_web_app(tokenizer):
     names = [n for n, _ in GPTLanguageModel(GPTConfig()).named_parameters()] + [
         "blocks.0.norm1.weight", "blocks.3.attn.qkv.weight", "transformer.h.3.attn.c_attn.bias",
         "model.layers.0.mlp.up_proj.weight", "transformer.wte.weight", "blocks.2.weight", "logit_scale",
         "0.weight", "0.1.weight", "blocks.x.sa.w", "blocks.٣.w", "constructor.weight", "__proto__.weight",
-        "a.b.c.d.e.weight",
+        "a.b.c.d.e.weight", "0.attn.qkv.weight", "h.0.attn.c_attn.weight", "block.mlp.0.weight",
+        "blocks.0.mlp.0.weight", "model.decoder.layers.0.self_attn.k_proj.weight", "layers.0.weight",
+        "net.layers.0.weight", "x.y.z.0.w.weight", "a.0.b.1.c.weight", "", ".", "a..b", "1.2.3.4.weight",
     ]
+    names += [n for n, _ in SharedBlockGPT(tiny_config(tokenizer)).named_parameters()]
+    names += [n for n, _ in ModernGPT(tiny_config(tokenizer)).named_parameters()]
     script = (f"import {{ groupOf }} from {json.dumps(GROUPS_JS.as_uri())};\n"
               f"console.log(JSON.stringify({json.dumps(names)}.map(groupOf)));")
     done = subprocess.run([NODE, "--input-type=module", "-e", script], capture_output=True, text=True,
@@ -521,6 +547,9 @@ def test_a_modified_architecture_is_recorded_completely(tokenizer, splits, tmp_p
                       training_dir=tmp_path / "training")
     assert not any("tensori diversi" in n or "non coincide" in n for n in info["notes"])
     assert read_training_history(tmp_path / "run" / "training").snapshots[-1]["step"] == TRAIN_CFG.max_iters
+    # Le note della registrazione arrivano anche in run.json: la scheda del run nel Laboratorio le mostra.
+    copied = [n for n in info["notes"] if n.startswith("storia del training: ")]
+    assert copied == [f"storia del training: {n}" for n in notes]
 
 
 @pytest.mark.parametrize("attention, reason", [(FlashAttention, "nessun modulo"),

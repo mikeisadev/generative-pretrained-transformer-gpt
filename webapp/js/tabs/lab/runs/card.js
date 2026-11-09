@@ -1,10 +1,11 @@
 /**
  * Scheda di un run (solo DOM): nome, descrizione, data, sorgente, config con le differenze dal GPT del
- * corso, parametri, compatibilità con il motore JS (con il motivo), training, note e avvisi. Tutti i
- * testi dei file caricati passano da textContent (el() li mette come nodi di testo).
+ * corso, parametri, compatibilità con il motore JS (con il motivo), training, note (di run.json e della
+ * storia del training) e avvisi. Tutti i testi dei file caricati passano da textContent (el() li mette
+ * come nodi di testo): una nota con dell'HTML resta testo.
  */
 import { el } from "../../../core/dom.js";
-import { architectureDiff, compatibilityText, configDiff, configValue, fmtInt, formatDate, originText, trainingText } from "./describe.js";
+import { architectureDiff, compatibilityText, configDiff, configValue, fmtInt, formatDate, originText, runNotes, trainingText } from "./describe.js";
 
 export function runCard(entry, run, course) {
   const card = el("article", { className: "lab-run-card", ariaLabel: `Scheda del run ${entry.name}` });
@@ -55,8 +56,11 @@ export function runCard(entry, run, course) {
     if (Number.isFinite(m.top5)) parts.push(`top-5 ${(m.top5 * 100).toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`);
     add("Benchmark", parts.length ? `${parts.join(" · ")} (validation completa, benchmark.json)` : "benchmark.json presente");
   }
-  const notes = [...(run.meta?.notes ?? []), ...(run.meta?.warnings ?? [])];
-  if (notes.length) add("Note", el("ul", { className: "lab-notes" }, ...notes.slice(0, 12).map((n) => el("li", {}, n))));
+  const { notes, hidden } = runNotes(run);
+  if (notes.length) {
+    const more = hidden ? el("li", { className: "hint" }, `… e altre ${fmtInt(hidden)}, non mostrate qui`) : "";
+    add("Note", el("ul", { className: "lab-notes" }, ...notes.map((n) => el("li", {}, n)), more));
+  }
   card.append(el("dl", { className: "lab-facts" }, ...rows));
   return card;
 }

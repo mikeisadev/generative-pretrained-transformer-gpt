@@ -128,6 +128,10 @@ _TOP_LEVEL = {
 }
 # Un indice di nn.Sequential o nn.ModuleList: solo cifre ASCII, come /^\d+$/ in groups.js.
 _INDEX = re.compile(r"[0-9]+")
+# Il contenitore dei blocchi ripetuti sta vicino alla radice del modello: il suo indice è al più il
+# terzo livello del nome (blocks.0, transformer.h.3, model.layers.0). Più in basso un indice numera le
+# parti di un modulo (le head di block.sa.heads.0), non i blocchi. Lo stesso numero è in groups.js.
+_BLOCK_INDEX_MAX_LEVEL = 2
 _LAYERNORM_GROUP = re.compile(r"blocks\.([^.]+)\.layernorm")
 # Le head del GPT del corso: con questi nomi l'entropia dell'attention non ha bisogno di spiegazioni.
 _COURSE_HEAD = re.compile(r"blocks\.[0-9]+\.sa\.heads\.[0-9]+")
@@ -157,12 +161,15 @@ def course_group(param_name: str) -> str | None:
 def module_group(param_name: str) -> str:
     """La regola generale, per i nomi che il GPT del corso non ha: il modulo che contiene il parametro.
 
-    Dentro un blocco ripetuto (il primo livello numerato del nome) è il sotto-modulo del blocco,
-    altrimenti i primi due livelli del nome; un parametro senza modulo è un gruppo da solo:
+    Dentro un blocco ripetuto è il sotto-modulo del blocco, altrimenti i primi due livelli del nome;
+    un parametro senza modulo è un gruppo da solo. L'indice del blocco è il primo livello numerato
+    del nome, se sta entro i primi tre livelli e ha ancora un modulo dopo di sé (vedi ``_block_index``):
 
         blocks.0.norm1.weight             → blocks.0.norm1
         transformer.h.3.attn.c_attn.bias  → transformer.h.3.attn
         transformer.wte.weight            → transformer.wte
+        block.sa.heads.0.key.weight       → block.sa      (un solo blocco riusato: lo 0 è una head)
+        block.mlp.0.weight                → block.mlp     (lo 0 è uno strato di un nn.Sequential)
         scale                             → scale
 
     È la regola di ``groupOf`` nel browser (js/shared/weights/groups.js): Python e web app
@@ -171,8 +178,22 @@ def module_group(param_name: str) -> str:
     modules = param_name.split(".")[:-1]
     if not modules:
         return param_name
-    index = next((i for i, part in enumerate(modules) if _INDEX.fullmatch(part)), -1)
-    return ".".join(modules[: index + 2 if index > 0 else 2])
+    index = _block_index(modules)
+    return ".".join(modules[: index + 2] if index is not None else modules[:2])
+
+
+def _block_index(modules: list[str]) -> int | None:
+    """La posizione dell'indice del blocco ripetuto nei moduli di un nome, o None se non c'è.
+
+    È il primo livello fatto di sole cifre, ma solo se sta vicino alla radice (``_BLOCK_INDEX_MAX_LEVEL``)
+    e non è l'ultimo modulo: un indice più in basso numera le head o gli strati DENTRO un modulo
+    (``block.sa.heads.0``, ``block.ffwd.net.0``), e un indice che è già il modulo del parametro
+    (``block.mlp.0.weight``) è uno strato di un ``nn.Sequential``, non un blocco con dei sotto-moduli.
+    """
+    index = next((i for i, part in enumerate(modules) if _INDEX.fullmatch(part)), None)
+    if index is None or index > _BLOCK_INDEX_MAX_LEVEL or index == len(modules) - 1:
+        return None
+    return index
 
 
 def group_of(param_name: str) -> str:

@@ -8,6 +8,7 @@ import json
 import pytest
 import torch
 
+from gpt import benchmark
 from gpt.config import GPTConfig, TrainConfig
 from gpt.export import EXAMPLE_PROMPT, PROJECT_ROOT, TRAINING_DIR, WEBAPP_DATA_DIR, WEIGHTS_MANIFEST
 from gpt.model import GPTLanguageModel
@@ -141,7 +142,9 @@ def test_the_protection_sees_buffers_shared_weights_and_model_code(script):
     assert script.reference_differences(tied, *defaults, course)[0] == [
         "pesi condivisi: lm_head.weight è lo stesso tensore di token_embedding_table.weight"]
 
-    # Il codice dei moduli: un calcolo nuovo con gli stessi pesi (es. GELU) cambia l'impronta.
+    # Il codice dei moduli: un calcolo nuovo con gli stessi pesi (es. GELU) cambia l'impronta, calcolata
+    # con le funzioni pubbliche di gpt/benchmark.py (le stesse di model.code_sha256 in benchmark.json).
+    assert script.code_files is benchmark.code_files and script.code_sha256 is benchmark.code_sha256
     course_model = GPTLanguageModel(config)
     other_code = script.reference_differences(course_model, *defaults, course, "0" * 64)[0]
     assert len(other_code) == 1 and "codice dei moduli" in other_code[0]
