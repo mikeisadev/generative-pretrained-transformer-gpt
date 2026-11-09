@@ -4,12 +4,15 @@
  *
  * Solo dati leggeri: viene caricato anche se il tab non è mai stato aperto, quindi niente three.js
  * né moduli della scena. Gli id coincidono con quelli che index.js capisce in goto():
- *   step:<id del Percorso>       (content.js, stessi id del Menu)
- *   action:<id dell'azione>      (actionCatalog.js, stessi id di player.register)
+ *   step:<id del Percorso>       (content.js: PATH = vista d'insieme + architettura completa)
+ *   action:<id dell'azione>      (actionCatalog.js e full/catalog.js, stessi id di player.register)
  *   view:macro | blocks | detail (livelli dello zoom) e view:<id di una regione> (regionData.js)
+ *   view:overview | full | full-<…>   sottotab e viste dell'architettura completa (full/catalog.js)
  */
 import { ACTION_CATALOG } from "./actionCatalog.js";
 import { PATH } from "./content.js";
+import { FULL_ACTIONS, FULL_LEVELS, FULL_SECTIONS } from "./full/catalog.js";
+import { MODELS, PRIMARY_MODEL_ID, MODEL_BY_ID } from "./full/models/index.js";
 import { REGIONS, ROWS } from "./regionData.js";
 
 /**
@@ -39,6 +42,21 @@ const STEP_KEYWORDS = {
   "beyond.mesh": ["3D", "mesh", "OBJ", "LLaMA-Mesh", "Blender", "modellazione 3D", "vertici"],
   "beyond.emergent": ["emergent abilities", "capacità emergenti", "emergenza", "mirage", "miraggio", "metrica"],
   "beyond.interp": ["interpretability", "interpretabilità", "induction head", "sparse autoencoder", "SAE", "feature", "mechanistic interpretability"],
+  // architettura completa (DeepSeek-V4.1-Flash)
+  "full-intro": ["DeepSeek-V4.1-Flash", "DeepSeek V4.1 Flash", "architettura completa", "modello aperto", "open weights", "config.json", "DeepInfer", "ricostruzione"],
+  "full-zoom": ["segnaposto", "16 meccanismi", "Panoramica", "Blocchi", "Dettaglio", "zoom", "vista d'insieme"],
+  "full-data": ["45T token", "pre-training", "dati", "token per parametro", "Chinchilla", "YaRN", "contesto lungo", "1M"],
+  "full-post": ["SFT", "RL", "GRPO", "OPD", "distillazione on-policy", "post-training", "specialisti", "sottorete"],
+  "full-weights": ["checkpoint", "safetensors", "96.085 tensori", "510 GB", "shard", "MXFP4", "FP8", "BF16", "FP32", "precisione", "dove sono i pesi"],
+  "full-tokens": ["tokenizer", "BPE", "129.280", "embedding", "token speciali", "think", "DSML", "mHC", "4 flussi"],
+  "full-stack": ["layer", "n-Transformer", "blocco ripetuto", "× N", "ripetizioni", "espandi", "srotola", "40 layer", "compressione"],
+  "full-ced": ["encoder-decoder causale", "CED", "YOCO", "prefill", "decode", "H20", "8B attivi", "16B attivi"],
+  "full-kv": ["KV cache compressa", "890 byte", "FP4", "CSA2", "riuso", "437", "MLA", "memoria"],
+  "full-attention": ["CSA2", "MQA", "latente condiviso", "lightning indexer", "top-512", "finestra", "SWA", "attention sink", "RoPE"],
+  "full-moe": ["MoE", "384 esperti", "router", "sqrtsoftplus", "top-6", "esperto condiviso", "SwiGLU", "bilanciamento"],
+  "full-mhc": ["mHC", "hyper-connections", "Sinkhorn", "residuo", "Engram", "n-gram", "hash", "memoria condizionale"],
+  "full-dspark": ["DSpark", "MTP", "multi-token prediction", "decodifica speculativa", "deployment", "EPLB", "expert parallel", "GFLOP"],
+  "full-emerge": ["capacità emergenti", "emergent abilities", "Schaeffer", "induction head", "grokking", "leggi di scala", "RL"],
 };
 
 const steps = PATH.flatMap((section) =>
@@ -47,19 +65,28 @@ const steps = PATH.flatMap((section) =>
     kind: "step",
     title: item.title,
     text: item.text,
-    keywords: [section.title, ...(STEP_KEYWORDS[item.id] ?? [])],
+    keywords: [section.title, ...(section.subtab === "full" ? ["architettura completa"] : []), ...(STEP_KEYWORDS[item.id] ?? [])],
   })),
 );
 
-const actions = ACTION_CATALOG.map((a) => ({
-  id: a.id,
-  kind: "action",
-  title: a.title,
-  text: `Animazione passo per passo. ${a.summary}`,
-  keywords: [a.category, "animazione", "animation", ...a.keywords],
-}));
+const actions = [
+  ...ACTION_CATALOG.map((a) => ({
+    id: a.id,
+    kind: "action",
+    title: a.title,
+    text: `Animazione passo per passo. ${a.summary}`,
+    keywords: [a.category, "animazione", "animation", ...a.keywords],
+  })),
+  ...FULL_ACTIONS.map((a) => ({
+    id: a.id,
+    kind: "action",
+    title: a.title,
+    text: `Architettura completa, animazione passo per passo. ${a.summary}`,
+    keywords: [a.category, "animazione", "architettura completa", "DeepSeek-V4.1-Flash", ...a.keywords],
+  })),
+];
 
-/** I livelli dello zoom (stessi id del LODController del tab). */
+/** I livelli dello zoom della vista d'insieme (stessi id del LODController del tab). */
 const levels = [
   {
     id: "macro",
@@ -93,4 +120,54 @@ const regions = REGIONS.map((r) => ({
   keywords: [ROWS[r.row].title, "regione", "meccanismo", ...ACTION_CATALOG.filter((a) => a.region === r.id).flatMap((a) => a.keywords.slice(0, 4))],
 }));
 
-export const searchIndex = [...steps, ...actions, ...levels, ...regions];
+// --- architettura completa (sottotab) ------------------------------------------------------
+
+const primary = MODEL_BY_ID.get(PRIMARY_MODEL_ID);
+
+const subtabs = [
+  {
+    id: "overview",
+    kind: "view",
+    title: "Vista d'insieme tecnologie LLM moderni",
+    text: "I 16 meccanismi dei modelli di oggi, uno per regione, con le loro animazioni.",
+    keywords: ["vista d'insieme", "sottotab", "big picture", "16 meccanismi", "tecnologie"],
+  },
+  {
+    id: "full",
+    kind: "view",
+    title: "Architettura LLM moderni completa",
+    text: `Un modello aperto vero smontato pezzo per pezzo: ${primary.name}, con Kimi K3.1 Pro e gpt-oss-120b come alternative.`,
+    keywords: ["architettura completa", "sottotab", "DeepSeek-V4.1-Flash", "Kimi K3.1 Pro", "gpt-oss", "modello di frontiera", "open weights", "pesi aperti"],
+  },
+];
+
+const fullLevels = FULL_LEVELS.map((l) => ({ id: l.id, kind: "view", title: `Architettura completa · ${l.title}`, text: l.text, keywords: ["architettura completa", "zoom", l.level] }));
+
+const fullSections = FULL_SECTIONS.map((s) => ({ id: s.id, kind: "view", title: `Architettura completa · ${s.title}`, text: `Inquadra il pezzo nell'architettura di ${primary.name}.`, keywords: ["architettura completa", ...s.keywords] }));
+
+const fullModels = MODELS.map((m) => ({
+  id: `full-model-${m.id}`,
+  kind: "view",
+  title: `Modello: ${m.name}`,
+  text: `${m.role}. ${m.headline}.`,
+  keywords: ["modello", "architettura completa", m.org, m.short, ...(m.id === PRIMARY_MODEL_ID ? ["V4.1", "DeepSeek"] : [])],
+}));
+
+/** Dove vive ogni meccanismo della vista d'insieme nel modello principale. */
+const fullMechanisms = REGIONS.map((r) => {
+  const mech = primary.mechanisms[r.id];
+  const where = mech.status === "absent" ? "qui vivrebbe, ma questo modello non lo usa" : mech.status === "study" ? "non è un pezzo del modello" : "dove vive";
+  return {
+    id: `full-mech-${r.id}`,
+    kind: "view",
+    title: `${r.title} in ${primary.name}`,
+    text: `${where}: ${mech.text}`,
+    keywords: ["dove sta", "segnaposto", "architettura completa", r.sub, ROWS[r.row].title],
+  };
+});
+
+/** Parole chiave della vista completa che lo studente potrebbe cercare da sole. */
+const TERMS = ["Engram", "mHC", "CSA2", "lightning indexer", "DSpark", "KDA", "Kimi Delta Attention", "MXFP4", "safetensors", "KV cache compressa", "encoder-decoder causale", "LatentMoE", "AttnRes", "attention sink"];
+subtabs[1].keywords.push(...TERMS);
+
+export const searchIndex = [...steps, ...actions, ...levels, ...regions, ...subtabs, ...fullLevels, ...fullSections, ...fullModels, ...fullMechanisms];

@@ -75,11 +75,32 @@ export class LODController {
     this.onPick = onPick;
     this.distanceScale = distanceScale;
     this.mode = "auto";
+    this.enabled = true;
     this.alphas = new Map(levels.map((l) => [l.id, 0]));
     this.current = null;
     this.widget = widgetParent ? this.renderWidget(widgetParent) : null;
     this.unsubscribe = host.onFrame((dt) => this.update(dt));
     this.setActive(this.pickByDistance(host.zoomDistance()), true);
+  }
+
+  /**
+   * Accende o spegne il controller, per un tab con due scene alternative nello stesso SceneHost (es. i
+   * due sottotab di "LLM moderni"): spento non tocca più i suoi gruppi a ogni frame e nasconde il suo
+   * selettore; chi lo spegne decide se nascondere i gruppi. Riacceso, riparte senza dissolvenza dal
+   * livello giusto (quello bloccato, o quello della distanza attuale).
+   */
+  setEnabled(enabled) {
+    enabled = Boolean(enabled);
+    if (enabled === this.enabled) return;
+    this.enabled = enabled;
+    if (this.widget) this.widget.style.display = enabled ? "" : "none";
+    if (!enabled) return;
+    this.current = null;
+    this.setActive(this.mode === "auto" ? this.pickByDistance(this.host.zoomDistance()) : this.mode, true);
+    for (const level of this.levels) {
+      level.group.userData.lodAlpha = this.alphas.get(level.id);
+      setGroupOpacity(level.group, this.alphas.get(level.id));
+    }
   }
 
   pickByDistance(distance) {
@@ -116,6 +137,7 @@ export class LODController {
   }
 
   update(dt) {
+    if (!this.enabled) return;
     if (this.mode === "auto") this.setActive(this.pickByDistance(this.host.zoomDistance()));
     for (const level of this.levels) {
       const target = level.id === this.current ? 1 : 0;

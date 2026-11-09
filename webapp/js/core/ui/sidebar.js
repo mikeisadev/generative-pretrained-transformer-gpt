@@ -47,6 +47,26 @@ export class Sidebar {
     this.listeners.add(fn);
   }
 
+  /**
+   * Nasconde (o rimostra) un pannello e la sua scheda: es. i pannelli del sottotab non attivo di un
+   * tab con due viste. Se il pannello nascosto era quello aperto, si apre il primo ancora visibile.
+   */
+  setPaneHidden(id, hidden) {
+    const entry = this.panes.get(id);
+    if (!entry) return;
+    entry.button.hidden = Boolean(hidden);
+    if (!hidden || entry.pane.hidden) return;
+    const next = [...this.panes].find(([, e]) => !e.button.hidden);
+    if (next) this.select(next[0]);
+    else entry.pane.hidden = true;
+  }
+
+  /** Il pannello aperto (id) o null. */
+  get current() {
+    for (const [id, { pane }] of this.panes) if (!pane.hidden) return id;
+    return null;
+  }
+
   toggleCollapsed(force) {
     this.root.closest(".tab")?.classList.toggle("sidebar-collapsed", force);
   }

@@ -36,6 +36,7 @@ export class RegionCompass {
     this.actionFor = actionFor;
     this.region = null;
     this.visible = false;
+    this.enabled = true; // spenta nell'altro sottotab del tab (architettura completa)
 
     this.dot = el("span", { className: "mllm-where-dot", ariaHidden: "true" });
     this.title = el("strong");
@@ -96,7 +97,7 @@ export class RegionCompass {
 
   /** Lo studente si muove da solo: compare l'etichetta (non durante un'azione, che ha già la sua regione). */
   show() {
-    if (this.ui.director.actionActive || this.lod.current === "macro") return;
+    if (!this.enabled || this.ui.director.actionActive || this.lod.current === "macro") return;
     const wasVisible = this.visible;
     this.visible = true;
     this.root.hidden = false;
@@ -110,6 +111,12 @@ export class RegionCompass {
     this.visible = false;
     this.root.hidden = true;
     this.setRegion(null);
+  }
+
+  /** Accende o spegne l'etichetta (spenta: nascosta e sorda ai movimenti della camera). */
+  setEnabled(enabled) {
+    this.enabled = Boolean(enabled);
+    if (!this.enabled) this.hide();
   }
 
   setRegion(region) {
