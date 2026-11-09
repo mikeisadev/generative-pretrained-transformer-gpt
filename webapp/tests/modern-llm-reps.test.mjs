@@ -289,6 +289,38 @@ test("rete: deterministica, token del prompt nella scheda, testi semplici e ones
   for (const file of ["../js/tabs/modern-llm/network.js", "../js/tabs/modern-llm/networkMechanisms.js"]) assert.doesNotMatch(await source(file), /from "three"|document\.|window\./);
 });
 
+test("rete: i testi dicono il ruolo vero di ogni layer disegnato (Reindex sceglie le voci, Reuse no) in italiano corretto", () => {
+  for (const d of drawn.blocks) {
+    const p = prefix(d);
+    const r = d.recipe;
+    const attn = sectionOf(`${p}.attn`).text;
+    if (r.compress > 0 && !r.writesKV && r.indexes) {
+      // il layer Reindex ricalcola la scelta: non «calcola solo la sua finestra»
+      assert.match(attn, /^.*Reindex: nessuna KV globale propria/m, p);
+      assert.match(attn, new RegExp(`KV globale del layer ${r.kvSource}, ma le voci le sceglie l'indexer di questo layer`), p);
+      assert.doesNotMatch(attn, /calcola solo la sua finestra/, p);
+    } else if (r.compress > 0 && !r.writesKV) {
+      assert.match(attn, new RegExp(`KV globale del layer ${r.kvSource}, con le voci scelte dall'indexer del layer ${r.indexSource}; questo layer calcola solo la sua finestra`), p);
+    }
+    // in fondo a ogni sezione: quali layer veri rappresenta («Layer 20 (Full ← H20).» se è uno solo)
+    const kind = model.kinds[d.block.kind];
+    const where = d.block.layers.length > 1 ? `Layer ${kind.label}: ${formatLayers(d.block.layers)}, ne vedi uno (${d.rep === 0 ? "lo 0" : `il ${d.rep}`}).` : `Layer ${d.rep} (${kind.label}).`;
+    for (const id of layerSectionIds(p, r)) assert.ok(sectionOf(id).text.includes(where), `${id}: ${where}`);
+    // la parentesi del layer elenca i layer veri, non «12 layer · 25 … 39» (sembrerebbe una fila continua)
+    const group = net.groups.find((g) => g.from.id === `${p}.norm1`);
+    assert.ok(group.text.includes(d.block.layers.length > 1 ? `Layer ${formatLayers(d.block.layers)} (${d.block.layers.length} layer)` : `Layer ${d.rep}: è l'unico di questo tipo.`), group.text);
+  }
+  const texts = [net.intro, net.scale, net.note, ...net.sections.map((s) => s.text), ...net.repeats.map((r) => r.text), ...net.groups.map((g) => g.text ?? "")];
+  for (const t of texts) {
+    assert.doesNotMatch(t, /\bil 0\b/, "«lo 0», non «il 0»");
+    for (const para of t.split(/\n{2,}/)) assert.match(para, /^[\p{Lu}\d«<+×]/u, `paragrafo che comincia in minuscolo: ${para.slice(0, 40)}`);
+  }
+  // «× 2»: il nucleo disegna una sola lastra fantasma
+  assert.match(net.repeats.find((x) => x.count === 2).text, /la lastra fantasma è l'altro/);
+  // l'ordine dei token speciali del prompt non è nelle fonti verificate: lo si dice
+  assert.match(networkSpec.intro, /template di chat di V4\.1-Flash non è tra le fonti verificate/);
+});
+
 test("rete: gli altri modelli della vista completa sono rifiutati invece di essere disegnati sbagliati", () => {
   for (const id of ["kimi-k3.1-pro", "gpt-oss-120b"]) assert.throws(() => buildNetworkSpec(MODEL_BY_ID.get(id)), /compress_ratios/);
 });
