@@ -17,7 +17,9 @@
  *     quello della ricerca);
  *   - sources: le due fonti che sostengono l'introduzione (le altre sono nelle analogie, nel circuito e nei
  *     fatti: il pannello le unisce senza doppioni).
- * Niente analogie nuove e nessun numero nuovo: solo quelli della ricerca.
+ * Niente analogie nuove e nessun numero nuovo: solo quelli della ricerca. Le cautele della verifica sui
+ * numeri "da ricontrollare" (verification.checked_sources) stanno in fondo alla nota di ogni fonte segnata
+ * e di ogni numero che la cita, con le parole della verifica.
  *
  * Per rigenerarlo (dalla radice del repository; lo script sta nello scratchpad del round E, fuori dal
  * repository):
@@ -266,7 +268,7 @@ export const brainSpec = {
         "venue": "Physiological Reviews 88(1):173-210",
         "url": "https://doi.org/10.1152/physrev.00044.2006",
         "doi": "10.1152/physrev.00044.2006",
-        "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna)."
+        "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna). Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; i conteggi 3.500/11.000 sono attribuiti tramite BioNumbers (voce 117129): da ricontrollare sulla rassegna."
       },
       {
         "id": "makary2011",
@@ -275,7 +277,8 @@ export const brainSpec = {
         "year": 2011,
         "venue": "Journal of the Association for Research in Otolaryngology 12(6):711-717",
         "url": "https://doi.org/10.1007/s10162-011-0283-2",
-        "doi": "10.1007/s10162-011-0283-2"
+        "doi": "10.1007/s10162-011-0283-2",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; medie 33.679 e 22.444 da ricontrollare."
       },
       {
         "id": "grothe2010",
@@ -336,7 +339,7 @@ export const brainSpec = {
           "venue": "Physiological Reviews 88(1):173-210",
           "url": "https://doi.org/10.1152/physrev.00044.2006",
           "doi": "10.1152/physrev.00044.2006",
-          "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna)."
+          "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna). Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; i conteggi 3.500/11.000 sono attribuiti tramite BioNumbers (voce 117129): da ricontrollare sulla rassegna."
         },
         {
           "id": "makary2011",
@@ -345,7 +348,8 @@ export const brainSpec = {
           "year": 2011,
           "venue": "Journal of the Association for Research in Otolaryngology 12(6):711-717",
           "url": "https://doi.org/10.1007/s10162-011-0283-2",
-          "doi": "10.1007/s10162-011-0283-2"
+          "doi": "10.1007/s10162-011-0283-2",
+          "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; medie 33.679 e 22.444 da ricontrollare."
         },
         {
           "id": "johnson1980",
@@ -518,7 +522,7 @@ export const brainSpec = {
           "venue": "Physiological Reviews 88(1):173-210",
           "url": "https://doi.org/10.1152/physrev.00044.2006",
           "doi": "10.1152/physrev.00044.2006",
-          "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna)."
+          "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna). Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; i conteggi 3.500/11.000 sono attribuiti tramite BioNumbers (voce 117129): da ricontrollare sulla rassegna."
         },
         {
           "id": "guinan2006",
@@ -667,7 +671,8 @@ export const brainSpec = {
           "year": 2025,
           "venue": "Nature Human Behaviour 9(5)",
           "url": "https://doi.org/10.1038/s41562-025-02105-9",
-          "doi": "10.1038/s41562-025-02105-9"
+          "doi": "10.1038/s41562-025-02105-9",
+          "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente (Nature Human Behaviour 2025); da ricontrollare numero del fascicolo, 100 ore di registrazioni e quattro pazienti."
         },
         {
           "id": "radford2022whisper",
@@ -807,7 +812,7 @@ export const brainSpec = {
     {
       "claim": "Cellule ciliate della coclea umana",
       "value": "circa 3.500 interne e 11.000 esterne",
-      "note": "Altre fonti danno fino a 15.000 cellule esterne: i conteggi variano.",
+      "note": "Altre fonti danno fino a 15.000 cellule esterne: i conteggi variano. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; i conteggi 3.500/11.000 sono attribuiti tramite BioNumbers (voce 117129): da ricontrollare sulla rassegna.",
       "source": {
         "id": "ashmore2008",
         "title": "Cochlear outer hair cell motility",
@@ -816,12 +821,13 @@ export const brainSpec = {
         "venue": "Physiological Reviews 88(1):173-210",
         "url": "https://doi.org/10.1152/physrev.00044.2006",
         "doi": "10.1152/physrev.00044.2006",
-        "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna)."
+        "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna). Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; i conteggi 3.500/11.000 sono attribuiti tramite BioNumbers (voce 117129): da ricontrollare sulla rassegna."
       }
     },
     {
       "claim": "Neuroni del ganglio spirale (nervo acustico)",
       "value": "33.679 in media nel primo decennio di vita, 22.444 nel decimo",
+      "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; medie 33.679 e 22.444 da ricontrollare.",
       "source": {
         "id": "makary2011",
         "title": "Age-related primary cochlear neuronal degeneration in human temporal bones",
@@ -829,7 +835,8 @@ export const brainSpec = {
         "year": 2011,
         "venue": "Journal of the Association for Research in Otolaryngology 12(6):711-717",
         "url": "https://doi.org/10.1007/s10162-011-0283-2",
-        "doi": "10.1007/s10162-011-0283-2"
+        "doi": "10.1007/s10162-011-0283-2",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; medie 33.679 e 22.444 da ricontrollare."
       }
     },
     {
@@ -843,7 +850,7 @@ export const brainSpec = {
         "venue": "Physiological Reviews 88(1):173-210",
         "url": "https://doi.org/10.1152/physrev.00044.2006",
         "doi": "10.1152/physrev.00044.2006",
-        "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna)."
+        "note": "Circa 3.500 cellule ciliate interne e circa 11.000 esterne per coclea umana (valori citati da BioNumbers, voce 117129, da questa rassegna). Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; i conteggi 3.500/11.000 sono attribuiti tramite BioNumbers (voce 117129): da ricontrollare sulla rassegna."
       }
     },
     {

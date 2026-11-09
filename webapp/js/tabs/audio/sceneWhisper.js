@@ -8,13 +8,18 @@ import * as THREE from "three";
 import { label } from "../../core/visuals.js";
 import { WHISPER } from "./dsp.js";
 import { SLOT } from "./layout3d.js";
+import { WHISPER_TOKENS } from "./whisperTokens.js";
 import { canvasPanel, disposeTree, placeLabel, rampColor, setBaseOpacity, slab } from "./widgets.js";
 
-/** Token d'uscita d'esempio: i primi quattro sono quelli veri del formato di Whisper. */
 /** Opacità di riposo delle linee della cross-attention (pulse("cross", 0) ci ritorna). */
 const CROSS_REST = 0.25;
 
-export const WHISPER_TOKENS = ["<|startoftranscript|>", "<|it|>", "<|transcribe|>", "<|notimestamps|>", " Ciao", " a", " tutti", "<|endoftext|>"];
+/**
+ * Token d'uscita d'esempio (i primi quattro sono quelli veri del formato di Whisper): stanno in un modulo di
+ * soli dati, whisperTokens.js, che usa anche la rete neurale del tab; riesportati qui per chi li importava
+ * dalla scena (actions.js, index.js).
+ */
+export { WHISPER_TOKENS };
 
 export function buildWhisper(lab, initialStyle) {
   const group = new THREE.Group();

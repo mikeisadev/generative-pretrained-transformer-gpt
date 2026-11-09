@@ -26,6 +26,39 @@ function signedColor(v) {
   return base.map((b, i) => Math.round(b + (tip[i] - b) * m));
 }
 
+/** Colormap dell'attention (0…1): scuro → azzurro, con la radice per far vedere anche i pesi piccoli. */
+function attentionColor(a) {
+  const s = Math.pow(a, 0.5);
+  return [Math.round(20 + 83 * s), Math.round(30 + 202 * s), Math.round(40 + 209 * s)];
+}
+
+/** Tabella di 256 colori RGBA (sRGB) da una funzione di colore del byte 0…255. */
+function lut(colorOf) {
+  const table = new Uint8Array(256 * 4);
+  for (let q = 0; q < 256; q++) table.set([...colorOf(q), 255], q * 4);
+  return table;
+}
+
+/**
+ * Le tabelle dei colori delle heatmap, una volta sola per pagina: chi colora celle con gli stessi colori
+ * della scena (matrixNumbers.js, le azioni del Transformer) le legge da qui invece di ricavarle
+ * disegnando una rampa. Sono esattamente i colori di weightTexture e attentionTexture (che le usano):
+ * byte quantizzato q → RGBA in [4q, 4q + 4). Condivise e di sola lettura: non scriverci (un array
+ * tipizzato non si può congelare).
+ * - DIVERGING_LUT: pesi quantizzati come gpt/export.py (128 = zero, v = (q − 128) / 127);
+ * - ATTENTION_LUT: pesi di attention 0…255 (v = q / 255);
+ * - MASKED_LUT: i 4 colori RGBA del tratteggio del futuro mascherato, indice (riga + colonna) % 4.
+ */
+export const DIVERGING_LUT = lut((q) => signedColor((q - 128) / 127));
+export const ATTENTION_LUT = lut((q) => attentionColor(q / 255));
+export const MASKED_LUT = Uint8Array.from([0, 1, 2, 3].flatMap((k) => maskedColor(k)));
+
+/** Colore del tratteggio grigio del futuro mascherato: (riga + colonna) % 4 → RGBA. */
+function maskedColor(k) {
+  const stripe = k % 4 < 2 ? 52 : 34;
+  return [stripe, stripe + 4, stripe + 10, 255];
+}
+
 function textureFromRGBA(rgba, width, height) {
   const tex = new THREE.DataTexture(rgba, width, height, THREE.RGBAFormat);
   tex.magFilter = THREE.NearestFilter; // celle nette: si vede ogni singolo peso
@@ -43,10 +76,8 @@ export function weightTexture(tensor) {
   const rgba = new Uint8Array(rows * cols * 4);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const v = (bytes[r * cols + c] - 128) / 127;
-      const [R, G, B] = signedColor(v);
-      const o = ((rows - 1 - r) * cols + c) * 4; // DataTexture parte dal basso
-      rgba.set([R, G, B, 255], o);
+      const q = 4 * bytes[r * cols + c];
+      rgba.set(DIVERGING_LUT.subarray(q, q + 4), ((rows - 1 - r) * cols + c) * 4); // DataTexture parte dal basso
     }
   }
   return textureFromRGBA(rgba, cols, rows);
@@ -59,13 +90,8 @@ export function attentionTexture(b64, T) {
   for (let i = 0; i < T; i++) {
     for (let j = 0; j < T; j++) {
       const o = ((T - 1 - i) * T + j) * 4;
-      if (j > i) {
-        const stripe = (i + j) % 4 < 2 ? 52 : 34;
-        rgba.set([stripe, stripe + 4, stripe + 10, 255], o);
-      } else {
-        const a = Math.pow(bytes[i * T + j] / 255, 0.5);
-        rgba.set([Math.round(20 + 83 * a), Math.round(30 + 202 * a), Math.round(40 + 209 * a), 255], o);
-      }
+      const k = j > i ? 4 * ((i + j) % 4) : 4 * bytes[i * T + j];
+      rgba.set((j > i ? MASKED_LUT : ATTENTION_LUT).subarray(k, k + 4), o);
     }
   }
   return textureFromRGBA(rgba, T, T);

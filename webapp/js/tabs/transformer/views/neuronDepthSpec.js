@@ -369,7 +369,8 @@ export function buildDepthSpec({ config, vocab, trace, param, fraction = DEFAULT
   const explicit = (from, to) => {
     for (const t of tensors) {
       if (t.from !== from || t.to !== to) continue;
-      links.push({ from, to, pattern: "explicit", pairs: strongestPairs(t, param(t.name), orderOf.get(t.name), fraction), label: `${t.label} (${t.name})` });
+      // numel: quanti pesi ha la matrice (metadato del tab, il nucleo lo ignora): serve a sliceCounts
+      links.push({ from, to, pattern: "explicit", pairs: strongestPairs(t, param(t.name), orderOf.get(t.name), fraction), label: `${t.label} (${t.name})`, numel: t.rows * t.cols });
     }
   };
   const gamma = (from, to, name) => links.push({ from, to, pattern: "explicit", pairs: gammaPairs(param(name)), label: `γ della LayerNorm (${name})` });
@@ -401,7 +402,7 @@ export function buildDepthSpec({ config, vocab, trace, param, fraction = DEFAULT
     title: "Rete neurale vera del GPT del corso, in orizzontale",
     intro: `È la rete VERA del modello, non una simulazione: ogni sfera è un neurone con il valore calcolato dal motore per il tuo prompt. Le stesse sezioni della disposizione a righe stanno una dopo l'altra da sinistra a destra, con la profondità vera: i ${T} token del prompt uno dietro l'altro. Di lato leggi il flusso; girando la camera vedi lo spessore, con l'attention che collega i token tra loro.`,
     scale: `Nessuna riduzione: 1 sfera = 1 neurone vero. ${fmtInt(counts.perPosition)} neuroni per token × ${T} token = ${fmtInt(counts.units)} neuroni, tutti con il valore calcolato dal motore per questo prompt.`,
-    note: `I collegamenti colorati sono i pesi veri delle nn.Linear sulla fetta scelta: i più forti (${fmtPct(fraction)} di ogni matrice) più tutti i γ delle LayerNorm. Gli archi di attention sono i pesi veri del motore (per ogni query e head i ${LINK_LIMITS.arcKeysPerQuery} più forti, sopra il ${LINK_LIMITS.arcMinWeight * 100}%). Linee grigie: collegamenti fissi, non appresi, uno a uno e token per token (le somme, con peso 1; LayerNorm e softmax, dove il neurone dipende anche dagli altri neuroni del suo token).`,
+    note: depthNote(fraction),
     seed: 1,
     axes: { x: "flusso: dall'ingresso all'uscita", y: `neuroni della sezione (${C} per il vettore x)`, z: `posizioni del prompt (${T} token)` },
     depth: { count: T, label: "token", names },
@@ -421,3 +422,21 @@ export function buildDepthSpec({ config, vocab, trace, param, fraction = DEFAULT
 }
 
 const fmtPct = (f) => `${(f * 100).toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
+
+/**
+ * La nota di onestà della rete per la quota `fraction` dei pesi della fetta (il tab la riscrive quando la
+ * quota cambia senza ricostruire la rete: vedi DepthLayout.applyFraction).
+ */
+export function depthNote(fraction) {
+  return `I collegamenti colorati sono i pesi veri delle nn.Linear sulla fetta scelta: i più forti (${fmtPct(fraction)} di ogni matrice) più tutti i γ delle LayerNorm. Gli archi di attention sono i pesi veri del motore (per ogni query e head i ${LINK_LIMITS.arcKeysPerQuery} più forti, sopra il ${LINK_LIMITS.arcMinWeight * 100}%). Linee grigie: collegamenti fissi, non appresi, uno a uno e token per token (le somme, con peso 1; LayerNorm e softmax, dove il neurone dipende anche dagli altri neuroni del suo token).`;
+}
+
+/**
+ * Quanti pesi disegnare di ogni collegamento della specifica con la quota `fraction`: delle nn.Linear i
+ * round(quota × pesi della matrice) più forti (shownWeights, come quando la rete si costruisce con quella
+ * quota), dei γ delle LayerNorm tutti (Infinity), degli altri collegamenti niente da dire (Infinity).
+ * Indice = indice del collegamento in spec.links (lo stesso di model.net.links).
+ */
+export function sliceCounts(spec, fraction) {
+  return spec.links.map((l) => (l.pattern === "explicit" && l.numel ? shownWeights(l.numel, fraction) : Infinity));
+}

@@ -41,6 +41,14 @@ const PREFERENCE = [
   ["menu", 2],
 ];
 
+/**
+ * Posto di riserva: se nelle prime tre file non c'è posto nemmeno per il menu compatto (es. il
+ * Transformer con i grafici aperti fino a 1280 px: barre delle viste nella seconda e terza fila), il menu
+ * scende in fondo alla colonna dei comandi a sinistra, nella prima fila libera, invece di finire sopra un
+ * comando. Al più fino alla fila RESERVE_ROWS - 1.
+ */
+const RESERVE_ROWS = 8;
+
 const EDGE = 10; // distanza dai bordi dello stage (come ☰ e il selettore dello zoom)
 const GAP = 8; // spazio minimo da ogni altro comando
 const FIRST_ROW = 10; // la prima fila è allineata a ☰
@@ -95,7 +103,8 @@ export function candidateRows({ obstacles = [], height, first = FIRST_ROW, gap =
  * (`center`); nelle altre il bordo sinistro, sotto ☰, come il selettore dello zoom sul telefono.
  * Gli ostacoli con `soft: true` sono comandi del tab nascosti da una vista alternativa: contano (il
  * selettore non salta mentre lo si usa), ma se così non c'è posto i pannelli alti tra loro (codice,
- * grafici) liberano la loro area. Se nessun posto è libero resta il menu compatto nella seconda fila
+ * grafici) liberano la loro area. Poi il posto di riserva: il menu compatto in fondo alla colonna dei
+ * comandi a sinistra (reserve: true). Se nessun posto è libero resta il menu compatto nella seconda fila
  * (meglio che sparire), con fits: false.
  * @param {object} o
  * @param {number} o.width larghezza dello stage (px)
@@ -112,9 +121,12 @@ export function placeSwitch({ width, stageHeight = Infinity, sizes, height, obst
   const all = obstacles.filter((o) => o.right - o.left < SHEET_FRACTION * width);
   const options = { width, stageHeight, sizes, height, center, gap, edge, first };
   const relaxed = all.filter((o) => !o.soft || o.bottom - o.top <= ROW_OBSTACLE_MAX);
+  const softer = relaxed.length < all.length;
   return (
     firstFreeSpot({ ...options, obstacles: all }) ??
-    (relaxed.length < all.length ? firstFreeSpot({ ...options, obstacles: relaxed }) : null) ?? {
+    (softer ? firstFreeSpot({ ...options, obstacles: relaxed }) : null) ??
+    reserveSpot({ ...options, obstacles: all }) ??
+    (softer ? reserveSpot({ ...options, obstacles: relaxed }) : null) ?? {
       variant: "menu",
       row: 1,
       top: candidateRows({ obstacles: all, height, first, gap })[1],
@@ -122,6 +134,21 @@ export function placeSwitch({ width, stageHeight = Infinity, sizes, height, obst
       fits: false,
     }
   );
+}
+
+/** Il posto di riserva: il menu compatto nella prima fila libera a sinistra, dalla quarta in giù. */
+function reserveSpot({ width, stageHeight, sizes, height, obstacles, gap, edge, first }) {
+  const w = sizes.menu;
+  if (!(w > 0)) return null;
+  const rows = candidateRows({ obstacles, height, first, gap, count: RESERVE_ROWS });
+  for (let row = 3; row < rows.length; row++) {
+    const top = rows[row];
+    if (top + height > stageHeight - edge) break;
+    // il tratto libero più a sinistra (gli intervalli sono ordinati): sotto ☰ se c'è posto
+    const span = freeIntervals({ width, top, height, obstacles, gap, edge }).find((f) => f.end - f.start >= w);
+    if (span) return { variant: "menu", row, top, left: span.start, fits: true, reserve: true };
+  }
+  return null;
 }
 
 /** Il primo posto libero nell'ordine di PREFERENCE, o null. */

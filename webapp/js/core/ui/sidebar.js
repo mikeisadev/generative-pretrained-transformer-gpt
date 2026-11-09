@@ -5,6 +5,10 @@
  *   const sidebar = new Sidebar(tabRoot);
  *   const pane = sidebar.addPane({ id: "azioni", title: "Azioni" });   // restituisce l'elemento del pannello
  *   sidebar.select("azioni");
+ *   sidebar.movePane("cervello", "fonti");                              // la scheda "Cervello" prima di "Fonti"
+ *
+ * I pannelli condividono il contenitore che scorre (`body`): ognuno ricorda il suo scorrimento, così
+ * tornando a un pannello lo si ritrova dov'era e uno nuovo si apre dall'alto.
  */
 import { el } from "../dom.js";
 
@@ -17,6 +21,7 @@ export class Sidebar {
     parent.append(this.root);
     this.panes = new Map();
     this.listeners = new Set();
+    this.scrolls = new Map(); // id del pannello → scrollTop quando lo si è lasciato
   }
 
   /** Aggiunge un pannello e restituisce il suo elemento contenitore. */
@@ -31,6 +36,8 @@ export class Sidebar {
   }
 
   select(id) {
+    const previous = this.current;
+    if (previous !== null && previous !== id) this.scrolls.set(previous, this.body.scrollTop);
     for (const [paneId, { button, pane, hint }] of this.panes) {
       const active = paneId === id;
       button.classList.toggle("active", active);
@@ -39,12 +46,34 @@ export class Sidebar {
       if (active) this.hint.textContent = hint;
     }
     this.hint.hidden = !this.hint.textContent;
+    // Lo scorrimento del pannello scelto (dall'alto la prima volta): prima degli ascoltatori, che possono
+    // portare in vista un elemento preciso (es. menu.reveal di un passo).
+    if (previous !== id && this.panes.has(id)) this.body.scrollTop = this.scrolls.get(id) ?? 0;
     for (const fn of this.listeners) fn(id);
   }
 
   /** fn(idPannello) a ogni cambio di pannello. */
   onSelect(fn) {
     this.listeners.add(fn);
+  }
+
+  /**
+   * Sposta la scheda (e il pannello) `id` subito prima di `beforeId`, o in fondo se `beforeId` è null:
+   * es. un pannello aggiunto dal nucleo che deve stare prima di "Fonti" anche quando i pannelli del tab
+   * nascono dopo. Restituisce false se uno dei due pannelli non esiste.
+   */
+  movePane(id, beforeId = null) {
+    const entry = this.panes.get(id);
+    const before = beforeId === null ? null : this.panes.get(beforeId);
+    if (!entry || (beforeId !== null && !before) || id === beforeId) return false;
+    if (before) {
+      if (entry.button.nextElementSibling !== before.button) this.nav.insertBefore(entry.button, before.button);
+      if (entry.pane.nextElementSibling !== before.pane) this.body.insertBefore(entry.pane, before.pane);
+    } else {
+      this.nav.append(entry.button);
+      this.body.append(entry.pane);
+    }
+    return true;
   }
 
   /**

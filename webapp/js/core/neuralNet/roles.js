@@ -79,3 +79,29 @@ export const LINK_COLORS = Object.freeze({
 
 /** Colori degli assi (gizmo 3D e chip della scheda): x flusso, y neuroni, z profondità. */
 export const AXIS_COLORS = Object.freeze({ x: "#e2e8f0", y: "#94a3b8", z: "#67e8f9" });
+
+/**
+ * Le sezioni collegate a una sezione, una voce per sezione: "Embedding (lookup dei token; lookup delle
+ * posizioni)" invece di ripetere la sezione per ogni collegamento. Sezioni diverse con lo stesso nome e
+ * gli stessi collegamenti (i livelli della U-Net, i layer di un blocco) diventano una voce sola con il
+ * numero davanti: "8 × Self- e cross-attention (…)" e non otto voci uguali.
+ * @param {object[]} links collegamenti della specifica normalizzata
+ * @param {(link: object) => {label: string}} other la sezione dall'altra parte del collegamento
+ * @returns {string[]}
+ */
+export function linkSummary(links, other) {
+  const bySection = new Map();
+  for (const l of links) {
+    const s = other(l);
+    if (!bySection.has(s)) bySection.set(s, []);
+    const what = l.label || PATTERNS[l.pattern]?.label.toLowerCase() || l.pattern;
+    if (!bySection.get(s).includes(what)) bySection.get(s).push(what);
+  }
+  const counts = new Map();
+  for (const [s, what] of bySection) {
+    const text = `${s.label} (${what.join("; ")})`;
+    counts.set(text, (counts.get(text) ?? 0) + 1);
+  }
+  return [...counts].map(([text, n]) => (n > 1 ? `${n} × ${text}` : text));
+}
+

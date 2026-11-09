@@ -187,7 +187,10 @@ export function buildRagNetworkSpec({ kb, run, origin = "panel" }) {
   const embedder = { dims: kb.embedder.dimensions, shared: kb.embedder.sharedComponent };
   const ctx = { kb, run, N, ex, features, dims, nonzero, chunks, cosine, chosen, embedder, prompt: promptSample(run), tokens: encoderTokens(run.question) };
 
-  const parts = [embedderPart(ctx), databasePart(ctx), encoderPart(ctx), generatorPart(ctx)];
+  // i token dell'encoder e dell'LLM non sono i chunk delle fette: con slices: false restano accesi
+  // (prima la fetta li accendeva in proporzione, senza legame con il chunk scelto)
+  const ownDepth = (part) => ({ ...part, sections: part.sections.map((s) => (s.depth ? { ...s, slices: false } : s)) });
+  const parts = [embedderPart(ctx), databasePart(ctx), ownDepth(encoderPart(ctx)), ownDepth(generatorPart(ctx))];
   return {
     title: "Rete neurale del RAG: dalla domanda alla risposta",
     intro: [
@@ -200,8 +203,8 @@ export function buildRagNetworkSpec({ kb, run, origin = "panel" }) {
       `Parte 4 (illustrativa): ${SHOWN.generator.width} dei ${it(GENERATOR.width)} numeri per token, ${SHOWN.generator.heads} delle ${GENERATOR.heads} head, uno dei ${GENERATOR.layers} layer, ${ctx.prompt.names.length} dei ${it(ctx.prompt.total)} token del prompt; one-hot su ${SHOWN.vocab} voci invece di ${it(GENERATOR.vocab)}.`,
     ].join(" "),
     note: [
-      "Attivazioni: vere nelle parti 1 e 2 (js/shared/rag e la pipeline del tab), simulate con un seme nelle parti 3 e 4: il badge «simulazione didattica» in alto vale per queste, e passando sopra un neurone la parola «simulato» compare solo lì.",
-      "La «Fetta» segue i chunk del database (parte 2). Nelle parti 3 e 4 la profondità sono i token: la fetta li accende solo in proporzione, senza un legame con il chunk scelto.",
+      "Attivazioni: vere nelle parti 1 e 2 (js/shared/rag e la pipeline del tab), simulate con un seme nelle parti 3 e 4: il badge «in parte vere» in alto lo dice (un clic sul badge apre l'elenco delle sezioni vere), e passando sopra un neurone la parola «simulato» compare solo nelle parti 3 e 4.",
+      "La «Fetta» segue i chunk del database (parte 2) e i loro nomi stanno ai due lati del database. Nelle parti 3 e 4 la profondità sono i token: con i chunk non c'entrano, quindi restano accesi qualunque fetta tu scelga.",
       "I token delle parti 3 e 4 sono quelli stimati dal tab (tokenizer.js, che approssima cl100k_base): i tokenizer veri di E5 e di Llama 3 spezzerebbero le parole in modo un po' diverso.",
     ].join(" "),
     seed: 23,

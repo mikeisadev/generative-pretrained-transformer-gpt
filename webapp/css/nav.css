@@ -169,6 +169,13 @@
 .nav-toast { padding-right: 6px; }
 .nav-toast:not(:has(button)) { padding-right: 14px; }
 .nav-toast:has(.nav-welcome) { border-radius: 14px; max-width: min(640px, calc(100% - 32px)); }
+/* Sopra una parte di scena stretta (codice o grafici aperti accanto) il testo del benvenuto va sopra e i
+   pulsanti sotto, invece di una colonna larga una parola con "Tutti i comandi" che esce dal riquadro. */
+.nav-hud { container-type: inline-size; }
+@container (max-width: 560px) {
+  .nav-welcome { flex-wrap: wrap; justify-content: flex-end; padding: 4px 0; }
+  .nav-welcome > span:first-child { flex: 1 1 100%; }
+}
 
 /* "Camera libera · Segui l'azione": sopra la barra del player, centrato */
 .nav-follow {
@@ -226,8 +233,11 @@
 @keyframes nav-flash { from { opacity: 0.35; } to { opacity: 0; } }
 /* Lo schermo intero è di tutta la pagina (ricerca, glossario e avvisi restano visibili): niente regole qui. */
 
-/* La didascalia in basso lascia spazio al pad quando stanno sulla stessa riga (valore calcolato da navPad.js). */
-.tab.has-nav-pad .caption { right: var(--nav-caption-right, 16px); }
+/* La didascalia in basso lascia spazio al pad quando stanno sulla stessa riga; se lì andrebbe a capo a ogni
+   parola sale sopra il pad, e sul telefono sopra il codice ridotto (captionPlacement di navMath.js, valori
+   scritti da navPad.js). Se nemmeno così c'è posto (grafici aperti in una finestra stretta) tace. */
+.tab.has-nav-pad .caption { right: var(--nav-caption-right, 16px); bottom: var(--nav-caption-bottom, 14px); }
+.tab.has-nav-pad.nav-caption-squeezed .caption { visibility: hidden; }
 
 /* Sui touch screen i tasti non servono: niente <kbd> nei chip ("Torna al centro C"). */
 @media (pointer: coarse) {
@@ -237,6 +247,11 @@
 @media (prefers-reduced-motion: reduce) {
   .nav-pad-tip, .nav-btn { transition: none; }
   .tab-stage.nav-flash::after { animation: none; }
+}
+
+/* Con i grafici aperti la barra strumenti del tab scende nella seconda fila (core.css): i chip le stanno sotto. */
+@media (min-width: 901px) {
+  .tab:has(.charts-panel.open):has(.stage-toolbar) .nav-hud { top: max(100px, var(--rep-safe-top, 100px)); }
 }
 
 /* ---------------------------------------------------------------- schermi stretti */

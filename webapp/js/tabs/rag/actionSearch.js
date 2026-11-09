@@ -3,6 +3,7 @@
  * La ricerca nell'indice HNSW è quella vera (eventi registrati dalla libreria), riprodotta
  * fotogramma per fotogramma; poi topK e soglia, prompt, ChatClient e streaming SSE.
  */
+import { hnswSearchCaption } from "./hnswCost.js";
 import { shortId } from "./stationsAnswer.js";
 import { isFinished } from "./actionIndex.js";
 import { phase } from "./scene3d.js";
@@ -111,13 +112,11 @@ export function searchAction(tab) {
           },
         });
       });
-      const saved = N - run.comparisons;
       steps.push({
         title: "HNSW contro ricerca esatta",
-        caption:
-          saved > 0
-            ? `HNSW ha calcolato ${run.comparisons} distanze invece di ${N} (${saved} in meno), recall ${Math.round(run.recall * 100)}%. Con milioni di chunk il risparmio diventa enorme: vedi i Grafici.`
-            : `Con soli ${N} chunk HNSW ha calcolato ${run.comparisons} distanze, la ricerca esatta ${N}: su così pochi vettori l'indice non conviene (rilegge alcuni nodi a ogni livello). Il vantaggio arriva con tanti vettori: vedi i Grafici.`,
+        // perché con pochi chunk HNSW non conviene: rilegge nodi (indice didattico) o legge tutto il grafo
+        // (valori di pgvector, un livello solo ed ef_search più grande dei chunk)
+        caption: hnswSearchCaption(run, N, kb.store.index.efSearch),
         duration: 5.5,
         enter: () => {
           baseline(3);

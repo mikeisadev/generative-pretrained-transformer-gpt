@@ -42,6 +42,12 @@ export const DEFAULT_DENSITY = Object.freeze({
   residual: 1,
 });
 
+/**
+ * Come parte la scheda: "auto" (ridotta sul telefono, sugli stage stretti e nelle reti molto più lunghe
+ * che alte, dove serve tutta la larghezza), "open" o "collapsed" per forzarla (sul telefono è sempre ridotta).
+ */
+export const CARD_MODES = Object.freeze(["auto", "open", "collapsed"]);
+
 const ID_RE = /^[A-Za-z0-9_.:-]+$/;
 
 /** Raccoglie errori e avvisi con il percorso del campo; `count` serve a capire se un blocco ne ha aggiunti. */
@@ -106,6 +112,8 @@ export function normalizeSpec(raw) {
   if (raw.scale === undefined) warnings.push("scale: manca la frase sulla scala (es. \"1 sfera = 1 canale; il modello vero ne ha 1.280\")");
   const seed = raw.seed === undefined ? 1 : raw.seed;
   if (!isInt(seed, 0, 2 ** 32 - 1)) fail("seed", `deve essere un intero tra 0 e 4294967295 (trovato: ${show(raw.seed)})`);
+  const card = raw.card === undefined ? "auto" : raw.card;
+  if (!CARD_MODES.includes(card)) fail("card", `uno tra ${CARD_MODES.join(", ")} (trovato: ${show(raw.card)})`);
 
   const axes = { x: "flusso: dall'ingresso all'uscita", y: "neuroni", z: "profondità" };
   if (raw.axes !== undefined) {
@@ -211,18 +219,21 @@ export function normalizeSpec(raw) {
   if (errors.length) throw new NetworkSpecError(errors);
 
   const simulated = sections.some((s) => !s.values);
-  const slices = globalDepth ?? sections.find((s) => s.depth.count > 1)?.depth ?? NO_DEPTH;
+  // le fette della rete: le posizioni sull'asse z della profondità predefinita (o della prima sezione
+  // profonda che partecipa). Le sezioni con una profondità di altro tipo (es. i token del prompt in una
+  // U-Net a griglia) o con `slices: false` (i token di un encoder accanto ai chunk di un database) non
+  // si accendono con la fetta; se nessuna sezione partecipa, la rete non ha fette.
+  let slices = globalDepth ?? sections.find((s) => s.slices && s.depth.count > 1)?.depth ?? NO_DEPTH;
+  if (slices.count > 1 && !sections.some((s) => s.slices && s.depth.count > 1 && s.depth.kind === slices.kind)) slices = NO_DEPTH;
   return {
     title,
     intro: optString(raw.intro),
     scale: optString(raw.scale),
     note: optString(raw.note),
     seed,
+    card,
     axes,
     depth: globalDepth ?? NO_DEPTH,
-    // le fette della rete: le posizioni sull'asse z della profondità predefinita (o della prima sezione
-    // profonda). Le sezioni con una profondità di altro tipo (es. i token del prompt in una U-Net a
-    // griglia) non partecipano alla scelta della fetta.
     slices: { label: slices.label, count: slices.cols, names: sliceNames(slices), kind: slices.kind },
     sections,
     repeats,
@@ -401,6 +412,9 @@ function parseSection(entry, path, problems, globalDepth, byId) {
     }
   }
   if (entry.router !== undefined && (role !== "experts" || typeof entry.router !== "string")) fail(at("router"), 'router: l\'id della sezione router (solo con role: "experts")');
+  // slices: false = le posizioni della sezione non sono quelle delle fette (i token di un encoder accanto
+  // ai chunk di un database, le parole del prompt accanto ai frame dell'audio): resta sempre accesa
+  if (entry.slices !== undefined && typeof entry.slices !== "boolean") fail(at("slices"), "true o false (false: la sezione non si accende né si spegne con la fetta)");
   if (problems.count !== errorsBefore) return null;
 
   return {
@@ -423,6 +437,7 @@ function parseSection(entry, path, problems, globalDepth, byId) {
     gates,
     router: entry.router ?? null, // id per ora: diventa la sezione dopo aver letto tutte le sezioni
     depth,
+    slices: entry.slices !== false,
     units,
     real: entry.real ?? null,
     activation,
@@ -504,7 +519,7 @@ function parseLink(entry, path, problems, byId) {
   if (!(Number.isFinite(density) && density > 0 && density <= 1)) return fail(`${label}.density`, `tra 0 (escluso) e 1 (trovato: ${show(entry.density)})`), null;
 
   const D = (s) => s.depth.count;
-  const link = { kind: "link", pattern, from, to, within, density, label: optString(entry.label), text: optString(entry.text), index: -1 };
+  const link = { kind: "link", pattern, from, to, within, density, label: optString(entry.label), text: optString(entry.text), index: -1, illustrative: false };
   const errorsBefore = problems.count;
   switch (pattern) {
     case "dense":
@@ -514,7 +529,6 @@ function parseLink(entry, path, problems, byId) {
         if (pattern === "dense") warnings.push(`${label}: profondità diverse (${D(from)} e ${D(to)}): le posizioni si abbinano in proporzione`);
         else fail(label, `profondità diverse (${D(from)} e ${D(to)}): servono uguali (o una delle due senza profondità)`);
       }
-      if (pattern === "identity" && sliceUnits(from) !== sliceUnits(to)) warnings.push(`${label}: ${sliceUnits(from)} e ${sliceUnits(to)} unità per posizione: si collegano le prime ${Math.min(sliceUnits(from), sliceUnits(to))}`);
       break;
     case "lookup":
       if (D(from) !== D(to)) fail(label, `il lookup lavora posizione per posizione: servono profondità uguali (${D(from)} e ${D(to)})`);
@@ -601,6 +615,22 @@ function parseLink(entry, path, problems, byId) {
   }
   link.fromSlab = entry.fromSlab ?? (from.role === "experts" ? "all" : from.slabs - 1); // si esce dall'ultima lastra…
   link.toSlab = entry.toSlab ?? (to.role === "experts" ? "all" : 0); // …e si entra dalla prima
+  if (pattern === "identity" && problems.count === errorsBefore) {
+    // uno a uno tra le lastre scelte (una sola, o tutte con "all"), come fa il generatore: "emb" a due
+    // lastre (token, posizione) → "x0" con fromSlab 0 e poi 1 non è un collegamento troncato
+    const units = (s, slab) => (slab === "all" ? s.slabs : 1) * s.neurons;
+    const a = units(from, link.fromSlab);
+    const b = units(to, link.toSlab);
+    if (a !== b) warnings.push(`${label}: ${a} e ${b} unità per posizione: si collegano le prime ${Math.min(a, b)}`);
+  }
+  // illustrative: i numeri espliciti (pesi di attention, coppie) mostrano lo schema, non vengono da un
+  // modello. La scheda lo dice ("illustrativi") invece di chiamarli veri.
+  if (entry.illustrative !== undefined) {
+    if (typeof entry.illustrative !== "boolean") fail(`${label}.illustrative`, "true o false");
+    else if (pattern !== "attention" && pattern !== "explicit") warnings.push(`${label}: illustrative vale per i numeri espliciti di attention ed explicit (ignorato)`);
+    else if (pattern === "attention" && !link.weights) warnings.push(`${label}: illustrative senza weights: i pesi di attention sono già simulati (ignorato)`);
+    else link.illustrative = entry.illustrative;
+  }
   if (problems.count !== errorsBefore) return null;
   return link;
 }

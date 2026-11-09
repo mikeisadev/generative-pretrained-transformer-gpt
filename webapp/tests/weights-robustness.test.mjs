@@ -320,6 +320,31 @@ test("store: IndexedDB che lancia all'apertura o fallisce: risposte pulite, nien
   }
 });
 
+test("store: il browser vieta IndexedDB (leggerlo lancia SecurityError) → il costruttore non lancia, salvataggio non disponibile", async () => {
+  const run = await uploadedRun();
+  const denied = () => {
+    throw Object.assign(new Error("The operation is insecure."), { name: "SecurityError" });
+  };
+  Object.defineProperty(globalThis, "indexedDB", { get: denied, configurable: true });
+  Object.defineProperty(globalThis, "IDBKeyRange", { get: denied, configurable: true });
+  try {
+    const store = new RunStore(); // prima: SecurityError dal valore predefinito del parametro (iframe in sandbox, navigazione privata)
+    assert.equal(store.available, false);
+    assert.equal(store.lastError.fatal, true);
+    assert.match(store.lastError.message, /IndexedDB vietato dal browser \(SecurityError\)/);
+    assert.deepEqual(await store.list(), []);
+    const saved = await store.save(run);
+    assert.equal(saved.ok, false);
+    assert.equal(await store.load(run.id), null);
+  } finally {
+    delete globalThis.indexedDB;
+    delete globalThis.IDBKeyRange;
+  }
+  // con le dipendenze passate esplicitamente nulla cambia (i test e chi usa un altro database)
+  assert.equal(new RunStore({ indexedDB: null }).available, false);
+  assert.equal(new RunStore({ indexedDB: fakeIndexedDB(), keyRange }).available, true);
+});
+
 test("store: quota esaurita a metà salvataggio → resta intera la versione di prima", async () => {
   const failures = {};
   const store = new RunStore({ indexedDB: fakeIndexedDB(failures), keyRange, storage: null });

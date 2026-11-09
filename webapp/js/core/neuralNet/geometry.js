@@ -351,12 +351,17 @@ const ARC_STEPS = { [ARC_KIND.attention]: 5, [ARC_KIND.cross]: 8, [ARC_KIND.resi
  * Archi come polilinee: attention tra due lastre = ponte che sale tanto più quanto i token sono lontani;
  * attention dentro una lastra sola = ansa verso destra; cross-attention = arco alto tra due sezioni;
  * residuo = arco sopra le sezioni saltate, all'altezza decisa dal layout (archi annidati non si coprono).
+ * `kinds`: quali tipi di arco (ARC_KIND) mettere in questo oggetto (predefinito: tutti). La scena tiene
+ * la cross-attention in un oggetto suo: di lato i suoi archi si sovrappongono in una fascia e si attenuano.
+ * Restituisce null se non c'è nessun arco di quei tipi (con `keepEmpty`, un oggetto vuoto).
  */
-export function arcLines(model, uniforms) {
+export function arcLines(model, uniforms, { kinds = null, name = "nn-arcs", keepEmpty = false } = {}) {
   const { net, layout, links } = model;
   const arcs = links.arcs;
+  const wanted = (i) => !kinds || kinds.includes(arcs.kind[i]);
   let segments = 0;
-  for (let i = 0; i < arcs.count; i++) segments += ARC_STEPS[arcs.kind[i]];
+  for (let i = 0; i < arcs.count; i++) if (wanted(i)) segments += ARC_STEPS[arcs.kind[i]];
+  if (kinds && segments === 0 && !keepEmpty) return null;
   const pos = new Float32Array(Math.max(1, segments) * 6);
   const color = new Uint8Array(Math.max(1, segments) * 8);
   const secA = new Float32Array(Math.max(1, segments) * 2);
@@ -376,6 +381,7 @@ export function arcLines(model, uniforms) {
   const cubic = new THREE.CubicBezierCurve3(p0, c1, c2, p1);
   let s = 0;
   for (let i = 0; i < arcs.count; i++) {
+    if (!wanted(i)) continue;
     const kind = arcs.kind[i];
     const link = net.links[arcs.link[i]];
     const from = arcs.from[i];
@@ -421,37 +427,47 @@ export function arcLines(model, uniforms) {
       s++;
     }
   }
-  return lineObject(uniforms, { pos, color, secA, secB, du, count: s * 2, name: "nn-arcs" });
+  return lineObject(uniforms, { pos, color, secA, secB, du, count: s * 2, name });
 }
 
 // ------------------------------------------------------------------------------------------ fantasmi e struttura
-/** Accumula triangoli e linee con colore per vertice (shader dei fantasmi: onda compresa). */
+/**
+ * Accumula triangoli e linee con colore per vertice (shader dei fantasmi: onda compresa). `ghost` è il
+ * numero della ripetizione + 1 per le lastre fantasma (0 per il resto): la scena le attenua quando stanno
+ * tra la camera e ciò che si guarda (texture uGhostFade, una colonna per ripetizione).
+ */
 class Builder {
   constructor() {
     this.tri = [];
     this.triColor = [];
+    this.triGhost = [];
     this.line = [];
     this.lineColor = [];
+    this.lineGhost = [];
   }
 
-  box(x0, x1, y0, y1, z0, z1, rgbA, faceAlpha, edgeAlpha) {
+  box(x0, x1, y0, y1, z0, z1, rgbA, faceAlpha, edgeAlpha, ghost = 0) {
     const c = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
     if (faceAlpha > 0) {
-      for (const [p, q, r, t] of [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]]) this.quad(c[p], c[q], c[r], c[t], rgbA, faceAlpha);
+      for (const [p, q, r, t] of [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [3, 2, 6, 7], [4, 5, 1, 0]]) this.quad(c[p], c[q], c[r], c[t], rgbA, faceAlpha, ghost);
     }
-    if (edgeAlpha > 0) for (const [p, q] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) this.segment(c[p], c[q], rgbA, edgeAlpha);
+    if (edgeAlpha > 0) for (const [p, q] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) this.segment(c[p], c[q], rgbA, edgeAlpha, ghost);
   }
 
-  quad(a, b, c, d, rgbA, alpha) {
+  quad(a, b, c, d, rgbA, alpha, ghost = 0) {
     for (const p of [a, b, c, a, c, d]) {
       this.tri.push(...p);
       this.triColor.push(255 * rgbA[0], 255 * rgbA[1], 255 * rgbA[2], 255 * alpha);
+      this.triGhost.push(ghost);
     }
   }
 
-  segment(a, b, rgbA, alpha) {
+  segment(a, b, rgbA, alpha, ghost = 0) {
     this.line.push(...a, ...b);
-    for (let e = 0; e < 2; e++) this.lineColor.push(255 * rgbA[0], 255 * rgbA[1], 255 * rgbA[2], 255 * alpha);
+    for (let e = 0; e < 2; e++) {
+      this.lineColor.push(255 * rgbA[0], 255 * rgbA[1], 255 * rgbA[2], 255 * alpha);
+      this.lineGhost.push(ghost);
+    }
   }
 
   /** { mesh, lines }: oggetti pronti (o null se vuoti). */
@@ -461,6 +477,7 @@ class Builder {
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(this.tri, 3));
       g.setAttribute("aColor", new THREE.BufferAttribute(Uint8Array.from(this.triColor), 4, true));
+      g.setAttribute("aGhost", new THREE.Float32BufferAttribute(this.triGhost, 1));
       g.computeBoundingBox();
       out.mesh = new THREE.Mesh(g, ghostMaterial(uniforms));
       out.mesh.name = `${name}-faces`;
@@ -469,11 +486,17 @@ class Builder {
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(this.line, 3));
       g.setAttribute("aColor", new THREE.BufferAttribute(Uint8Array.from(this.lineColor), 4, true));
+      g.setAttribute("aGhost", new THREE.Float32BufferAttribute(this.lineGhost, 1));
       out.lines = noRaycast(new THREE.LineSegments(g, ghostMaterial(uniforms, { lines: true })));
       out.lines.name = `${name}-lines`;
     }
     return out;
   }
+}
+
+/** Il riquadro (min/max) delle lastre fantasma di una ripetizione, come le disegna structure(). */
+export function ghostBox(r) {
+  return { min: [r.x0, r.yBottom - 0.1, r.z0 - 0.2], max: [r.x1, r.yTop + 0.1, r.z1 + 0.2] };
 }
 
 /** Lastre fantasma dei blocchi ripetuti, la parentesi sotto il blocco e i basamenti delle sezioni. */
@@ -492,7 +515,7 @@ export function structure(model, uniforms) {
     faces.quad([box.x0 - pad, y, z1], [box.x1 + pad, y, z1], [box.x1 + pad, y, z0], [box.x0 - pad, y, z0], rgb(s.color), 0.12);
   }
   for (const r of layout.repeats) {
-    for (const g of r.ghosts) faces.box(g.x, g.x + g.width, r.yBottom - 0.1, r.yTop + 0.1, r.z0 - 0.2, r.z1 + 0.2, ink, 0.07 + 0.1 * g.fade, 0.25 + 0.4 * g.fade);
+    for (const g of r.ghosts) faces.box(g.x, g.x + g.width, r.yBottom - 0.1, r.yTop + 0.1, r.z0 - 0.2, r.z1 + 0.2, ink, 0.07 + 0.1 * g.fade, 0.25 + 0.4 * g.fade, r.index + 1);
     // parentesi sotto il blocco vero e i suoi fantasmi: "tutto questo × N"
     const y = r.yBottom - 1.05;
     faces.segment([r.blockX0, y, r.z1 + 0.2], [r.x1, y, r.z1 + 0.2], ink, 0.75);

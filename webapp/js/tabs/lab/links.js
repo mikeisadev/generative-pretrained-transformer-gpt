@@ -15,6 +15,7 @@
  * run esistono lo decide il tab.
  */
 
+import { REP_LINKS } from "../../core/repLinks.js";
 import { BUILTIN_RUN_ID } from "../../shared/weights/run.js";
 import { ANALYSIS_VIEWS } from "./analysis/search.js";
 
@@ -85,7 +86,7 @@ export function resolveTarget({ kind, id } = {}) {
   }
   if (kind === "action") return id.length <= MAX_ID && !CONTROL.test(id) ? { type: "action", id } : null;
   if (kind !== "view") return null;
-  if (id === "rete" || id === "cervello") return { type: "rep", id };
+  if (Object.hasOwn(REP_LINKS, id)) return { type: "rep", id }; // view:rete | view:cervello del nucleo
   if (id.startsWith("tensor:")) return resolveTarget({ kind: "tensor", id: id.slice(7) });
   if (id.startsWith("run:")) return resolveTarget({ kind: "run", id: id.slice(4) });
   const step = /^step:(\d{1,9}|finali)$/.exec(id);

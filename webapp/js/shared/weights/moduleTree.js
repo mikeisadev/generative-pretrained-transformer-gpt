@@ -211,9 +211,14 @@ function visit(n, ctx, classes) {
   }
 }
 
-/** Buffer e sotto-moduli senza pesi della classe (es. la maschera `tril`, i Dropout): utili da mostrare. */
+/**
+ * Buffer e sotto-moduli senza pesi della classe (es. la maschera `tril`, i Dropout): utili da mostrare. Ogni voce
+ * porta lo snippet e il file della CLASSE: la riga sta lì (es. il Dropout di `sa` in gpt/attention.py), non nel
+ * file della riga che crea il modulo (`code.file`, es. gpt/block.py).
+ */
 function addClassDetails(code, source) {
-  if (source.buffers.length) code.buffers = source.buffers.map((b) => ({ name: b.name, line: b.line, text: b.text, statement: b.statement }));
+  const where = { snippet: source.key, file: source.file };
+  if (source.buffers.length) code.buffers = source.buffers.map((b) => ({ name: b.name, line: b.line, text: b.text, statement: b.statement, ...where }));
   const withoutWeights = [...source.attrs.values()].filter((s) => s.callee && /^nn\.(Dropout|ReLU|GELU|Identity)$/.test(s.callee));
-  if (withoutWeights.length) code.noWeights = withoutWeights.map((s) => ({ attr: s.attr, type: s.callee, line: s.line, text: s.text }));
+  if (withoutWeights.length) code.noWeights = withoutWeights.map((s) => ({ attr: s.attr, type: s.callee, line: s.line, text: s.text, ...where }));
 }

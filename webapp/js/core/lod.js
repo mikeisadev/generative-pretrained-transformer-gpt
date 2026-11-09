@@ -66,7 +66,9 @@ export class LODController {
    * @param {(mode: string) => void} [options.onPick] quando lo STUDENTE sceglie un livello nel selettore
    *        (non quando lo fa il codice con setMode): di solito per inquadrare quel livello
    * @param {() => number} [options.distanceScale] moltiplica tutte le soglie (es. > 1 su schermi stretti,
-   *        dove per far entrare lo stesso oggetto la camera deve stare più lontana)
+   *        dove per far entrare lo stesso oggetto la camera deve stare più lontana). Si legge solo quando
+   *        la distanza della camera cambia: un nuovo fattore vale dal primo movimento (ridurre il codice o
+   *        chiudere i grafici con la camera ferma non cambia livello sotto gli occhi dello studente)
    */
   constructor(host, { levels, widgetParent = null, onChange = () => {}, onPick = null, distanceScale = () => 1 }) {
     this.host = host;
@@ -78,6 +80,10 @@ export class LODController {
     this.enabled = true;
     this.alphas = new Map(levels.map((l) => [l.id, 0]));
     this.current = null;
+    // Stato visto all'ultimo frame: a camera ferma, soglie invariate e sfumature finite update() esce subito.
+    this._distance = NaN;
+    this._thresholds = new Float64Array(levels.length).fill(NaN);
+    this._settled = false;
     this.widget = widgetParent ? this.renderWidget(widgetParent) : null;
     this.unsubscribe = host.onFrame((dt) => this.update(dt));
     this.setActive(this.pickByDistance(host.zoomDistance()), true);
@@ -96,6 +102,7 @@ export class LODController {
     if (this.widget) this.widget.style.display = enabled ? "" : "none";
     if (!enabled) return;
     this.current = null;
+    this._distance = NaN;
     this.setActive(this.mode === "auto" ? this.pickByDistance(this.host.zoomDistance()) : this.mode, true);
     for (const level of this.levels) {
       level.group.userData.lodAlpha = this.alphas.get(level.id);
@@ -119,7 +126,9 @@ export class LODController {
   setMode(mode) {
     this.mode = mode;
     this.widget?.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+    if (this.widget) this.widget.dataset.mode = mode;
     if (mode !== "auto") this.setActive(mode);
+    else this._distance = NaN; // tornando ad "Auto" il livello si ricalcola dalla distanza al prossimo frame
   }
 
   /** Scelta dal selettore: come setMode, più il richiamo onPick (es. per inquadrare il livello). */
@@ -131,14 +140,30 @@ export class LODController {
   setActive(id, immediate = false) {
     if (id === this.current) return;
     this.current = id;
+    this._settled = false; // le sfumature verso il nuovo livello ripartono
     if (immediate) for (const l of this.levels) this.alphas.set(l.id, l.id === id ? 1 : 0);
     this.widget?.querySelector("[data-current]")?.replaceChildren(this.levels.find((l) => l.id === id).label);
+    // Il livello attivo anche come attributo del selettore: CSS e script lo leggono senza conoscere il tab.
+    if (this.widget) this.widget.dataset.level = id;
     this.onChange(id);
   }
 
+  /**
+   * Una volta per frame. A riposo (distanza della camera e soglie invariate, sfumature finite) esce
+   * dopo due confronti, senza chiamare distanceScale() né toccare i gruppi: lo spostamento laterale
+   * (pan) non cambia la distanza e quindi nemmeno il livello.
+   */
   update(dt) {
     if (!this.enabled) return;
-    if (this.mode === "auto") this.setActive(this.pickByDistance(this.host.zoomDistance()));
+    if (this.mode === "auto") {
+      const distance = this.host.zoomDistance();
+      if (distance !== this._distance || this.thresholdsChanged()) {
+        this._distance = distance;
+        this.setActive(this.pickByDistance(distance));
+      }
+    }
+    if (this._settled) return;
+    let settled = true;
     for (const level of this.levels) {
       const target = level.id === this.current ? 1 : 0;
       const a = this.alphas.get(level.id);
@@ -148,14 +173,32 @@ export class LODController {
         level.group.userData.lodAlpha = next;
         setGroupOpacity(level.group, next);
       }
+      if (next !== target) settled = false;
     }
+    this._settled = settled;
+  }
+
+  /**
+   * true se un tab ha cambiato le soglie (`levels[i].maxDistance`, es. entrando in una vista o dopo un
+   * ridimensionamento): valgono subito, anche a camera ferma, come prima di questo controllo.
+   */
+  thresholdsChanged() {
+    let changed = false;
+    for (let i = 0; i < this.levels.length; i++) {
+      const d = this.levels[i].maxDistance;
+      if (this._thresholds[i] !== d) {
+        this._thresholds[i] = d;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   renderWidget(parent) {
     const buttons = [{ mode: "auto", label: "Auto" }, ...this.levels.map((l) => ({ mode: l.id, label: l.label }))];
     const widget = el(
       "div",
-      { className: "lod-switch", role: "group", ariaLabel: "Livello di dettaglio" },
+      { className: "lod-switch", role: "group", ariaLabel: "Livello di dettaglio", dataset: { mode: this.mode } },
       el("span", { className: "lod-title" }, "Zoom: ", el("strong", { dataset: { current: "" } })),
       ...buttons.map((b) =>
         el("button", { type: "button", className: b.mode === "auto" ? "active" : "", dataset: { mode: b.mode }, onclick: () => this.pick(b.mode) }, b.label),

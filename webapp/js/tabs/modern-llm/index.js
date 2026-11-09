@@ -45,6 +45,7 @@ import { el, fillTemplate, fmt, sleep } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
 import { installStepKeys } from "../../core/stepKeys.js";
 import { LODController } from "../../core/lod.js";
+import { BRAIN_PANE_ID } from "../../core/repLinks.js";
 import { installRepresentations } from "../../core/representations.js";
 import { parseHash } from "../../core/search.js";
 import { Menu } from "../../core/ui/menu.js";
@@ -161,7 +162,7 @@ const PANE_PAIRS = [
 ];
 const OVERVIEW_PANES = ["percorso", "azioni", "viste", "modelli", "fonti"];
 /** Id del pannello "Cervello" creato da core/representations.js (comune ai due sottotab). */
-const BRAIN_PANE = "cervello";
+const BRAIN_PANE = BRAIN_PANE_ID;
 const FULL_STEP_IDS = new Set(FULL_PATH.flatMap((s) => s.children.map((c) => c.id)));
 
 export async function createTab(root, app) {
@@ -297,7 +298,7 @@ export async function createTab(root, app) {
         if (!s || request !== codeRequest) return;
         codePanel.show({ title: s.title, file: s.file, startLine: s.startLine ?? 1, code: s.code, language: s.language, highlight: s.highlight ?? [] });
         // su schermo stretto il codice coprirebbe la scena: resta ridotto, si espande con il suo pulsante
-        if (NARROW.matches) codePanel.root.classList.add("minimized");
+        if (NARROW.matches) codePanel.minimize();
       })();
       return tab.codePending;
     },
@@ -326,7 +327,10 @@ export async function createTab(root, app) {
     tabId: "modern-llm",
     app,
     network: {
-      load: () => import("./network.js").then((m) => m.networkSpec),
+      // a ogni apertura (cache: false): la rete del modello scelto nel selettore se il suo config lo
+      // permette, altrimenti quella del modello principale con la frase che dice perché (network.js)
+      load: () => import("./network.js").then((m) => m.networkSpecFor(tab.full?.model ?? null)),
+      cache: false,
       description: `${primaryModel.name} in versione ridotta, neurone per neurone da sinistra a destra: i ${primaryModel.config.layers} layer con le ripetizioni compresse in «× N». Girando la camera vedi i token del prompt: finestra locale, KV globale compressa e indexer, router ed esperti. Valori illustrativi.`,
     },
     brain: {
@@ -466,12 +470,18 @@ export async function createTab(root, app) {
   let returnTo = null;
 
   // Tasto V bloccato anche con l'aiuto della navigazione del livello alternativo aperto (è una finestra modale)
-  const bar = createSubtabs({ root, items: SUBTABS, current: "overview", onSelect: (id) => showSubtab(id), isBlocked: () => nav.modalOpen || Boolean(reps.stack?.nav.modalOpen) });
-  addHelpShortcut(nav);
   // Con un livello alternativo aperto la barra resta usabile (css/tabs/modern-llm.css): un clic sulla
-  // scheda GIÀ attiva non cambia sottotab (subtabs.js non chiama onSelect), ma deve mostrarne la scena.
-  // Per l'altra scheda ci pensa showSubtab; qui, dopo di lui, il livello è già chiuso e non succede niente.
-  bar.element.addEventListener("click", (e) => e.target.closest?.(".mllm-subtab") && closeRepresentation());
+  // scheda GIÀ attiva non cambia sottotab, ma deve mostrarne la scena (onReselect); per l'altra scheda
+  // ci pensa showSubtab, che comincia chiudendo il livello.
+  const bar = createSubtabs({
+    root,
+    items: SUBTABS,
+    current: "overview",
+    onSelect: (id) => showSubtab(id),
+    onReselect: () => closeRepresentation(),
+    isBlocked: () => nav.modalOpen || Boolean(reps.stack?.nav.modalOpen),
+  });
+  addHelpShortcut(nav);
 
   const capturePose = () => ({ position: host.camera.position.clone(), target: host.controls.target.clone() });
   const restorePose = (p) => {
@@ -510,13 +520,10 @@ export async function createTab(root, app) {
   /**
    * La scheda "Cervello" subito prima delle "Fonti" del sottotab attivo. Il nucleo la crea una volta (prima di
    * "Fonti" della vista d'insieme); i pannelli della vista completa arrivano dopo, al primo ingresso, e senza
-   * spostarla finirebbe in testa alla fila (prima di "Percorso"). La Sidebar non ha un'API per l'ordine:
-   * si sposta il pulsante nella sua barra (l'ordine dei pannelli nel corpo non si vede).
+   * spostarla finirebbe in testa alla fila (prima di "Percorso").
    */
   function placeBrainPane(to) {
-    const button = sidebar.nav.querySelector(`:scope > [data-pane="${BRAIN_PANE}"]`);
-    const before = sidebar.nav.querySelector(`:scope > [data-pane="${to === "full" ? "full-fonti" : "fonti"}"]`);
-    if (button && before && button.nextElementSibling !== before) sidebar.nav.insertBefore(button, before);
+    sidebar.movePane(BRAIN_PANE, to === "full" ? "full-fonti" : "fonti");
   }
 
   /** Grafici: solo le sezioni del sottotab attivo (quelle della vista completa hanno id "full-…"). */

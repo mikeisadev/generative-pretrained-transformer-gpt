@@ -4,7 +4,7 @@
  *
  *   const depth = new DepthLayout(tab, { onNeuron, onSlice, onStatus, onPlaying, onBuild, reserved });
  *   await depth.enter({ engine, trace, fraction, slice });  // costruisce, monta, inquadra (o rimette la camera di prima)
- *   await depth.update({ engine, trace, fraction });        // nuovo prompt o nuova quota di pesi: ricostruisce se serve
+ *   await depth.update({ engine, trace, fraction });        // nuovo prompt: ricostruisce; nuova quota: di solito no
  *   depth.setSlice(t | null); depth.markNeuron({ section, slab, neuron }, t); depth.togglePlay();
  *   depth.frame("side" | "thick"); depth.home();
  *   depth.exit();                                           // libera la scena (GPU), rimette navigazione e limiti
@@ -14,6 +14,11 @@
  * e il renderer li fissa quando costruisce la scena. Ricolorare soltanto lascerebbe archi del prompt
  * precedente. Il modello puro si costruisce in ~20 ms (quota 2%) e resta in memoria: tornando a questa
  * disposizione con lo stesso prompt si rifà solo la scena.
+ *
+ * La quota dei pesi della fetta ("Pesi della fetta") invece non ricostruisce: la prima volta che lo
+ * studente la alza oltre quella costruita, la rete si rifà con la quota massima (25%: 50.768 pesi, una
+ * volta sola), poi ogni quota è NetworkScene.setSliceDensity, che mostra i più forti di ogni matrice
+ * (prima ogni passo del cursore costava una ricostruzione: 234-282 ms al 25%).
  *
  * Costi: a riposo, a ogni frame, solo il confronto della matrice della camera (nessuna allocazione);
  * quando la camera si muove, LOD ed etichette del renderer; durante l'onda una uniform. I tempi
@@ -26,7 +31,7 @@ import { buildNetworkModel } from "../../../core/neuralNet/model.js";
 import { HEAD_COLORS } from "../../../core/neuralNet/roles.js";
 import { NetworkScene } from "../../../core/neuralNet/scene.js";
 import { DEPTH_DIRECTIONS, framePose } from "./neuronDepthCamera.js";
-import { buildDepthSpec, sectionTitle, unitDescription, weightOrders } from "./neuronDepthSpec.js";
+import { DEPTH_FRACTIONS, buildDepthSpec, depthNote, sectionTitle, sliceCounts, unitDescription, weightOrders } from "./neuronDepthSpec.js";
 
 export { sectionTitle };
 
@@ -37,6 +42,10 @@ const TOUCH_TIP_MS = 2600;
 /** Si gira attorno alla rete fin quasi di fianco e dall'alto, mai da dietro (il flusso si leggerebbe al contrario). */
 const ORBIT = { turn: 85, tilt: 82, minDistance: 0.5 };
 const FLIGHT = 1.1;
+const MAX_FRACTION = Math.max(...DEPTH_FRACTIONS); // la quota con cui si ricostruisce una volta sola (vedi build)
+/** Comandi DOM sopra il canvas del tab che le etichette della rete lasciano liberi (vedi coveredRects). */
+const STAGE_OBSTACLES = ":scope > .tf-neuron-bar, :scope > .sidebar-toggle, :scope > .rep-switch, :scope > .stage-toolbar, :scope > .nav-pad, :scope > .nav-hud > :not([hidden]), :scope > .player-bar";
+const ROOT_OBSTACLES = ":scope > .caption, :scope > .charts-fab, :scope > .charts-panel.open, :scope > .code-panel";
 
 /** Chiave dei pesi del motore: cambia con uno snapshot del training; null = pesi personalizzati (sempre nuovi). */
 const weightsKey = (engine) => (engine.weightsSource === "custom" ? null : `${engine.weightsSource}:${engine.snapshotStep ?? ""}`);
@@ -62,6 +71,9 @@ export class DepthLayout {
     this.model = null;
     this.tokenNames = null; // caratteri del prompt (la profondità normalizzata li perde con un solo token)
     this.modelKey = undefined;
+    this.builtFraction = 0; // quota dei pesi della fetta con cui è costruito il modello
+    this.fraction = 0; // quota mostrata (≤ builtFraction: setSliceDensity)
+    this.linkSizes = null; // { pattern, numel } di ogni collegamento della specifica (sliceCounts)
     this.orders = null;
     this.ordersKey = undefined;
     this.scene = null;
@@ -88,20 +100,31 @@ export class DepthLayout {
   }
 
   // ---------------------------------------------------------------- modello e scena
-  /** Modello puro per questo prompt e questa quota: riusato se non è cambiato niente. */
+  /**
+   * Modello puro per questo prompt e questi pesi: riusato se non è cambiato niente e se ha abbastanza pesi
+   * della fetta per la quota chiesta (la quota mostrata la sceglie applyFraction). Con lo stesso prompt e
+   * una quota più alta si ricostruisce con la quota massima, così i cambi seguenti non ricostruiscono più;
+   * con un prompt nuovo si torna alla quota chiesta (costruzione più rapida). Con un solo token i pesi
+   * della fetta non sono "sulla fetta" (stanno tra i collegamenti normali): lì si costruisce con la quota.
+   */
   build(engine, trace, fraction) {
     const wkey = weightsKey(engine);
-    const key = wkey === null ? null : `${wkey}|${fraction}|${trace.ids.join(",")}`;
-    if (key !== null && key === this.modelKey && this.model) return false;
+    const key = wkey === null ? null : `${wkey}|${trace.ids.join(",")}`;
+    const same = key !== null && key === this.modelKey && this.model !== null;
+    const scalable = trace.T > 1;
+    if (same && (scalable ? fraction <= this.builtFraction : fraction === this.builtFraction)) return false;
+    const buildFraction = same && scalable ? Math.max(MAX_FRACTION, fraction) : fraction;
     const t0 = performance.now();
     const param = (name) => engine.paramViews.get(name).data;
     if (wkey === null || wkey !== this.ordersKey) {
       this.orders = weightOrders(engine.config, param); // dipende solo dai pesi: si rifà solo se cambiano
       this.ordersKey = wkey;
     }
-    const spec = buildDepthSpec({ config: engine.config, vocab: engine.vocab, trace, param, fraction, orders: this.orders });
+    const spec = buildDepthSpec({ config: engine.config, vocab: engine.vocab, trace, param, fraction: buildFraction, orders: this.orders });
     const t1 = performance.now();
     this.model = buildNetworkModel(spec);
+    this.linkSizes = spec.links.map((l) => ({ pattern: l.pattern, numel: l.numel ?? 0 }));
+    this.builtFraction = buildFraction;
     this.tokenNames = spec.depth.names;
     this.modelKey = key;
     this.stats.specMs = t1 - t0;
@@ -132,8 +155,27 @@ export class DepthLayout {
     this.wave.to = x1 + 2 * w;
     const { links, net } = this.model;
     Object.assign(this.stats, { sceneMs: performance.now() - t0, units: net.units, segments: links.segments.count, sliceSegments: links.sliceSegments.count, arcs: links.arcs.count });
+    this.applyFraction(this.fraction);
     this.dirty = true;
     this.placeMarker();
+  }
+
+  /**
+   * La quota dei pesi della fetta da mostrare (≤ quella costruita): i round(quota) più forti di ogni
+   * nn.Linear e tutti i γ, senza ricostruire. Aggiorna anche il conto (stats.sliceSegments) e la nota.
+   */
+  applyFraction(fraction) {
+    this.fraction = fraction;
+    if (!this.scene || !this.model) return;
+    const total = this.model.links.sliceSegments.count;
+    let drawn = total;
+    if (total && fraction < this.builtFraction) {
+      const counts = sliceCounts({ links: this.linkSizes }, fraction);
+      drawn = this.scene.setSliceDensity((link) => counts[link.index]);
+    } else if (total && this.scene.sliceDrawn !== total) drawn = this.scene.setSliceDensity(1);
+    this.stats.sliceSegments = drawn;
+    this.model.net.note = depthNote(fraction); // la nota della rete dice la quota che si vede
+    this.dirty = true;
   }
 
   unmount() {
@@ -148,10 +190,15 @@ export class DepthLayout {
   async enter({ engine, trace, fraction, slice = null }) {
     if (this.scene) return;
     this.slice = slice;
+    this.fraction = fraction;
     this.build(engine, trace, fraction);
     this.mount();
     this.adoptNavigation();
     this.disposers.push(this.ui.host.onFrame(() => this.tick()));
+    // i comandi sopra il canvas cambiano misura (barra su due file, didascalia, grafici): etichette da rifare
+    const relabel = new ResizeObserver(() => (this.dirty = true));
+    for (const node of [this.ui.stage.querySelector(":scope > .tf-neuron-bar"), this.ui.root.querySelector(":scope > .caption"), this.ui.root.querySelector(":scope > .charts-panel")]) if (node) relabel.observe(node);
+    this.disposers.push(() => relabel.disconnect());
     this.bindPointer();
     if (this.savedPose) this.setPose(this.savedPose);
     else await this.frame("side", { whole: true, immediate: true });
@@ -172,10 +219,17 @@ export class DepthLayout {
     this.restoreNavigation();
   }
 
-  /** Nuovo prompt, nuovi pesi o nuova quota: ricostruisce scena e archi (camera, fetta ed enfasi restano). */
+  /**
+   * Nuovo prompt o nuovi pesi: ricostruisce scena e archi (camera, fetta ed enfasi restano). Nuova quota:
+   * di solito solo setSliceDensity (vedi build). → true se ha ricostruito.
+   */
   update({ engine, trace, fraction }) {
     if (!this.scene) return false;
-    if (!this.build(engine, trace, fraction)) return false;
+    this.fraction = fraction;
+    if (!this.build(engine, trace, fraction)) {
+      this.applyFraction(fraction);
+      return false;
+    }
     this.stopWave();
     const n = this.model.net.slices.count;
     if (this.slice !== null && this.slice >= n) this.slice = null;
@@ -202,9 +256,9 @@ export class DepthLayout {
   adoptNavigation() {
     const { nav, host } = this.ui;
     const c = host.controls;
-    // Navigation non ha un getter dei confini: si ricorda la sorgente per rimetterla tale e quale (vedi report)
-    this.saved = { bounds: nav.boundsSource ?? null, minAz: c.minAzimuthAngle, maxAz: c.maxAzimuthAngle, minPolar: c.minPolarAngle, maxPolar: c.maxPolarAngle, minDistance: c.minDistance };
-    nav.setBounds(() => this.bounds());
+    // la sorgente dei confini del tab si ricorda per rimetterla tale e quale (setBounds restituisce la precedente)
+    this.saved = { minAz: c.minAzimuthAngle, maxAz: c.maxAzimuthAngle, minPolar: c.minPolarAngle, maxPolar: c.maxPolarAngle, minDistance: c.minDistance };
+    this.saved.bounds = nav.setBounds(() => this.bounds()) ?? null;
     nav.setOrbitLimits(ORBIT);
   }
 
@@ -311,7 +365,7 @@ export class DepthLayout {
     if (this.cameraChanged()) {
       const t1 = performance.now();
       const { container, renderer } = this.ui.host;
-      this.scene.update(this.camera, container.clientWidth, container.clientHeight, renderer.getPixelRatio());
+      this.scene.update(this.camera, container.clientWidth, container.clientHeight, renderer.getPixelRatio(), this.coveredRects(), this.ui.host.controls.target);
       this.stats.updateMs = ema(this.stats.updateMs, performance.now() - t1);
       this.stats.updates++;
     }
@@ -350,6 +404,24 @@ export class DepthLayout {
     if (this.lastCamera[i] === value) return false;
     this.lastCamera[i] = value;
     return true;
+  }
+
+  /**
+   * Rettangoli dello stage coperti da comandi DOM sopra il canvas (barra della vista, ☰, selettore, pad,
+   * chip della navigazione, didascalia, grafici e codice aperti): le etichette della rete li evitano, come
+   * nella vista del nucleo. Letti solo quando la camera o lo stage cambiano, non a ogni frame.
+   */
+  coveredRects() {
+    const box = this.ui.host.container.getBoundingClientRect();
+    const rects = [];
+    const add = (node) => {
+      if (node.hidden) return;
+      const r = node.getBoundingClientRect();
+      if (r.width >= 1 && r.height >= 1) rects.push([r.left - box.left, r.top - box.top, r.right - box.left, r.bottom - box.top]);
+    };
+    for (const node of this.ui.stage.querySelectorAll(STAGE_OBSTACLES)) add(node);
+    for (const node of this.ui.root.querySelectorAll(ROOT_OBSTACLES)) add(node);
+    return rects;
   }
 
   // ---------------------------------------------------------------- onda di attivazione
@@ -430,7 +502,7 @@ export class DepthLayout {
     this.pointer.raf = 0;
     if (!this.scene || !this.pointer.at || this.pointer.down) return;
     // durante un volo la camera cambia a ogni frame: l'indice sullo schermo andrebbe rifatto ogni volta
-    if (this.ui.director.flight) return this.hideTip();
+    if (this.ui.director.flying) return this.hideTip();
     const { x, y } = this.pointer.at;
     const rect = this.canvas.getBoundingClientRect();
     const label = this.scene.labels?.hit(x - rect.left, y - rect.top);

@@ -10,7 +10,7 @@
  * l'aiuto aperto o con Ctrl/⌘/Alt). A destra un'area di contesto per i collegamenti tra le due viste
  * ("← Torna all'architettura completa", "Dove sta in …").
  *
- *   const bar = createSubtabs({ root, items, current: "overview", onSelect: (id) => showSubtab(id), isBlocked });
+ *   const bar = createSubtabs({ root, items, current: "overview", onSelect: (id) => showSubtab(id), onReselect, isBlocked });
  *   bar.setCurrent("full"); bar.setContext({ back, link }); bar.dispose();
  */
 import { el } from "../../core/dom.js";
@@ -27,9 +27,11 @@ const TEXT_TARGETS = "input, textarea, select, [contenteditable=''], [contentedi
  * @param {{id: string, label: string, short: string}[]} o.items
  * @param {string} o.current
  * @param {(id: string) => void} o.onSelect lo studente ha scelto un sottotab
+ * @param {(id: string) => void} [o.onReselect] lo studente ha premuto la scheda GIÀ attiva (non cambia
+ *   sottotab: es. per chiudere una rappresentazione aperta sopra la sua scena)
  * @param {() => boolean} [o.isBlocked] true se i tasti non devono agire (es. aiuto della navigazione aperto)
  */
-export function createSubtabs({ root, items, current, onSelect, isBlocked = () => false }) {
+export function createSubtabs({ root, items, current, onSelect, onReselect = null, isBlocked = () => false }) {
   const buttons = new Map();
   const tablist = el("div", { className: "mllm-subtabs-list", role: "tablist", ariaLabel: "Viste del tab LLM moderni" });
   for (const item of items) {
@@ -78,7 +80,10 @@ export function createSubtabs({ root, items, current, onSelect, isBlocked = () =
   setCurrent(current);
 
   function pick(id) {
-    if (id === selected) return;
+    if (id === selected) {
+      onReselect?.(id);
+      return;
+    }
     setCurrent(id);
     onSelect(id);
   }

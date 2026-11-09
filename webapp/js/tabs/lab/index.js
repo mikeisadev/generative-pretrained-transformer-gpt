@@ -82,13 +82,15 @@ export async function createTab(root, app) {
   tab.reps = installRepresentations(ui, {
     tabId: "lab",
     app,
-    network: { load: network.load, description: "La rete vera del run nella scena: neuroni da sinistra a destra, i token di un prompt d'esempio in profondità." },
+    // cache: false: la specifica si rifà a ogni apertura, per il run A e lo step di adesso (network.js)
+    network: { load: network.load, cache: false, description: "La rete vera del run nella scena: neuroni da sinistra a destra, i token di un prompt d'esempio in profondità." },
     brain: { load: () => import("./brain.js").then((m) => m.brainSpec) },
   });
   network.attach(tab.reps);
   tab.scene.attachReps(tab.reps);
   for (const type of ["runA", "weights"]) state.on(type, () => network.invalidate());
   tab.network = network;
+  tab.disposers.push(() => network.dispose()); // un rifacimento in attesa non deve arrivare a tab chiuso
 
   ui.sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Da dove vengono codice, formati e regole." }).append(renderSources(tab.sources));
   window.__labTab = tab; // per la console e gli script di verifica

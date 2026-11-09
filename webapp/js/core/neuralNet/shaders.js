@@ -24,10 +24,15 @@ export function rgb(hex) {
 }
 const vec3 = (hex) => new THREE.Vector3(...rgb(hex));
 
-/** Le uniform condivise da tutti i materiali della rete (un'assegnazione le aggiorna ovunque). */
-export function createSharedUniforms(stateTexture) {
+/**
+ * Le uniform condivise da tutti i materiali della rete (un'assegnazione le aggiorna ovunque).
+ * `ghostTexture`: una colonna per ripetizione, R = opacità delle sue lastre fantasma (1 = piene): la
+ * scena le attenua quando stanno tra la camera e ciò che si guarda.
+ */
+export function createSharedUniforms(stateTexture, ghostTexture = null) {
   return {
     uState: { value: stateTexture },
+    uGhostFade: { value: ghostTexture },
     uFront: { value: 1e6 }, // a riposo il fronte è "lontanissimo": tutto è già calcolato
     uWaveWidth: { value: 2 },
     uGlow: { value: 1 },
@@ -206,14 +211,19 @@ void main() {
 `;
 
 // ------------------------------------------------------------------------------------------ fantasmi e strutture
+// aGhost = numero della ripetizione + 1 (0 = basamenti e parentesi, mai attenuati): la colonna della
+// texture uGhostFade dice quanto restano visibili le sue lastre fantasma.
 const GHOST_VERTEX = /* glsl */ `
 ${COMMON}
 attribute vec4 aColor;
+attribute float aGhost;
+uniform sampler2D uGhostFade;
 uniform vec3 uGlowColor;
 varying vec4 vColor;
 void main() {
   float glow = waveGlow(position.x);
-  vColor = vec4(mix(aColor.rgb, uGlowColor, clamp(glow * 0.7, 0.0, 0.8)), clamp(aColor.a * (1.0 + 2.5 * glow), 0.0, 1.0));
+  float fade = aGhost > 0.5 ? texelFetch(uGhostFade, ivec2(int(aGhost - 0.5), 0), 0).r : 1.0;
+  vColor = vec4(mix(aColor.rgb, uGlowColor, clamp(glow * 0.7, 0.0, 0.8)), clamp(aColor.a * fade * (1.0 + 2.5 * glow), 0.0, 1.0));
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;

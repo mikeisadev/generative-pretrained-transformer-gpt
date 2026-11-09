@@ -319,48 +319,24 @@ export async function createTab(root, app) {
 
   // --- rappresentazioni del nucleo: "Rete neurale" e "Cervello" (il pannello Cervello va prima di Fonti).
   // Azioni, passi del Percorso e link riportano da soli all'Architettura (ritorno automatico del nucleo).
-  const network = createNetworkSource();
   const reps = installRepresentations(ui, {
     tabId: "rag",
     app,
     network: {
-      load: network.load,
+      // cache: false = load() a ogni apertura del livello (anche quando il tab torna visibile con la rete
+      // aperta): la rete si apre sempre con la domanda e la configurazione di adesso (~0,6 ms). Una rete
+      // già aperta resta quella della domanda scritta nella sua introduzione: "Cerca" fa partire un'azione
+      // e il nucleo torna da solo all'Architettura.
+      load: () => import("./network.js").then((m) => m.buildRagNetworkSpec({ kb: tab.kb, ...networkSearch() })),
+      cache: false,
       description: "La pipeline come rete: il nostro embedder e la ricerca nel database con i numeri veri della tua domanda, poi l'encoder e l'LLM di un RAG vero (illustrativi). Girando la camera vedi i chunk in profondità.",
     },
     brain: {
       load: () => import("./brain.js").then((m) => m.brainSpec),
       description: "L'ippocampo e la memoria: le analogie tra il RAG e il cervello, con i loro limiti e le fonti, e il circuito dell'ippocampo in 3D.",
     },
-    // la rete si apre sempre con la domanda e la configurazione di adesso
-    onChange: (id) => id === "network" && network.refresh(),
   });
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Documentazione e sorgenti da cui vengono codice, numeri e parametri." });
-
-  /**
-   * La specifica della "Rete neurale" con i calcoli veri del tab (network.js). Il nucleo la carica una
-   * volta e la tiene in cache, mentre la domanda e la configurazione cambiano: `load` restituisce un
-   * oggetto stabile che `refresh` riempie di nuovo, appena prima che la vista lo legga (a ogni apertura
-   * e quando il tab torna visibile con la rete aperta). La vista costruisce il modello all'apertura:
-   * una rete già aperta resta quella della domanda scritta nella sua introduzione.
-   */
-  function createNetworkSource() {
-    let builder = null;
-    const spec = {};
-    const refresh = () => {
-      if (!builder) return;
-      const next = builder({ kb: tab.kb, ...networkSearch() });
-      for (const key of Object.keys(spec)) delete spec[key];
-      Object.assign(spec, next);
-    };
-    return {
-      async load() {
-        ({ buildRagNetworkSpec: builder } = await import("./network.js"));
-        refresh();
-        return spec;
-      },
-      refresh,
-    };
-  }
 
   /**
    * La ricerca da disegnare e da dove viene (l'introduzione della rete lo dice): la domanda del pannello
@@ -624,8 +600,7 @@ export async function createTab(root, app) {
     tab,
     goto,
     activate() {
-      // con la rete aperta il nucleo la ricrea qui (host.start): la domanda può essere cambiata nel frattempo
-      if (reps.current === "network") network.refresh();
+      // con la rete aperta il nucleo la ricrea qui (host.start) con una specifica nuova (cache: false)
       host.start();
       host.resize();
     },

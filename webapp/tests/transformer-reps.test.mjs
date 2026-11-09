@@ -10,6 +10,7 @@ import { test } from "node:test";
 
 import { atlasKind } from "../js/core/brain/atlas.js";
 import { normalizeBrainSpec, safeUrl } from "../js/core/brain/spec.js";
+import { REP_LINKS } from "../js/core/repLinks.js";
 import { brainSpec } from "../js/tabs/transformer/brain.js";
 import { searchIndex } from "../js/tabs/transformer/search.js";
 
@@ -81,9 +82,8 @@ test("cervello: i testi sono quelli della ricerca verificata, parola per parola"
 });
 
 test("link e ricerca: view:rete e view:cervello, Pesi numerici e i pesi che nascono", async () => {
-  // REP_LINKS del nucleo (letto dal sorgente: representations.js importa three.js, che qui non c'è)
-  const core = await readFile(new URL("../js/core/representations.js", import.meta.url), "utf8");
-  assert.match(core, /REP_LINKS = \{ rete: "network", cervello: "brain" \}/);
+  // REP_LINKS del nucleo: core/repLinks.js (soli dati; representations.js importa three.js, che qui non c'è)
+  assert.deepEqual({ ...REP_LINKS }, { rete: "network", cervello: "brain" });
   const views = new Map(searchIndex.filter((e) => e.kind === "view").map((e) => [e.id, e]));
   for (const id of ["rete", "cervello", "numeri", "numeri.training", "neuroni", "neuroni-profondita", "pesi", "architettura", "contesto"]) assert.ok(views.has(id), id);
   // parole chiave utili ma poche: la ricerca globale non deve esserne inondata

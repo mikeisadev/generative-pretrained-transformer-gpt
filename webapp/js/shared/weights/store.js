@@ -145,18 +145,33 @@ function reasonOf(error) {
   return `il browser non ha salvato il run (${error?.message || error?.name || "errore sconosciuto"})`;
 }
 
+/**
+ * Una dipendenza del browser letta senza farsi fermare: in un iframe in sandbox e in alcune navigazioni
+ * private anche solo leggere `indexedDB` lancia SecurityError. → { value, error }
+ */
+function browserGlobal(read) {
+  try {
+    return { value: read() ?? null, error: null };
+  } catch (error) {
+    return { value: null, error };
+  }
+}
+
 export class RunStore {
   /**
+   * Non lancia mai: se il browser vieta IndexedDB (SecurityError leggendo `indexedDB`), il salvataggio non è
+   * disponibile (`available` false, `lastError` dice perché) e la pagina continua con i run in memoria.
    * @param {{indexedDB?: IDBFactory|null, keyRange?: typeof IDBKeyRange|null, name?: string,
    *   storage?: {estimate: () => Promise<{usage: number, quota: number}>}|null}} [o]
    *   le dipendenze del browser si possono sostituire (test, altri database)
    */
-  constructor({ indexedDB = globalThis.indexedDB ?? null, keyRange = globalThis.IDBKeyRange ?? null, name = DB_NAME, storage = globalThis.navigator?.storage ?? null } = {}) {
-    this.idb = indexedDB;
-    this.keyRange = keyRange;
+  constructor({ indexedDB, keyRange, name = DB_NAME, storage } = {}) {
+    const idb = indexedDB === undefined ? browserGlobal(() => globalThis.indexedDB) : { value: indexedDB, error: null };
+    this.idb = idb.value;
+    this.keyRange = keyRange === undefined ? browserGlobal(() => globalThis.IDBKeyRange).value : keyRange;
     this.name = name;
-    this.storage = storage;
-    this.lastError = null;
+    this.storage = storage === undefined ? browserGlobal(() => globalThis.navigator?.storage).value : storage;
+    this.lastError = idb.error ? { fatal: true, message: `IndexedDB vietato dal browser (${idb.error.name || "errore"}): i run restano finché la pagina è aperta` } : null;
     this._db = null;
   }
 

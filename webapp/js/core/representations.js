@@ -12,6 +12,10 @@
  *   });
  *   await reps.show("brain", { focus: ["hippocampus"] });   // → true quando la vista è pronta
  *   reps.current;  reps.has("network");  reps.on("change", fn);  reps.goto({ kind, id });  reps.sync(id)
+ *   await reps.refresh("network");   // specifica di nuovo da load() e, se è aperta, vista rifatta (stessa camera)
+ *
+ * La specifica di `load` resta in cache per tutta la pagina; con `cache: false` load() si richiama a ogni
+ * apertura del livello (la rete segue lo stato del tab: la domanda del RAG, il brano dell'Audio).
  *
  * Una vista con `load` vive in un livello sovrapposto allo stage (.rep-layer) con la sua pila di scena
  * (createSceneStack: SceneHost, CameraDirector, Navigation e NavPad, quindi navigazione libera identica).
@@ -34,15 +38,13 @@
  */
 import { el } from "./dom.js";
 import { createSceneStack } from "./layout.js";
+import { BRAIN_PANE_ID, REP_IDS, REP_LINKS, repOfLink } from "./repLinks.js";
 import { parseHash } from "./search.js";
 import { ALT_ACTIVE_CLASS, RepSwitch } from "./ui/repSwitch.js";
 import { showToast } from "./ui/share.js";
 
-/** Id delle rappresentazioni, nell'ordine del selettore. */
-export const REP_IDS = ["main", "network", "brain"];
-
-/** Link diretti #<tab>/go=view:rete | view:cervello → id della rappresentazione. */
-export const REP_LINKS = { rete: "network", cervello: "brain" };
+// le parti pure (id, link, pannello) stanno in repLinks.js, importabile anche dai test in Node
+export { BRAIN_PANE_ID, REP_IDS, REP_LINKS };
 
 const DEFAULTS = {
   main: {
@@ -93,8 +95,9 @@ const BRAIN_HINT = "Analogie tra questa architettura e il cervello: cosa hanno i
  * @param {string} [opts.tabId] id del tab (predefinito: data-tab della radice)
  * @param {object} [opts.app] l'oggetto app del guscio (passato alle viste e al pannello Cervello)
  * @param {{label?: string, description?: string}} [opts.main] la scena del tab
- * @param {{load?: () => Promise<object>, enter?: Function, exit?: Function, focus?: Function, label?: string, description?: string}} [opts.network]
- * @param {{load?: () => Promise<object>, enter?: Function, exit?: Function, focus?: Function, label?: string, description?: string}} [opts.brain]
+ * @param {{load?: () => Promise<object>, cache?: boolean, enter?: Function, exit?: Function, focus?: Function, label?: string, description?: string}} [opts.network]
+ *   cache: false = load() a ogni apertura del livello (predefinito true: la specifica si carica una volta)
+ * @param {{load?: () => Promise<object>, cache?: boolean, enter?: Function, exit?: Function, focus?: Function, label?: string, description?: string}} [opts.brain]
  * @param {(id: string, previous: string) => void} [opts.onChange]
  * @param {{network?: Function, brain?: Function, pane?: Function}} [opts.loaders] solo per le pagine di
  *   prova: sostituiscono i moduli veri (ognuna → Promise della funzione create…View / renderBrainPane)
@@ -114,18 +117,19 @@ export function installRepresentations(ui, opts = {}) {
     if (!o) continue;
     const custom = typeof o.enter === "function";
     if (!custom && typeof o.load !== "function") throw new TypeError(`installRepresentations: "${id}" vuole load() oppure enter()/exit()`);
-    reps.set(id, { id, kind: custom ? "custom" : "layer", ...DEFAULTS[id], ...labels(o), load: o.load, enter: o.enter, exit: o.exit, focus: o.focus });
+    reps.set(id, { id, kind: custom ? "custom" : "layer", ...DEFAULTS[id], ...labels(o), load: o.load, cache: o.cache !== false, enter: o.enter, exit: o.exit, focus: o.focus });
   }
 
   const listeners = new Set(typeof opts.onChange === "function" ? [opts.onChange] : []);
   const cache = new Map(); // chiave → Promise: moduli e specifiche si caricano una volta sola
+  const versions = new Map(); // id → numero della specifica (refresh): un caricamento superato si rifà
   const memory = new Map(); // id → { camera, data }: ciò che sopravvive alla chiusura del livello
   let current = "main";
   let live = null; // il livello alternativo vivo: { id, element, stack, view, ready, shown, closed }
   let suspended = null; // la scena del tab ferma sotto un livello: { navEnabled, position, target }
   let visible = host.running; // il tab è visibile: lo dicono le sue chiamate a host.start/stop
   let seq = 0; // ogni show() ha un numero: una richiesta superata da una più recente non tocca niente
-  let consumedStamp = -1; // ultimo gesto dello studente già "speso" per l'alternativa (director.intentStamp)
+  let consumedStamp = -1; // ultimo gesto dello studente già "speso" per l'alternativa (director.lastIntent)
   let consumedHash = location.hash; // indirizzo al momento dell'ultima richiesta di una rappresentazione
   let disposed = false;
   let brainPane = null;
@@ -184,14 +188,14 @@ export function installRepresentations(ui, opts = {}) {
    * fuori dal tab). Così il ritorno funziona anche in un goto che non passa da reps.goto.
    */
   function studentAsked() {
-    if (performance.now() <= director.userIntentUntil && director.intentStamp !== consumedStamp) return true;
+    if (director.intentActive && director.lastIntent !== consumedStamp) return true;
     if (location.hash === consumedHash) return false;
     const { tab, go } = parseHash(location.hash);
     return tab === tabId && Boolean(go);
   }
 
   function consumeGesture() {
-    consumedStamp = director.intentStamp;
+    consumedStamp = director.lastIntent;
     consumedHash = location.hash;
   }
 
@@ -248,6 +252,7 @@ export function installRepresentations(ui, opts = {}) {
     show,
     sync,
     goto,
+    refresh,
     /** type "change": fn(id, previous) a ogni cambio. Restituisce la funzione di rimozione. */
     on(type, fn) {
       if (type !== "change" || typeof fn !== "function") return () => {};
@@ -339,7 +344,7 @@ export function installRepresentations(ui, opts = {}) {
    *   const shown = reps.goto(target); if (shown) return shown;
    */
   function goto({ kind, id } = {}) {
-    const repId = kind === "view" ? REP_LINKS[id] : undefined;
+    const repId = repOfLink({ kind, id });
     if (repId && reps.has(repId)) {
       if (narrow.matches) root.classList.add("sidebar-collapsed"); // sul telefono conta la scena
       return show(repId).then(() => true); // un errore di caricamento ha già il suo avviso
@@ -392,11 +397,7 @@ export function installRepresentations(ui, opts = {}) {
   }
 
   function finishFlight() {
-    const f = director.flight;
-    if (!f) return;
-    host.camera.position.copy(f.toPos);
-    host.controls.target.copy(f.toTarget);
-    director.cancel();
+    director.finish();
   }
 
   // ---------------------------------------------------------------- livello alternativo
@@ -424,7 +425,13 @@ export function installRepresentations(ui, opts = {}) {
     switcher?.setBusy(rep.id);
     entry.ready = (async () => {
       try {
-        const [create, spec] = await Promise.all([once(`module:${rep.id}`, loaders[rep.id]), once(`spec:${rep.id}`, rep.load)]);
+        let version = specVersion(rep.id);
+        let [create, spec] = await Promise.all([once(`module:${rep.id}`, loaders[rep.id]), specFor(rep)]);
+        // un refresh arrivato mentre la specifica si caricava: si legge quella nuova
+        while (!entry.closed && version !== specVersion(rep.id)) {
+          version = specVersion(rep.id);
+          spec = await specFor(rep);
+        }
         if (entry.closed) return false;
         if (typeof create !== "function") throw new TypeError(`il modulo della vista "${rep.id}" non esporta la funzione create…View`);
         releaseNow(); // al più un livello vivo: il contesto del livello precedente se ne va prima
@@ -467,17 +474,7 @@ export function installRepresentations(ui, opts = {}) {
     entry.closed = true;
     switcher?.setBusy(null);
     const hadFocus = entry.element.contains(document.activeElement);
-    if (entry.stack && entry.shown) {
-      const { camera, controls } = entry.stack.host;
-      const home = entry.stack.nav.homePose;
-      memoryFor(entry.id).camera = {
-        position: camera.position.clone(),
-        target: controls.target.clone(),
-        // la vista iniziale fotografata dalla navigazione: alla riapertura "Centra" deve tornare lì,
-        // non sul punto in cui lo studente aveva lasciato la camera
-        home: home ? { position: home.position.clone(), target: home.target.clone() } : null,
-      };
-    }
+    if (entry.stack && entry.shown) memoryFor(entry.id).camera = cameraOf(entry.stack);
     if (entry.shown) safely(() => entry.view.onHide?.(), "onHide");
     if (entry.view) safely(() => entry.view.dispose(), "dispose");
     if (entry.stack) {
@@ -512,6 +509,66 @@ export function installRepresentations(ui, opts = {}) {
     return memory.get(id);
   }
 
+  /**
+   * La specifica di `id` va riletta (lo stato del tab è cambiato: un altro brano, un altro run): esce
+   * dalla cache e, se il livello di `id` è aperto, la vista si rifà sulla STESSA pila di scena (stesso
+   * renderer: nessun contesto WebGL nuovo né perso, quindi nessuno scatto) con la camera di prima.
+   * → Promise<boolean>: true a vista rifatta, o subito se il livello non è aperto (alla prossima apertura
+   * la specifica sarà quella nuova); false se superata da un altro refresh o se il livello si chiude.
+   */
+  async function refresh(id) {
+    const rep = reps.get(id);
+    if (!rep || rep.kind !== "layer" || disposed) return false;
+    cache.delete(`spec:${id}`);
+    versions.set(id, specVersion(id) + 1);
+    const entry = live;
+    if (!entry || entry.id !== id) return true;
+    if (!entry.stack) return entry.ready; // ancora in caricamento: buildLive legge la specifica nuova
+    return rebuildView(entry, rep);
+  }
+
+  /** Rifà la vista del livello aperto con la specifica di adesso, tenendo pila, camera e "Centra". */
+  async function rebuildView(entry, rep) {
+    const version = specVersion(rep.id);
+    const { host: layerHost, director: layerDirector, nav: layerNav } = entry.stack;
+    const saved = cameraOf(entry.stack);
+    const busy = loadingCard(rep, "Aggiorno la scena…");
+    entry.element.append(busy);
+    switcher?.setBusy(rep.id);
+    try {
+      const [create, spec] = await Promise.all([once(`module:${rep.id}`, loaders[rep.id]), specFor(rep)]);
+      if (entry.closed || entry !== live || version !== specVersion(rep.id)) return false; // un refresh più recente fa il suo
+      if (entry.shown) safely(() => entry.view.onHide?.(), "onHide");
+      safely(() => entry.view.dispose(), "dispose"); // scheda, scena, listener; rimette home e confini della navigazione
+      entry.shown = false;
+      layerDirector.cancel();
+      entry.view = create({ host: layerHost, director: layerDirector, nav: layerNav, layer: entry.element, tabId, spec, app, reps: api, memory: memoryFor(rep.id).data });
+      await entry.view.ready;
+      if (entry.closed || entry !== live) return false;
+      entry.view.onShow?.();
+      entry.shown = true;
+      switcher?.scheduleLayout();
+      restoreCamera(entry.stack, saved);
+      return version === specVersion(rep.id);
+    } catch (err) {
+      if (!entry.closed) report(rep, err);
+      return false;
+    } finally {
+      busy.remove();
+      if (live === entry) switcher?.setBusy(null);
+    }
+  }
+
+  /** Numero della specifica di una rappresentazione: cresce a ogni refresh. */
+  function specVersion(id) {
+    return versions.get(id) ?? 0;
+  }
+
+  /** La specifica di una rappresentazione: dalla cache, o di nuovo da load() con `cache: false`. */
+  function specFor(rep) {
+    return rep.cache ? once(`spec:${rep.id}`, rep.load) : Promise.resolve().then(rep.load);
+  }
+
   /** Carica una volta sola (moduli, specifiche); un errore si può riprovare alla richiesta successiva. */
   function once(key, load) {
     if (!cache.has(key)) {
@@ -536,14 +593,14 @@ export function installRepresentations(ui, opts = {}) {
    * volta che serve, con renderBrainPane di core/brain/pane.js (solo DOM, nessun three.js).
    */
   function installBrainPane() {
-    const pane = sidebar.addPane({ id: "cervello", title: "Cervello", hint: BRAIN_HINT });
+    const pane = sidebar.addPane({ id: BRAIN_PANE_ID, title: "Cervello", hint: BRAIN_HINT });
     pane.classList.add("rep-brain-pane");
     pane.append(el("p", { className: "hint" }, "Le analogie con il cervello si caricano quando apri questo pannello."));
     let filling = null;
     const fill = () => {
       filling ??= (async () => {
         pane.replaceChildren(el("p", { className: "rep-pane-status", role: "status" }, "Carico le analogie con il cervello…"));
-        const [render, spec] = await Promise.all([once("module:pane", loaders.pane), once("spec:brain", reps.get("brain").load)]);
+        const [render, spec] = await Promise.all([once("module:pane", loaders.pane), specFor(reps.get("brain"))]);
         if (disposed) return;
         pane.replaceChildren();
         render(pane, spec, { onShow3D: (focus) => showFromPane(focus), app });
@@ -557,7 +614,7 @@ export function installRepresentations(ui, opts = {}) {
       });
       return filling;
     };
-    const onSelect = (id) => !disposed && id === "cervello" && fill();
+    const onSelect = (id) => !disposed && id === BRAIN_PANE_ID && fill();
     sidebar.onSelect(onSelect);
     if (!pane.hidden) void fill(); // unico pannello della sidebar: è già quello aperto
     return { pane, fill, onSelect };
@@ -583,9 +640,9 @@ export function installRepresentations(ui, opts = {}) {
     window.removeEventListener("keydown", onWindowKey, true);
     switcher?.dispose();
     if (brainPane) {
-      sidebar.nav.querySelector(':scope > [data-pane="cervello"]')?.remove();
+      sidebar.nav.querySelector(`:scope > [data-pane="${BRAIN_PANE_ID}"]`)?.remove();
       brainPane.pane.remove();
-      sidebar.panes?.delete?.("cervello");
+      sidebar.panes?.delete?.(BRAIN_PANE_ID);
       sidebar.listeners?.delete?.(brainPane.onSelect); // Sidebar.onSelect non restituisce la funzione di rimozione
     }
     listeners.clear();
@@ -632,17 +689,26 @@ function settleControls(controls) {
   controls.enableDamping = true;
 }
 
-/** Livello riaperto: camera dove lo studente l'aveva lasciata, "Centra" sulla vista iniziale di prima. */
+/**
+ * La camera di una pila di scena e la sua vista iniziale fotografata dalla navigazione: riaprendo (o
+ * rifacendo) la vista "Centra" deve tornare lì, non sul punto in cui lo studente aveva lasciato la camera.
+ */
+function cameraOf(stack) {
+  const { camera, controls } = stack.host;
+  return { position: camera.position.clone(), target: controls.target.clone(), home: stack.nav.getHomePose() };
+}
+
+/** Livello riaperto (o vista rifatta): camera dove lo studente l'aveva lasciata, "Centra" sulla vista iniziale di prima. */
 function restoreCamera(stack, saved) {
   stack.director.cancel(); // l'inquadratura iniziale della vista ricreata non deve partire
   stack.host.camera.position.copy(saved.position);
   stack.host.controls.target.copy(saved.target);
   stack.host.controls.update();
-  if (saved.home) stack.nav.homePose = { position: saved.home.position.clone(), target: saved.home.target.clone() };
+  if (saved.home) stack.nav.setHomePose(saved.home);
 }
 
-function loadingCard(rep) {
-  return el("div", { className: "rep-loading", role: "status" }, el("span", { className: "rep-loading-bar", ariaHidden: "true" }), el("strong", {}, rep.label), el("span", {}, "Preparo la scena…"));
+function loadingCard(rep, text = "Preparo la scena…") {
+  return el("div", { className: "rep-loading", role: "status" }, el("span", { className: "rep-loading-bar", ariaHidden: "true" }), el("strong", {}, rep.label), el("span", {}, text));
 }
 
 function safely(fn, what) {

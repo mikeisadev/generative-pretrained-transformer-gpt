@@ -256,12 +256,6 @@
   .tab-root[data-tab="modern-llm"]:has(.charts-panel.open) .mllm-toolbar { top: 56px; left: 10px; right: auto; }
 }
 
-/* Vista completa, grafici aperti: il codice è ridotto alla sua intestazione (full/index.js) e, invece di
-   restare tagliato sotto i grafici, sta accanto a loro: si legge quale codice c'è e ▁ lo riapre. */
-@media (min-width: 901px) {
-  .mllm-full:has(.charts-panel.open) > .code-panel.minimized { right: 474px; width: min(340px, 28vw); }
-}
-
 /* «Grafici» si illumina quando un passo o un'azione ha dei grafici ma accanto alla scena non c'era
    posto per aprirli da soli (full/index.js, openChartsIfRoom). */
 .charts-fab.mllm-charts-hint { border-color: var(--accent); color: #e0f2fe; box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.35); animation: mllm-charts-hint 0.9s ease-in-out 3; }

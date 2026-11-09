@@ -17,9 +17,11 @@ import {
   logTicks,
   nearestIndexSorted,
   niceStep,
+  keepTickLabels,
   niceTicks,
   placeLabels,
   summarize,
+  tickPriority,
   visibleLabel,
   visibleRange,
 } from "../js/core/ui/chartMath.js";
@@ -206,4 +208,79 @@ test("visibleLabel rende visibili spazi e a capo", () => {
   assert.equal(visibleLabel(" "), "␣");
   assert.equal(visibleLabel("\n"), "⏎");
   assert.equal(visibleLabel("a"), "a");
+});
+
+// ---------------------------------------------------------------- round E: istogramma unico, etichette log
+
+/** L'istogramma di chartMath com'era prima di usare stats.js: il riferimento per l'equivalenza. */
+function histogramBefore(values, { bins = 40, min, max } = {}) {
+  const n = Math.max(1, Math.floor(Number.isFinite(bins) ? bins : 40));
+  const range = extent(values);
+  if (!range) return null;
+  let lo = Number.isFinite(min) ? min : range.min;
+  let hi = Number.isFinite(max) ? max : range.max;
+  if (lo > hi) [lo, hi] = [hi, lo];
+  if (lo === hi) {
+    lo -= 0.5;
+    hi += 0.5;
+  }
+  const width = (hi - lo) / n;
+  const counts = new Uint32Array(n);
+  let total = 0;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (!Number.isFinite(v) || v < lo || v > hi) continue;
+    counts[Math.min(n - 1, Math.floor((v - lo) / width))]++;
+    total++;
+  }
+  const edges = new Float64Array(n + 1);
+  for (let i = 0; i <= n; i++) edges[i] = lo + i * width;
+  edges[n] = hi;
+  return { edges, counts, min: lo, max: hi, total, ignored: values.length - total };
+}
+
+test("histogram con i conteggi di shared/weights/stats.js: risultati identici a prima", () => {
+  let seed = 7;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+  const cases = [];
+  for (let k = 0; k < 60; k++) {
+    const n = 1 + Math.floor(rand() * 400);
+    const values = Array.from({ length: n }, () => {
+      const r = rand();
+      return r < 0.03 ? NaN : r < 0.05 ? Infinity : r < 0.06 ? -Infinity : (rand() - 0.5) * 10 ** Math.floor(rand() * 4);
+    });
+    const opts = { bins: 1 + Math.floor(rand() * 70) };
+    if (k % 3 === 1) Object.assign(opts, { min: -1, max: 1 }); // valori fuori scala da escludere
+    if (k % 7 === 2) Object.assign(opts, { min: 0.5, max: 0.5 }); // intervallo vuoto
+    cases.push([values, opts], [Float32Array.from(values), opts]);
+  }
+  cases.push([[3, 3, 3], { bins: 4 }], [[], {}], [[NaN, Infinity], {}], [["3", null, 2], { bins: 2 }], [[1, 2], { bins: 0 }], [[1, 2], { bins: NaN }]);
+  for (const [values, opts] of cases) {
+    const a = histogram(values, opts);
+    const b = histogramBefore(values, opts);
+    if (b === null) {
+      assert.equal(a, null);
+      continue;
+    }
+    assert.deepEqual([...a.counts], [...b.counts]);
+    assert.deepEqual([...a.edges], [...b.edges]);
+    assert.deepEqual([a.min, a.max, a.total, a.ignored], [b.min, b.max, b.total, b.ignored]);
+  }
+});
+
+test("etichette dei tick: in scala log sotto una decade le più vicine si saltano, restano le tonde", () => {
+  // 1,5…14: 9 e 10 distano pochi px; la griglia resta, l'etichetta del 9 no (10 è una potenza di 10)
+  const ticks = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const scale = logScale([1.5, 14], [200, 0]);
+  const keep = keepTickLabels(ticks.map(scale), ticks.map((t) => tickPriority(t, { log: true })));
+  assert.equal(keep[ticks.indexOf(10)], true);
+  assert.equal(keep[ticks.indexOf(9)], false);
+  assert.equal(keep[ticks.indexOf(2)], true);
+  assert.equal(keep[ticks.indexOf(5)], true);
+  const ys = ticks.map(scale).filter((_, i) => keep[i]);
+  for (let i = 1; i < ys.length; i++) for (let j = 0; j < i; j++) assert.ok(Math.abs(ys[i] - ys[j]) >= 12, "etichette distanti almeno 12 px");
+  // asse lineare ben distanziato: tutte
+  assert.deepEqual(keepTickLabels([0, 40, 80, 120]), [true, true, true, true]);
+  assert.deepEqual([1, 2, 5, 7, 10, 0.3].map((v) => tickPriority(v, { log: true })), [0, 1, 1, 2, 0, 2]);
+  assert.equal(tickPriority(7), 0, "asse lineare: tutte uguali");
 });

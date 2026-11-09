@@ -226,6 +226,7 @@ export const brainSpec = {
         year: 1998,
         venue: "Journal of Neuroscience 18(12):4722-4731",
         url: "https://doi.org/10.1523/JNEUROSCI.18-12-04722.1998",
+        note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; la cifra di circa 380.000 assoni va ricontrollata.",
       },
       {
         id: "matsuda2009",
@@ -755,6 +756,7 @@ export const brainSpec = {
         year: 2018,
         venue: "Frontiers in Cellular Neuroscience 12:181",
         url: "https://doi.org/10.3389/fncel.2018.00181",
+        note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 25.000–30.000 spine va ricontrollato sul testo.",
       },
     },
     {
@@ -768,6 +770,7 @@ export const brainSpec = {
         year: 1984,
         venue: "Journal of Neuroscience 4(11):2866-2876",
         url: "https://doi.org/10.1523/JNEUROSCI.04-11-02866.1984",
+        note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 3–8 Hz va ricontrollato (in letteratura si leggono anche 1–8 e 2–10 Hz).",
       },
     },
     {
@@ -820,6 +823,7 @@ export const brainSpec = {
         year: 1998,
         venue: "Journal of Neuroscience 18(12):4722-4731",
         url: "https://doi.org/10.1523/JNEUROSCI.18-12-04722.1998",
+        note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; la cifra di circa 380.000 assoni va ricontrollata.",
       },
     },
     {
@@ -1232,6 +1236,7 @@ export const brainSpec = {
       year: 1998,
       venue: "Journal of Neuroscience 18(12):4722-4731",
       url: "https://doi.org/10.1523/JNEUROSCI.18-12-04722.1998",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; la cifra di circa 380.000 assoni va ricontrollata.",
     },
     {
       id: "matsuda2009",
@@ -1248,6 +1253,7 @@ export const brainSpec = {
       year: 2018,
       venue: "Frontiers in Cellular Neuroscience 12:181",
       url: "https://doi.org/10.3389/fncel.2018.00181",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 25.000–30.000 spine va ricontrollato sul testo.",
     },
     {
       id: "grace1984a",
@@ -1256,6 +1262,7 @@ export const brainSpec = {
       year: 1984,
       venue: "Journal of Neuroscience 4(11):2866-2876",
       url: "https://doi.org/10.1523/JNEUROSCI.04-11-02866.1984",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 3–8 Hz va ricontrollato (in letteratura si leggono anche 1–8 e 2–10 Hz).",
     },
     {
       id: "bolam2012",

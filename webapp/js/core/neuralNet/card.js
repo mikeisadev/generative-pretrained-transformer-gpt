@@ -8,11 +8,25 @@
  */
 import { el, fmt } from "../dom.js";
 import { MODE } from "./activations.js";
+import { badgeOf, honestyLines, plural, valueSources } from "./honesty.js";
 import { ACTIVATION, AXIS_COLORS, HEAD_COLORS, LINK_COLORS, PATTERNS, ROLES } from "./roles.js";
 
 const NARROW = "(max-width: 640px)";
 const COMPACT_STAGE = 980; // px di stage sotto i quali la scheda parte ridotta
 const NARROW_MAX_VH = 0.52; // altezza massima della scheda sul telefono: la stessa di neuralnet.css (52vh)
+/**
+ * Rapporto lunghezza / altezza oltre il quale la scheda parte ridotta anche sugli schermi larghi (con
+ * `card: "auto"`): la rete di DeepSeek-V4.1-Flash è lunga 240 unità e alta 17, e accanto alla scheda
+ * aperta restava una striscia di 40 px. Ridotta, la rete prende tutta la larghezza dello stage.
+ */
+export const LONG_NETWORK_RATIO = 10;
+
+/** true se la scheda deve partire ridotta (telefono sempre; poi la specifica; poi stage stretto o rete molto lunga). */
+export function startsCollapsed({ narrow, stageWidth, mode = "auto", ratio = 0 }) {
+  if (narrow || mode === "collapsed") return true;
+  if (mode === "open") return false;
+  return stageWidth < COMPACT_STAGE || ratio >= LONG_NETWORK_RATIO;
+}
 const SPEEDS = [
   { value: 0.5, label: "0,5×" },
   { value: 1, label: "1×" },
@@ -31,6 +45,13 @@ function patternSwatch(pattern) {
 
 /** Area di un rettangolo {x0, y0, x1, y1} (0 se vuoto). */
 const area = (r) => Math.max(0, r.x1 - r.x0) * Math.max(0, r.y1 - r.y0);
+
+/** Da dove vengono i pesi di attention di una sezione, detto allo studente. */
+const ATTENTION_TEXT = Object.freeze({
+  real: "veri, calcolati dal modello",
+  illustrative: "illustrativi: mostrano lo schema, non vengono da un modello",
+  simulated: "simulati con un seme",
+});
 
 const paragraphs = (text, className = "nn-text") => (text ? text.split(/\n{2,}/).map((p) => el("p", { className }, p)) : []);
 
@@ -69,8 +90,12 @@ export class NetworkCard {
     this.total = links.segments.count;
     const collapse = el("button", { type: "button", className: "nn-collapse", ariaExpanded: "true", onclick: () => this.setCollapsed(!this.collapsed) }, el("span", { className: "nn-collapse-text" }, "Riduci"));
     this.collapseButton = collapse;
-    const badge = el("span", { className: `nn-badge ${net.simulated ? "sim" : "real"}` }, net.simulated ? "Attivazioni: simulazione didattica" : "Attivazioni vere");
-    badge.title = net.simulated ? `I valori non vengono da un modello: sono generati con un seme (${net.seed}) per mostrare il meccanismo.` : "I valori sono quelli calcolati dal modello.";
+    // badge a tre stati (vere, in parte vere, simulazione): è un pulsante che apre "Scala e onestà",
+    // dove c'è l'elenco di che cosa è vero (anche sul telefono, dove il suggerimento del mouse non c'è)
+    const sources = valueSources(model);
+    const info = badgeOf(sources, net.seed);
+    const badge = el("button", { type: "button", className: `nn-badge ${info.className}`, title: info.title, ariaLabel: `${info.text}. ${info.title}`, onclick: () => this.showHonesty() }, info.text);
+    this.badge = badge;
     const head = el("header", { className: "nn-head" }, el("div", { className: "nn-head-text" }, el("h2", { className: "nn-title" }, net.title), badge), collapse);
 
     this.playButton = el("button", { type: "button", className: "nn-btn nn-primary", ariaPressed: "false", onclick: () => this.on.play() }, "▶ Anima");
@@ -96,32 +121,77 @@ export class NetworkCard {
     this.density = el("input", { type: "range", min: "2", max: "100", step: "1", className: "nn-range", ariaLabel: "Densità dei collegamenti disegnati", oninput: (e) => this.on.density(Number(e.target.value) / 100) });
     this.densityText = el("span", { className: "nn-range-value" });
     const densityRow = this.total > 0 ? el("div", { className: "nn-row" }, el("span", { className: "nn-row-label" }, "Collegamenti"), this.density, this.densityText) : null;
-    this.status = el("p", { className: "nn-status" });
+    this.status = el("p", { className: "nn-status", ariaLive: "polite" });
+
+    // reti lunghe: la vista iniziale è l'ingresso con i primi strati; qui si scorre a parti (o si vede tutta)
+    this.walkPrev = el("button", { type: "button", className: "nn-btn nn-walk-step", ariaLabel: "Parte precedente della rete", title: "Parte precedente (verso l'ingresso)", onclick: () => this.on.walk?.(-1) }, "◀");
+    this.walkNext = el("button", { type: "button", className: "nn-btn nn-walk-step", ariaLabel: "Parte successiva della rete", title: "Parte successiva (verso l'uscita)", onclick: () => this.on.walk?.(1) }, "▶");
+    this.walkLabel = el("span", { className: "nn-walk-label" });
+    const whole = el("button", { type: "button", className: "nn-btn", title: "Tutta la rete di lato: si leggono le parti e le ripetizioni (i neuroni sono piccoli)", onclick: () => this.on.whole?.() }, "Tutta la rete");
+    this.walk = el("div", { className: "nn-row nn-walk", role: "group", ariaLabel: "Parti della rete", hidden: true }, this.walkPrev, this.walkLabel, this.walkNext, whole);
 
     const controls = el(
       "div",
       { className: "nn-controls" },
       el("div", { className: "nn-buttons" }, this.playButton, speed, thick, side),
+      this.walk,
       sliceRow,
       densityRow,
       this.status,
     );
 
     this.detail = el("div", { className: "nn-detail", hidden: true, ariaLive: "polite" });
+    this.honesty = el(
+      "details",
+      { className: "nn-more nn-honesty" },
+      el("summary", {}, "Scala e onestà"),
+      ...honestyLines(sources, net.seed).map((line) => el("p", { className: "nn-text nn-truth" }, line)),
+      el("p", { className: "nn-text" }, net.scale || "Rete ridotta."),
+      net.note ? el("p", { className: "nn-text" }, net.note) : null,
+      el("p", { className: "nn-text nn-muted" }, this.capNote(model)),
+    );
     const body = el(
       "div",
       { className: "nn-body" },
       ...paragraphs(net.intro),
       this.detail,
       this.legend(model),
-      el("details", { className: "nn-more" }, el("summary", {}, "Scala e onestà"), el("p", { className: "nn-text" }, net.scale || "Rete ridotta."), net.note ? el("p", { className: "nn-text" }, net.note) : null, el("p", { className: "nn-text nn-muted" }, this.capNote(model))),
+      this.honesty,
       this.index(net),
       net.sources.length ? el("details", { className: "nn-more" }, el("summary", {}, `Fonti (${net.sources.length})`), el("ul", { className: "nn-sources" }, ...net.sources.map((s) => el("li", {}, el("a", { href: s.url, target: "_blank", rel: "noopener noreferrer" }, s.title), s.note ? el("span", { className: "nn-muted" }, ` · ${s.note}`) : null)))) : null,
     );
     this.body = body;
     this.root.replaceChildren(head, controls, body);
-    // stage stretto (telefono, o finestra media con la sidebar aperta): si parte ridotti, la scena ha spazio
-    this.setCollapsed(this.narrow.matches || this.layer.clientWidth < COMPACT_STAGE);
+    // telefono, stage stretto, o rete molto più lunga che alta: si parte ridotti, la scena ha spazio
+    const { min, max } = model.layout.bounds;
+    const ratio = (max[0] - min[0]) / Math.max(1e-6, max[1] - min[1]);
+    this.setCollapsed(startsCollapsed({ narrow: this.narrow.matches, stageWidth: this.layer.clientWidth, mode: net.card, ratio }));
+  }
+
+  /** Il badge apre "Scala e onestà": la scheda si apre e l'elenco di che cosa è vero va in vista. */
+  showHonesty() {
+    if (!this.honesty) return;
+    if (this.collapsed) this.setCollapsed(false);
+    this.honesty.open = true;
+    this.honesty.scrollIntoView?.({ block: "nearest" });
+    this.honesty.querySelector("summary")?.focus({ preventScroll: true });
+  }
+
+  /**
+   * Riga delle parti di una rete lunga: { index, count, title } (index da 0; -1: si vede la rete
+   * d'insieme, e ▶ riparte dalla prima parte) o null per nasconderla. I pulsanti ai due estremi si
+   * spengono (la rete non continua da quella parte).
+   */
+  setWalk(walk) {
+    if (!this.walk) return;
+    this.walk.hidden = !walk;
+    if (!walk) return;
+    // nella riga il numero; il nome della parte nel suggerimento (e nella riga di stato quando si scorre)
+    const whole = walk.index < 0;
+    this.walkLabel.textContent = whole ? `Insieme: ${walk.count} parti` : `Parte ${walk.index + 1} di ${walk.count}`;
+    this.walkLabel.title = whole ? "Si vede tutta la rete: ▶ riparte dalla prima parte, l'ingresso" : walk.title ? `Parte ${walk.index + 1} di ${walk.count}: ${walk.title}` : "";
+    this.walkPrev.disabled = walk.index <= 0;
+    this.walkNext.disabled = !whole && walk.index >= walk.count - 1;
   }
 
   /** Legenda: assi, colori delle attivazioni presenti, ruoli e meccanismi della rete. */
@@ -219,18 +289,23 @@ export class NetworkCard {
     if (this.sliceSelect) this.sliceSelect.value = t === null ? "" : String(t);
   }
 
-  /** Dettaglio di una sezione (clic sulla scena o sull'indice). */
-  showSection(s, { incoming, outgoing, simulated }) {
+  /**
+   * Dettaglio di una sezione (clic sulla scena o sull'indice). `incoming`/`outgoing`: una voce per
+   * sezione collegata (view.js raggruppa i collegamenti verso la stessa sezione); `attention`: da dove
+   * vengono i pesi di attention che arrivano qui ("real" | "illustrative" | "simulated" | null).
+   */
+  showSection(s, { incoming, outgoing, simulated, attention = null }) {
     const role = ROLES[s.role];
     const depth = s.depth.kind === "grid" ? `griglia ${s.depth.rows} × ${s.depth.cols}` : s.depth.count > 1 ? `${s.depth.count} ${s.depth.label}` : "nessuna profondità";
     const drawn = s.role === "experts"
-      ? `${s.experts} esperti${s.shared ? ` + ${s.shared} condiviso` : ""} × ${s.neurons} neuroni, ${s.active} attivi per ${s.depth.label || "posizione"}`
-      : s.depth.kind === "grid" ? `${s.neurons} canali × ${s.depth.rows} × ${s.depth.cols}` : `${s.slabs > 1 ? `${s.slabs} lastre × ` : ""}${s.neurons} neuroni × ${depth}`;
+      ? `${plural(s.experts, "esperto", "esperti")}${s.shared ? ` + ${plural(s.shared, "condiviso", "condivisi")}` : ""} × ${plural(s.neurons, "neurone", "neuroni")}, ${plural(s.active, "attivo", "attivi")} per ${s.depth.label || "posizione"}`
+      : s.depth.kind === "grid" ? `${plural(s.neurons, "canale", "canali")} × ${s.depth.rows} × ${s.depth.cols}` : `${s.slabs > 1 ? `${s.slabs} lastre × ` : ""}${plural(s.neurons, "neurone", "neuroni")} × ${depth}`;
     const facts = [
       ["Disegnati", `${drawn} = ${fmt(s.units)}`],
-      s.real ? ["Nel modello vero", `${fmt(s.real)} ${s.depth.kind === "grid" ? "canali" : "per posizione"}`] : null,
+      s.real ? ["Nel modello vero", s.depth.kind === "grid" ? plural(s.real, "canale", "canali") : `${fmt(s.real)} per posizione`] : null,
       s.heads > 1 ? ["Head", fmt(s.heads)] : null,
       ["Valori", simulated ? "simulazione didattica" : "veri"],
+      attention ? ["Pesi di attention", ATTENTION_TEXT[attention]] : null,
       incoming.length ? ["Riceve da", incoming.join(" · ")] : null,
       outgoing.length ? ["Manda a", outgoing.join(" · ")] : null,
     ].filter(Boolean);

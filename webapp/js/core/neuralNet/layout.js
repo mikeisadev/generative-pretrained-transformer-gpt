@@ -48,7 +48,10 @@ export const SPACING = Object.freeze({
  * @returns {NetworkLayout}
  */
 export function computeLayout(net, spacing = SPACING) {
-  const maxCols = Math.max(1, ...net.sections.map((s) => s.depth.cols), ...net.sections.map((s) => s.depth.rows));
+  // le sezioni che campionano l'asse delle fette con un altro passo (EnCodec a 36 posizioni accanto ai 12
+  // frame, una KV compressa 2 → 1) non dettano la profondità: si stendono sulla stessa estensione
+  const sized = net.sections.filter((s) => !proportionalDepth(s, net));
+  const maxCols = Math.max(1, net.slices.count, ...sized.map((s) => s.depth.cols), ...sized.map((s) => s.depth.rows));
   // un passo in profondità per tutta la rete (le fette si allineano), stretto se la profondità è grande;
   // con le griglie 2D le celle sono più grandi: ogni canale è una lastra quadrata, come una feature map
   const preferred = net.sections.some((s) => s.depth.kind === "grid") ? spacing.grid : spacing.depth;
@@ -62,7 +65,7 @@ export function computeLayout(net, spacing = SPACING) {
   let cursor = 0;
   for (const item of net.items) {
     if (item.kind === "section") {
-      const box = placeSection(item, cursor, dz, spacing, attentionWide.has(item.id));
+      const box = placeSection(item, cursor, depthStep(item, net, dz), spacing, attentionWide.has(item.id));
       sections.push(box);
       cursor = box.x1 + spacing.section + (attentionLoops.has(item.id) ? spacing.loopRoom : 0);
     } else {
@@ -209,8 +212,24 @@ export function unitPosition(s, box, u, out, o = 0) {
   return out;
 }
 
-/** true se la sezione si accende e si spegne con la fetta scelta: ha profondità dello stesso tipo delle fette. */
-export const takesPartInSlices = (s, net) => s.depth.count > 1 && s.depth.kind === net.slices.kind;
+/**
+ * true se la sezione si accende e si spegne con la fetta scelta: ha profondità dello stesso tipo delle
+ * fette e non l'ha esclusa la specifica (`slices: false`).
+ */
+export const takesPartInSlices = (s, net) => s.depth.count > 1 && s.depth.kind === net.slices.kind && s.slices !== false;
+
+/**
+ * true se la sezione campiona l'asse delle fette (in fila) con un altro numero di posizioni: 36 istanti
+ * accanto a 12 frame, una KV compressa 2 → 1 accanto ai token. Le sue posizioni si stendono sulla stessa
+ * estensione in z delle fette (passo proporzionale): la posizione p sta alla z del suo istante.
+ */
+export const proportionalDepth = (s, net) => net.slices.kind === "line" && takesPartInSlices(s, net) && s.depth.count !== net.slices.count;
+
+/**
+ * Passo in profondità di una sezione: quello della rete, o (passo proporzionale) quello che porta il
+ * centro della posizione p alla frazione (p + 0,5) / D dell'asse, come la fetta t sta a (t + 0,5) / T.
+ */
+export const depthStep = (s, net, dz) => (proportionalDepth(s, net) ? (dz * net.slices.count) / s.depth.count : dz);
 
 /** Posizione normalizzata in profondità (0…1, centro della colonna) per la scelta della fetta; -1 = senza profondità. */
 export function unitDepthU(s, u) {

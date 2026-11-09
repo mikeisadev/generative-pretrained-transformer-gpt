@@ -23,7 +23,7 @@
  * A riposo il costo per frame è un paio di confronti: niente allocazioni, niente calcoli.
  */
 import * as THREE from "three";
-import { meshBounds } from "./director.js";
+import { instancedBounds, meshBounds } from "./director.js";
 import { AXES, SPEED, boundsMargin, classifyKey, dollyDistance, excessToBox, expandBox, isDoubleTap, isLost, maxUserDistance, resistMove, speedMultiplier, stepVelocity } from "./navMath.js";
 
 const PREF_MODE = "nav.dragMode";
@@ -149,6 +149,7 @@ export class Navigation {
     this.projScreen = new THREE.Matrix4();
     this.sphere = new THREE.Sphere();
     this.meshSphere = new THREE.Sphere(); // per anyVisibleInFrustum (this.sphere serve a checkLost nello stesso momento)
+    this.meshBox = new THREE.Box3(); // idem, per gli InstancedMesh
 
     this.setDragMode(readPref(PREF_MODE, "rotate"), { persist: false, broadcast: false });
     this.bind();
@@ -160,10 +161,39 @@ export class Navigation {
     this.homeFn = typeof fn === "function" ? fn : null;
   }
 
-  /** Confini della navigazione: un THREE.Box3 o una funzione che lo restituisce (null = automatici). */
+  /**
+   * Confini della navigazione: un THREE.Box3 o una funzione che lo restituisce (null = automatici).
+   * Restituisce la sorgente di prima, così chi li cambia per un po' (una disposizione, una vista) può
+   * rimetterli tali e quali.
+   */
   setBounds(source) {
+    const previous = this.boundsSource;
     this.boundsSource = source ?? null;
     this.boundsAt = -Infinity;
+    return previous;
+  }
+
+  /** La sorgente dei confini data a setBounds (Box3, funzione o null = automatici). */
+  getBounds() {
+    return this.boundsSource;
+  }
+
+  /**
+   * La vista iniziale fotografata ("Centra" quando il tab non ha dato setHome, e il riferimento dello zoom
+   * indietro massimo): { position, target } (copie) o null se non c'è ancora.
+   */
+  getHomePose() {
+    return this.homePose ? { position: this.homePose.position.clone(), target: this.homePose.target.clone() } : null;
+  }
+
+  /**
+   * Imposta la vista iniziale (es. una vista riaperta con la camera dove lo studente l'aveva lasciata:
+   * "Centra" deve tornare alla vista iniziale di prima, non lì). null = la si fotografa di nuovo al
+   * prossimo volo finito.
+   */
+  setHomePose(pose) {
+    this.homePose = pose ? { position: pose.position.clone(), target: pose.target.clone() } : null;
+    if (!pose) this.framesSinceStart = 0;
   }
 
   /**
@@ -712,11 +742,16 @@ export class Navigation {
   anyVisibleInFrustum(object) {
     if (!object.visible) return false;
     if (object.isMesh && !object.userData.isFrame && !object.userData.noBounds && isPickable(object)) {
-      // InstancedMesh: la sfera di tutte le istanze (quella della geometria è di una sola)
-      const owner = object.isInstancedMesh ? object : object.geometry;
-      if (!owner.boundingSphere) owner.computeBoundingSphere();
-      this.meshSphere.copy(owner.boundingSphere).applyMatrix4(object.matrixWorld);
-      if (this.frustum.intersectsSphere(this.meshSphere)) return true;
+      if (object.isInstancedMesh) {
+        // tutte le istanze visibili, ricalcolate quando le loro matrici cambiano (la sfera di three.js
+        // dell'InstancedMesh resta quella del primo calcolo)
+        const local = instancedBounds(object);
+        if (!local.isEmpty() && this.frustum.intersectsBox(this.meshBox.copy(local).applyMatrix4(object.matrixWorld))) return true;
+      } else {
+        if (!object.geometry.boundingSphere) object.geometry.computeBoundingSphere();
+        this.meshSphere.copy(object.geometry.boundingSphere).applyMatrix4(object.matrixWorld);
+        if (this.frustum.intersectsSphere(this.meshSphere)) return true;
+      }
     }
     for (const child of object.children) if (this.anyVisibleInFrustum(child)) return true;
     return false;

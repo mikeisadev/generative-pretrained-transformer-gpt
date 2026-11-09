@@ -43,6 +43,8 @@ export function createTabLayout(root, { code = false, charts = false, player = f
   const { host, director, nav, player: actions } = createSceneStack(stage, { root, player, codePanel, charts: chartsPanel, coveredRight, background });
   codePanel?.onResize(() => host.resize());
   if (chartsPanel?.onResize) chartsPanel.onResize(() => host.resize());
+  // Grafici aperti: il codice si riduce accanto a loro invece di restarne una striscia sotto (codePanel.js).
+  if (codePanel && chartsPanel) codePanel.followCharts(chartsPanel);
 
   const toggle = el(
     "button",

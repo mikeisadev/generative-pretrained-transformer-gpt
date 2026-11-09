@@ -233,7 +233,7 @@ export const brainSpec = {
         year: 2016,
         venue: "In: The Neurobiological Basis of Memory (Springer), cap. 4",
         url: "https://doi.org/10.1007/978-3-319-15759-7_4",
-        note: "Stime nel ratto per una piramidale di CA3: circa 12.000 sinapsi ricorrenti, circa 46 da fibre muschiose, circa 4.000 dalla via perforante.",
+        note: "Stime nel ratto per una piramidale di CA3: circa 12.000 sinapsi ricorrenti, circa 46 da fibre muschiose, circa 4.000 dalla via perforante. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Capitolo Springer, riferimento coerente; nelle opere di Rolls la stima per la via perforante è di solito 3.600 sinapsi per cellula di CA3, quindi «circa 4.000» sarebbe un arrotondamento: da ricontrollare sul capitolo.",
       },
       {
         id: "bliss1973",
@@ -447,7 +447,7 @@ export const brainSpec = {
           year: 2016,
           venue: "In: The Neurobiological Basis of Memory (Springer), cap. 4",
           url: "https://doi.org/10.1007/978-3-319-15759-7_4",
-          note: "Stime nel ratto per una piramidale di CA3: circa 12.000 sinapsi ricorrenti, circa 46 da fibre muschiose, circa 4.000 dalla via perforante.",
+          note: "Stime nel ratto per una piramidale di CA3: circa 12.000 sinapsi ricorrenti, circa 46 da fibre muschiose, circa 4.000 dalla via perforante. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Capitolo Springer, riferimento coerente; nelle opere di Rolls la stima per la via perforante è di solito 3.600 sinapsi per cellula di CA3, quindi «circa 4.000» sarebbe un arrotondamento: da ricontrollare sul capitolo.",
         },
         {
           id: "rolls2013",
@@ -719,11 +719,13 @@ export const brainSpec = {
         year: 2018,
         venue: "Frontiers in Cellular Neuroscience 12:181",
         url: "https://doi.org/10.3389/fncel.2018.00181",
+        note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 25.000–30.000 spine va ricontrollato sul testo.",
       },
     },
     {
       claim: "Interneuroni a canestro PV+",
       value: "possono scaricare a oltre 200 Hz",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; volume e pagine (28(12):4954-4967) da ricontrollare.",
       source: {
         id: "hijazi2023",
         title: "Fast-spiking parvalbumin-positive interneurons in brain physiology and Alzheimer's disease",
@@ -731,6 +733,7 @@ export const brainSpec = {
         year: 2023,
         venue: "Molecular Psychiatry 28(12):4954-4967",
         url: "https://doi.org/10.1038/s41380-023-02168-y",
+        note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; volume e pagine (28(12):4954-4967) da ricontrollare.",
       },
     },
     {
@@ -768,7 +771,7 @@ export const brainSpec = {
         year: 2016,
         venue: "In: The Neurobiological Basis of Memory (Springer), cap. 4",
         url: "https://doi.org/10.1007/978-3-319-15759-7_4",
-        note: "Stime nel ratto per una piramidale di CA3: circa 12.000 sinapsi ricorrenti, circa 46 da fibre muschiose, circa 4.000 dalla via perforante.",
+        note: "Stime nel ratto per una piramidale di CA3: circa 12.000 sinapsi ricorrenti, circa 46 da fibre muschiose, circa 4.000 dalla via perforante. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Capitolo Springer, riferimento coerente; nelle opere di Rolls la stima per la via perforante è di solito 3.600 sinapsi per cellula di CA3, quindi «circa 4.000» sarebbe un arrotondamento: da ricontrollare sul capitolo.",
       },
     },
   ],
@@ -900,7 +903,7 @@ export const brainSpec = {
       year: 2016,
       venue: "In: The Neurobiological Basis of Memory (Springer), cap. 4",
       url: "https://doi.org/10.1007/978-3-319-15759-7_4",
-      note: "Stime nel ratto per una piramidale di CA3: circa 12.000 sinapsi ricorrenti, circa 46 da fibre muschiose, circa 4.000 dalla via perforante.",
+      note: "Stime nel ratto per una piramidale di CA3: circa 12.000 sinapsi ricorrenti, circa 46 da fibre muschiose, circa 4.000 dalla via perforante. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Capitolo Springer, riferimento coerente; nelle opere di Rolls la stima per la via perforante è di solito 3.600 sinapsi per cellula di CA3, quindi «circa 4.000» sarebbe un arrotondamento: da ricontrollare sul capitolo.",
     },
     {
       id: "rolls2013",
@@ -1085,6 +1088,7 @@ export const brainSpec = {
       year: 2018,
       venue: "Frontiers in Cellular Neuroscience 12:181",
       url: "https://doi.org/10.3389/fncel.2018.00181",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 25.000–30.000 spine va ricontrollato sul testo.",
     },
     {
       id: "hijazi2023",
@@ -1093,6 +1097,7 @@ export const brainSpec = {
       year: 2023,
       venue: "Molecular Psychiatry 28(12):4954-4967",
       url: "https://doi.org/10.1038/s41380-023-02168-y",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; volume e pagine (28(12):4954-4967) da ricontrollare.",
     },
   ],
 };

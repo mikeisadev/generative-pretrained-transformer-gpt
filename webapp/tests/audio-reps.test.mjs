@@ -17,6 +17,7 @@ import { atlasKind } from "../js/core/brain/atlas.js";
 import { resolveNeuronType } from "../js/core/brain/morphology.js";
 import { normalizeBrainSpec, safeUrl, STRENGTHS } from "../js/core/brain/spec.js";
 import { LINK_LIMITS } from "../js/core/neuralNet/links.js";
+import { REP_LINKS } from "../js/core/repLinks.js";
 import { buildNetworkModel } from "../js/core/neuralNet/model.js";
 import { LIMITS, normalizeSpec } from "../js/core/neuralNet/spec.js";
 import { prepareEntry, search } from "../js/core/search.js";
@@ -74,7 +75,7 @@ test("rete: la specifica passa la validazione del nucleo senza avvisi per i due 
     assert.ok(model.links.sliceSegments.count < 2000, `pesi veri sulla fetta: ${model.links.sliceSegments.count}`);
     assert.ok(n.sources.length >= 12 && n.sources.every((s) => /^https:\/\//.test(s.url)));
     assert.ok(n.scale.length > 300 && n.note.startsWith("Valori veri"), "scala e onestà dichiarate");
-    assert.equal(n.simulated, true, "il badge dice simulazione didattica: non tutto è vero");
+    assert.equal(n.simulated, true, "non tutto è vero: il badge dice «in parte vere»");
   }
 });
 
@@ -297,9 +298,10 @@ test("rete: Whisper riceve il log-Mel vero del brano e la codifica di posizione 
     for (let i = 0; i < WHISPER_TEXT.length; i++) for (let j = 0; j < WHISPER_TEXT.length; j++) assert.equal(valueAt(tok, i, j), i === j ? 1 : 0);
     assert.equal(tok.valueLabel, "(token d'esempio)", "il valore dice che è un esempio");
   }
-  // lo stesso testo della scena (sceneWhisper.js importa three.js: si legge il sorgente)
-  const scene = await source("../js/tabs/audio/sceneWhisper.js");
-  assert.deepEqual(JSON.parse(scene.match(/export const WHISPER_TOKENS = (\[[^\]]+\]);/)[1]), [...WHISPER_TEXT]);
+  // lo stesso testo della scena: il modulo di soli dati che la scena di Whisper importa e riesporta
+  const { WHISPER_TOKENS } = await import("../js/tabs/audio/whisperTokens.js");
+  assert.deepEqual([...WHISPER_TOKENS], [...WHISPER_TEXT]);
+  assert.match(await source("../js/tabs/audio/sceneWhisper.js"), /import \{ WHISPER_TOKENS \} from "\.\/whisperTokens\.js";/);
   const w = whisperWindow(lab, STYLES[0]);
   assert.deepEqual(w.channels, [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352]);
 });
@@ -404,12 +406,24 @@ test("cervello: le fonti citate da circuito, fatti e introduzione esistono e han
 test("cervello: i testi sono quelli della ricerca verificata, parola per parola", { skip: !(RESEARCH && existsSync(RESEARCH)) && "BRAIN_RESEARCH non indicato (la ricerca sta fuori dal repository)" }, async () => {
   const data = JSON.parse(await readFile(RESEARCH, "utf8"));
   const r = data.tabs.audio;
+  // L'unica aggiunta ai testi della ricerca: la cautela della verifica in fondo alla nota di ogni fonte segnata
+  // "da ricontrollare" (verification.checked_sources), con le parole della verifica (round E, richiesta 31).
+  const flagged = new Map(data.verification.checked_sources.filter((v) => /ricontrollare/.test(v.status)).map((v) => [v.id, v.note]));
+  const withCautions = (v) => {
+    if (Array.isArray(v)) return v.map(withCautions);
+    if (!v || typeof v !== "object") return v;
+    const out = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, withCautions(x)]));
+    if (typeof out.title === "string" && flagged.has(out.id) && !/ricontrollar/i.test(out.note ?? "")) {
+      out.note = [out.note, `Da ricontrollare (verifica della ricerca dell'8 novembre 2026): ${flagged.get(out.id)}`].filter(Boolean).join(" ");
+    }
+    return out;
+  };
   assert.equal(brainSpec.intro, r.intro);
   assert.deepEqual([brainSpec.regions, brainSpec.markers, brainSpec.pathways], [r.regions, r.markers, r.pathways]);
-  assert.deepEqual(brainSpec.analogies, r.analogies);
+  assert.deepEqual(brainSpec.analogies, withCautions(r.analogies));
   const { layout, ...circuit } = r.circuit;
   assert.ok(layout, "il campo descrittivo della ricerca esiste ed è l'unico tolto");
-  assert.deepEqual(brainSpec.circuit, circuit);
+  assert.deepEqual(brainSpec.circuit, withCautions(circuit));
   for (const f of brainSpec.facts) {
     const global = data.facts.find((y) => y.value === f.value && y.source.id === f.source.id);
     const typed = Object.values(data.neuron_types).flatMap((t) => t.data).find((d) => d.text === f.value && d.source?.id === f.source.id);
@@ -433,14 +447,13 @@ test("ricerca: voci view:rete e view:cervello trovabili con le parole dei meccan
 });
 
 test("installazione: rappresentazioni dopo i pannelli del tab e prima di Fonti, goto che comincia da reps.goto", async () => {
-  const core = await source("../js/core/representations.js");
-  assert.match(core, /REP_LINKS = \{ rete: "network", cervello: "brain" \}/, "gli id delle voci sono quelli del nucleo");
+  assert.deepEqual({ ...REP_LINKS }, { rete: "network", cervello: "brain" }, "gli id delle voci sono quelli del nucleo (core/repLinks.js)");
   const index = await source("../js/tabs/audio/index.js");
   const install = index.indexOf("installRepresentations(ui");
   assert.ok(install > index.indexOf('addPane({ id: "viste"'), "dopo i pannelli del tab");
   assert.ok(install < index.indexOf('addPane({ id: "fonti"'), "il pannello Cervello sta prima delle Fonti");
   assert.match(index, /async function goto\(target\) \{[^}]*?const shown = reps\.goto\(target\);\s+if \(shown\) return shown;/, "goto comincia con reps.goto");
   assert.match(index, /import\("\.\/brain\.js"\)\.then\(\(m\) => m\.brainSpec\)/);
-  assert.match(index, /buildAudioNetworkSpec: build/, "la rete si costruisce con i numeri del laboratorio");
-  assert.match(index, /network\.refresh\(\) && reps\.current === "network"/, "cambiando brano la rete aperta si aggiorna");
+  assert.match(index, /buildAudioNetworkSpec\(lab, \{ style: state\.style \}\)\),\s+cache: false,/, "la rete si costruisce a ogni apertura con i numeri del laboratorio");
+  assert.match(index, /if \(reps\.current === "network"\) void reps\.refresh\("network"\);/, "cambiando brano la rete aperta si rifà (stessa scena, stessa camera)");
 });

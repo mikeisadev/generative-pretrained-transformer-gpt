@@ -24,6 +24,7 @@ const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2
  * (userData.isFrame) e gli oggetti marcati userData.noBounds.
  * Un oggetto con userData.members usa l'unione dei membri (gruppi "virtuali").
  * Con { visibleOnly: true } conta solo ciò che è visibile (utile per inquadrare un livello LOD).
+ * Un InstancedMesh conta tutte le sue istanze (instancedBounds), non solo la geometria di una.
  */
 export function meshBounds(object, { visibleOnly = false } = {}) {
   const box = new THREE.Box3();
@@ -32,8 +33,13 @@ export function meshBounds(object, { visibleOnly = false } = {}) {
     // visibleOnly: salta i sotto-alberi nascosti (ma non la radice, es. un livello LOD ancora in dissolvenza)
     if (visibleOnly && !isRoot && !child.visible) return;
     if (child.isMesh && !child.userData.isFrame && !child.userData.noBounds) {
-      if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
-      box.union(part.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld));
+      if (child.isInstancedMesh) {
+        const local = instancedBounds(child);
+        if (!local.isEmpty()) box.union(part.copy(local).applyMatrix4(child.matrixWorld));
+      } else {
+        if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
+        box.union(part.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld));
+      }
     }
     for (const c of child.children) visit(c, false);
   };
@@ -41,6 +47,33 @@ export function meshBounds(object, { visibleOnly = false } = {}) {
     target.updateWorldMatrix(true, true);
     visit(target, true);
   }
+  return box;
+}
+
+const instanceCache = new WeakMap(); // InstancedMesh → { version, count, geometry, box }
+const instanceMatrix = new THREE.Matrix4();
+const instanceBox = new THREE.Box3();
+
+/**
+ * Box (coordinate locali del mesh) di tutte le istanze visibili di un InstancedMesh: le prime `count`,
+ * saltando quelle con scala zero (il modo comune di nasconderne una: il suo box sarebbe un punto, magari
+ * nell'origine, e allargherebbe l'inquadratura verso il nulla). Ricalcolato solo se le matrici delle
+ * istanze (versione dell'attributo), il loro numero o la geometria cambiano: la navigazione chiede i
+ * confini ogni 3 s e un mesh con migliaia di istanze non deve costare a ogni richiesta.
+ */
+export function instancedBounds(mesh) {
+  const geometry = mesh.geometry;
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const cached = instanceCache.get(mesh);
+  if (cached && cached.version === mesh.instanceMatrix.version && cached.count === mesh.count && cached.geometry === geometry) return cached.box;
+  const box = cached?.box ?? new THREE.Box3();
+  box.makeEmpty();
+  for (let i = 0; i < mesh.count; i++) {
+    mesh.getMatrixAt(i, instanceMatrix);
+    if (Math.abs(instanceMatrix.determinant()) < 1e-12) continue; // istanza nascosta con scala zero
+    box.union(instanceBox.copy(geometry.boundingBox).applyMatrix4(instanceMatrix));
+  }
+  instanceCache.set(mesh, { version: mesh.instanceMatrix.version, count: mesh.count, geometry, box });
   return box;
 }
 
@@ -146,6 +179,34 @@ export class CameraDirector {
     const f = this.flight;
     this.flight = null;
     f?.resolve?.();
+  }
+
+  /** true mentre un volo è in corso (la camera cambia a ogni frame). */
+  get flying() {
+    return this.flight !== null;
+  }
+
+  /**
+   * Porta subito il volo in corso alla meta e lo risolve (es. una vista alternativa copre la scena: lo
+   * studente tornerà lì, non a metà strada). Restituisce true se c'era un volo.
+   */
+  finish() {
+    const f = this.flight;
+    if (!f) return false;
+    this.camera.position.copy(f.toPos);
+    this.controls.target.copy(f.toTarget);
+    this.cancel();
+    return true;
+  }
+
+  /** true dentro la finestra dell'ultimo noteUserIntent: un volo chiesto adesso è "dello studente". */
+  get intentActive() {
+    return performance.now() <= this.userIntentUntil;
+  }
+
+  /** Numero dell'ultimo gesto dello studente (cresce a ogni noteUserIntent): per riconoscere un gesto già usato. */
+  get lastIntent() {
+    return this.intentStamp;
   }
 
   // ---------------------------------------------------------------- inseguimento / camera libera

@@ -235,85 +235,25 @@ export async function networkSpecFor(state) {
 }
 
 /**
- * Il collegamento con core/representations.js. Il nucleo carica la specifica UNA volta (la tiene in
- * cache): qui `load()` restituisce un "segnaposto vivo" (Proxy) che legge sempre la specifica attuale,
- * e quando il run A o lo step cambiano con la Rete neurale aperta il livello si ricostruisce con
- * `ui.host.stop(); ui.host.start()` (il nucleo lo documenta: con un livello attivo stop lo libera e start
- * lo riapre). Richiesta al nucleo nel report: un'API `reps.reload("network")`.
+ * Il collegamento con core/representations.js: la specifica si costruisce a ogni apertura della Rete
+ * neurale (`cache: false`) per il run A e lo step di adesso. Se run A o step cambiano con la rete aperta,
+ * `reps.refresh("network")` la rifà sulla stessa scena e con la stessa camera (niente livello WebGL nuovo),
+ * poco dopo l'ultimo cambio: il cursore dello step può scorrere.
  */
 export function createNetworkSource(tab, { build = networkSpecFor, delay = 450 } = {}) {
-  let current = { title: "Rete neurale", scale: "", sections: [{ id: "attesa", label: "…", role: "data", neurons: 1 }], links: [] };
-  let version = 0;
-  let readVersion = -1; // ultima versione letta dalla vista aperta (null: non ancora letta)
-  let stale = true;
-  let building = null;
   let timer = 0;
   let reps = null;
-  const holder = new Proxy(
-    {},
-    {
-      get: (_, key) => {
-        // risolvere una promessa con il segnaposto ne legge `then`: non è la vista che legge la specifica
-        if (key !== "then" && typeof key !== "symbol" && (readVersion === null || readVersion < version)) readVersion = version;
-        return current[key];
-      },
-      has: (_, key) => key in current,
-      ownKeys: () => Reflect.ownKeys(current),
-      getOwnPropertyDescriptor: (_, key) => {
-        const d = Object.getOwnPropertyDescriptor(current, key);
-        return d ? { ...d, configurable: true } : undefined;
-      },
-    },
-  );
-
-  /** Rifà la specifica se è vecchia (una costruzione alla volta; se nel frattempo cambia ancora, si rifà). */
-  async function refresh() {
-    if (building) return building;
-    if (!stale) return undefined;
-    building = (async () => {
-      try {
-        while (stale) {
-          stale = false;
-          current = await build(tab.state);
-          version++;
-        }
-      } finally {
-        building = null;
-      }
-    })();
-    return building;
-  }
-
-  /** Se la vista aperta ha letto una specifica vecchia, il livello si ricostruisce con quella nuova. */
-  function reloadIfStale() {
-    if (reps?.current !== "network" || readVersion === null || readVersion >= version) return;
-    tab.ui.host.stop(); // con la Rete neurale attiva: il livello si chiude (la scena del tab resta ferma)…
-    tab.ui.host.start(); // …e si riapre leggendo la specifica nuova (la camera resta dov'era)
-  }
-
-  /** Run o step cambiati: la specifica è da rifare; con la Rete neurale aperta, poco dopo (il cursore può scorrere). */
-  function invalidate() {
-    stale = true;
-    if (reps?.current !== "network") return;
-    clearTimeout(timer);
-    timer = setTimeout(() => void refresh().then(reloadIfStale, () => {}), delay);
-  }
-
   return {
-    load: () => refresh().then(() => holder),
-    invalidate,
-    get version() {
-      return version;
+    load: () => build(tab.state),
+    /** Run o step cambiati: con la Rete neurale aperta la si rifà, quando lo studente si ferma. */
+    invalidate() {
+      if (reps?.current !== "network") return;
+      clearTimeout(timer);
+      timer = setTimeout(() => void reps.refresh("network"), delay);
     },
-    /** Collega il selettore: aprendo la Rete neurale con una specifica vecchia la si rifà prima che la vista la legga. */
+    /** Collega il selettore delle rappresentazioni (l'API di installRepresentations). */
     attach(r) {
       reps = r;
-      r.on("change", (id) => {
-        if (id !== "network") return;
-        readVersion = null;
-        // la vista legge la specifica un frame dopo l'apertura: spesso quella nuova è già pronta
-        if (stale) void refresh().then(reloadIfStale, () => {});
-      });
     },
     dispose: () => clearTimeout(timer),
   };

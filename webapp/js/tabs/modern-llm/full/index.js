@@ -197,11 +197,8 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
   canvas.addEventListener("pointermove", onMove);
   canvas.addEventListener("pointerleave", onLeave);
   const offResize = host.onResize(() => active && updateThresholds());
-  ui.charts.onResize(() => {
-    if (!active) return;
-    syncCodeWithCharts();
-    updateThresholds();
-  });
+  // con i grafici aperti il codice si riduce e si aggancia in fondo ai grafici da sé (CodePanel.followCharts del nucleo)
+  ui.charts.onResize(() => active && updateThresholds());
 
   // =============================================================================================
 
@@ -591,41 +588,15 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
     request.then(() => {
       if (request !== tab.codePending || NARROW.matches) return;
       const panel = ui.codePanel.root;
-      if (panel.hidden) return;
-      // sotto i grafici aperti il codice sarebbe una striscia tagliata: resta ridotto finché si chiudono
-      if (ui.charts.isOpen) return minimizeCodeForCharts();
+      // con i grafici aperti è già ridotto, agganciato in fondo ai grafici (nucleo: CodePanel.followCharts)
+      if (panel.hidden || ui.charts.isOpen) return;
       // Accanto alla striscia larga dell'architettura, con meno di ~600 px di scena libera (1280 px con la
       // sidebar aperta: ne restavano 350) il codice parte ridotto alla sua intestazione, come sul telefono:
       // il titolo dice cosa c'è, ▁ lo espande. Se lo studente l'ha espanso a mano, resta espanso.
-      if (!codeExpandedByUser && stage.clientWidth - panel.offsetWidth - 14 < MIN_SCENE_BESIDE_CODE) panel.classList.add("minimized");
+      if (!ui.codePanel.userExpanded && stage.clientWidth - panel.offsetWidth - 14 < MIN_SCENE_BESIDE_CODE) ui.codePanel.minimize();
     });
   }
 
-  /**
-   * Grafici e codice stanno entrambi a destra, i grafici sopra: del codice restava visibile una striscia
-   * di 100 px con il titolo tagliato, che in più toglieva quello spazio alla scena. Con i grafici aperti
-   * il codice si riduce alla sua intestazione (nascosta sotto i grafici) e alla chiusura torna com'era.
-   */
-  let codeMinimizedForCharts = false;
-  function minimizeCodeForCharts() {
-    const panel = ui.codePanel.root;
-    if (panel.hidden || panel.classList.contains("minimized")) return;
-    panel.classList.add("minimized");
-    codeMinimizedForCharts = true;
-  }
-  function syncCodeWithCharts() {
-    if (NARROW.matches) return;
-    if (ui.charts.isOpen) minimizeCodeForCharts();
-    else if (codeMinimizedForCharts) {
-      codeMinimizedForCharts = false;
-      if (!ui.codePanel.root.hidden && !ui.codePanel.userMinimized) ui.codePanel.root.classList.remove("minimized");
-    }
-  }
-  /** Lo studente ha espanso il codice con ▁: la sua scelta vale per i frammenti seguenti. */
-  let codeExpandedByUser = false;
-  const codeToggle = ui.codePanel.root.querySelector("header button");
-  const onCodeToggle = () => (codeExpandedByUser = !ui.codePanel.root.classList.contains("minimized"));
-  codeToggle?.addEventListener("click", onCodeToggle);
 
   // --- clic e passaggio del mouse -----------------------------------------------------------------
   function visibleMarkers() {
@@ -891,7 +862,6 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
     dispose() {
       this.deactivate();
       clearTimeout(chartsHintTimer);
-      codeToggle?.removeEventListener("click", onCodeToggle);
       offClick();
       offResize();
       offInput();

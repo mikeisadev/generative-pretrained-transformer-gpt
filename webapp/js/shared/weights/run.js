@@ -6,6 +6,7 @@
  *   const run = await loadBuiltinRun();                       // "GPT del corso", snapshot a richiesta
  *   run.tensor("blocks.0.sa.heads.0.key.weight")              // {name, shape: [16, 64], numel, dtype, data}
  *   const s = await run.loadSnapshot(500);                    // {step, meta, flat, tensors}
+ *   run.unloadSnapshots({ keep: [500] })                      // libera la memoria degli altri step decodificati
  *   const { runs, errors } = await runsFromFiles(input.files, { defaultVocab: run.vocab });
  *   if (runs[0].compatibleWithEngine) runs[0].createEngine().generate(…)
  *
@@ -33,7 +34,7 @@ const sameShape = (a, b) => a.length === b.length && a.every((v, i) => v === b[i
  * @typedef {{name: string, shape: number[], numel: number, dtype: string, data: Float32Array, offset?: number}} Tensor
  * @typedef {{step: number, file: string|null, meta: object, available: boolean, layoutMatches: boolean,
  *   load: () => Promise<{step: number, meta: object, flat: Float32Array, tensors: Map<string, Tensor>, layout: object[]}>,
- *   raw: () => Promise<ArrayBuffer>}} SnapshotEntry
+ *   unload: () => boolean, loaded: boolean, raw: () => Promise<ArrayBuffer>}} SnapshotEntry
  */
 
 export class WeightRun {
@@ -106,6 +107,18 @@ export class WeightRun {
 
   snapshot(step) {
     return this.snapshots.find((s) => s.step === step);
+  }
+
+  /**
+   * Toglie dalla cache gli snapshot decodificati, tranne quelli degli step in `keep` (es. lo step mostrato e
+   * quello di confronto): per i run grandi, quando lo studente ha visitato molti step. → quanti ne ha tolti.
+   * @param {{keep?: Iterable<number>}} [o]
+   */
+  unloadSnapshots({ keep = [] } = {}) {
+    const kept = new Set(keep);
+    let dropped = 0;
+    for (const s of this.snapshots) if (!kept.has(s.step) && s.unload?.()) dropped++;
+    return dropped;
   }
 
   /** Pesi dello snapshot allo step indicato (scaricati o letti una volta sola). */
@@ -303,6 +316,9 @@ export function engineCompatibility(tensors, { config = null, vocab = null, decl
 
 /**
  * Voce di uno snapshot con caricamento pigro e in cache (un errore di rete non resta in cache).
+ * `unload()` toglie dalla cache lo snapshot decodificato (4 byte per peso: con un run grande e tanti
+ * snapshot la memoria cresce a ogni step visitato); chi ne tiene ancora un riferimento lo conserva, e il
+ * prossimo `load()` lo rilegge. `loaded` dice se è in cache (anche se il caricamento è in corso).
  * @param {{step: number, file: string|null, meta: object, layout: object[], totalParams: number,
  *   layoutMatches: boolean, raw: (() => Promise<ArrayBuffer>)|null}} o
  * @returns {SnapshotEntry}
@@ -311,15 +327,35 @@ export function snapshotEntry({ step, file, meta, layout, totalParams, layoutMat
   let pending = null;
   const load = () => {
     if (!pending) {
-      pending = Promise.resolve(raw()).then((buffer) => {
+      const request = Promise.resolve(raw()).then((buffer) => {
         const flat = decodeSnapshot(buffer, totalParams, { file: file ?? `snapshot ${step}` });
         return { step, meta, flat, tensors: tensorsFromLayout(flat, layout, "float16"), layout };
       });
-      pending.catch(() => (pending = null));
+      pending = request;
+      request.catch(() => {
+        if (pending === request) pending = null;
+      });
     }
     return pending;
   };
-  return { step, file, meta, available: Boolean(raw), layoutMatches, load, raw: raw ?? (() => Promise.reject(new Error(`snapshot ${step} non disponibile`))) };
+  const unload = () => {
+    const had = pending !== null;
+    pending = null;
+    return had;
+  };
+  return {
+    step,
+    file,
+    meta,
+    available: Boolean(raw),
+    layoutMatches,
+    load,
+    unload,
+    get loaded() {
+      return pending !== null;
+    },
+    raw: raw ?? (() => Promise.reject(new Error(`snapshot ${step} non disponibile`))),
+  };
 }
 
 /** Concatenazione dei valori di tutti i tensori, nell'ordine della Map. */

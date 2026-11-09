@@ -250,8 +250,8 @@ function layerPart(ctx, d, previous) {
   sections.push(attentionSection(ctx, id("attn"), r, layer));
   links.push({ from: id("norm1"), to: id("attn"), pattern: "dense", toSlab: 0, density: 0.012, label: `query: wq_a ${it(c.hidden)} → ${it(c.qLora)} → wq_b ${c.heads} × ${it(c.headDim)}` });
   if (r.indexes) links.push({ from: id("idx"), to: id("attn"), pattern: "dense", toSlab: 0, density: 0.08, label: `voci scelte (top-${it(c.indexTopK)}, qui ${SHOWN.entries})` });
-  links.push({ from: id("kv"), to: id("attn"), pattern: "attention", heads: SHOWN.heads, weights: attention.window, label: `finestra locale: ${it(c.window)} token, qui ${SHOWN.window}` });
-  if (kvSource) links.push({ from: kvSource, to: id("attn"), pattern: "attention", heads: SHOWN.heads, weights: attention.entries, label: r.writesKV ? "voci globali di questo layer" : `voci globali riusate dal layer ${r.kvSource}` });
+  links.push({ from: id("kv"), to: id("attn"), pattern: "attention", heads: SHOWN.heads, weights: attention.window, illustrative: true, label: `finestra locale: ${it(c.window)} token, qui ${SHOWN.window}` });
+  if (kvSource) links.push({ from: kvSource, to: id("attn"), pattern: "attention", heads: SHOWN.heads, weights: attention.entries, illustrative: true, label: r.writesKV ? "voci globali di questo layer" : `voci globali riusate dal layer ${r.kvSource}` });
   sections.push(addSection(ctx, id("add1"), "attn", layer));
   links.push(
     { from: id("attn"), to: id("add1"), pattern: "dense", toSlab: "all", density: 0.01, label: `wo_a → wo_b (${c.oGroups} gruppi): ritorno a ${it(c.hidden)}, poi mHC 1 → ${c.hcMult}` },
@@ -637,7 +637,7 @@ function draftPart(ctx, previous) {
   links.push(
     { from: previous, to: "mtp.fuse", pattern: "dense", fromSlab: "all", toSlab: "all", density: 0.006, label: `feature dei layer ${list(targets)}` },
     { from: "mtp.fuse", to: "mtp.block", pattern: "dense", fromSlab: "all", density: 0.012, label: `main_proj: ${it(ds.targets.length * c.hidden)} → ${it(c.hidden)}` },
-    { within: "mtp.block", pattern: "attention", causal: true, heads: SHOWN.draftHeads, weights: draft.window, label: `finestra locale: ${it(c.window)} token, qui ${SHOWN.window}` },
+    { within: "mtp.block", pattern: "attention", causal: true, heads: SHOWN.draftHeads, weights: draft.window, illustrative: true, label: `finestra locale: ${it(c.window)} token, qui ${SHOWN.window}` },
     { from: "mtp.block", to: "mtp.out", pattern: "dense", slice: T - 1, toSlab: "all", density: 0.1, label: `${ds.blockSize} token proposti dall'ultima posizione` },
   );
   groups.push({ label: "DSpark (MTP)", from: "mtp.fuse", to: "mtp.out", color: branch.color, text: `${branch.title}: ${branch.text}` });
@@ -645,3 +645,23 @@ function draftPart(ctx, previous) {
 
 /** La rete del modello principale della vista completa (DeepSeek-V4.1-Flash). */
 export const networkSpec = buildNetworkSpec();
+
+/**
+ * La rete del modello scelto nel selettore della vista completa, se il suo config descrive l'attention con
+ * i campi che servono; altrimenti quella del modello principale, con in testa all'introduzione la frase che
+ * dice perché (Kimi K3.1 Pro e gpt-oss-120b: KDA lineare, GQA a finestre alterne). index.js la chiede a ogni
+ * apertura della Rete neurale (cache: false del nucleo).
+ * @param {object | null} model modulo dati di full/models (null: il principale)
+ */
+export function networkSpecFor(model) {
+  if (!model || model.id === PRIMARY_MODEL_ID) return networkSpec;
+  try {
+    return buildNetworkSpec(model);
+  } catch {
+    const primary = MODEL_BY_ID.get(PRIMARY_MODEL_ID);
+    return {
+      ...networkSpec,
+      intro: `Nel selettore è scelto ${model.name}: il suo config non descrive l'attention con i campi che questa rete sa disegnare (compress_ratios, kv_source, index_source), quindi qui vedi ${primary.name}.\n\n${networkSpec.intro}`,
+    };
+  }
+}

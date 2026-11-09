@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { atlasKind } from "../js/core/brain/atlas.js";
 import { normalizeBrainSpec } from "../js/core/brain/spec.js";
 import { buildNetworkModel } from "../js/core/neuralNet/model.js";
+import { REP_LINKS } from "../js/core/repLinks.js";
 import { LINK_LIMITS } from "../js/core/neuralNet/links.js";
 import { LIMITS, normalizeSpec } from "../js/core/neuralNet/spec.js";
 import { EXAMPLE_QUESTIONS, SHARED_DIMENSION, UNKNOWN_DIMENSION, cosineSimilarity } from "../js/shared/rag/index.js";
@@ -279,7 +280,8 @@ test("l'introduzione dice da dove viene la domanda disegnata (pannello, ultima r
   for (const o of ["panel", "last", "example"]) assert.ok(intro(o).includes(`«${DEFAULT_QUESTION}»`));
   // index.js passa la provenienza: networkSearch → { run, origin }
   return readFile(new URL("../js/tabs/rag/index.js", import.meta.url), "utf8").then((source) => {
-    assert.match(source, /builder\(\{ kb: tab\.kb, \.\.\.networkSearch\(\) \}\)/);
+    // la specifica si rifà a ogni apertura (cache: false) con la ricerca di adesso
+    assert.match(source, /buildRagNetworkSpec\(\{ kb: tab\.kb, \.\.\.networkSearch\(\) \}\)\),\s+cache: false,/);
     for (const o of ["panel", "last", "example"]) assert.ok(source.includes(`origin: "${o}"`), o);
   });
 });
@@ -448,9 +450,8 @@ test("brainSpec: i testi sono quelli della ricerca verificata, parola per parola
 
 // ------------------------------------------------------------------------------------------ ricerca
 test("link: gli id delle voci di ricerca sono quelli di REP_LINKS del nucleo", async () => {
-  // letto dal sorgente: representations.js importa moduli con three.js, che qui non c'è
-  const core = await readFile(new URL("../js/core/representations.js", import.meta.url), "utf8");
-  assert.match(core, /REP_LINKS = \{ rete: "network", cervello: "brain" \}/);
+  // repLinks.js: le parti pure delle rappresentazioni, importabili qui (representations.js importa three.js)
+  assert.deepEqual({ ...REP_LINKS }, { rete: "network", cervello: "brain" });
   const tab = await readFile(new URL("../js/tabs/rag/index.js", import.meta.url), "utf8");
   assert.match(tab, /const shown = reps\.goto\(\{ kind, id \}\);\s+if \(shown\) return shown;/, "goto comincia con reps.goto");
   assert.ok(tab.indexOf("installRepresentations(ui") < tab.indexOf('addPane({ id: "fonti"'), "il pannello Cervello va prima di Fonti");

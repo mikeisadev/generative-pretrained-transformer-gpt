@@ -25,7 +25,7 @@ import { prepareEntry, search } from "../js/core/search.js";
 import { brainSpec } from "../js/tabs/modern-llm/brain.js";
 import { buildStrip, compressLayers, formatLayers, layerList } from "../js/tabs/modern-llm/full/model.js";
 import { MODEL_BY_ID, PRIMARY_MODEL_ID } from "../js/tabs/modern-llm/full/models/index.js";
-import { PROMPT, SHOWN, buildNetworkSpec, layerSectionIds, networkSpec, readableText } from "../js/tabs/modern-llm/network.js";
+import { PROMPT, SHOWN, buildNetworkSpec, layerSectionIds, networkSpec, networkSpecFor, readableText } from "../js/tabs/modern-llm/network.js";
 import { drawnLayers, entryCount, entryReady, layerAttention, layerRecipe, selectEntries } from "../js/tabs/modern-llm/networkMechanisms.js";
 import { searchIndex } from "../js/tabs/modern-llm/search.js";
 
@@ -325,6 +325,19 @@ test("rete: gli altri modelli della vista completa sono rifiutati invece di esse
   for (const id of ["kimi-k3.1-pro", "gpt-oss-120b"]) assert.throws(() => buildNetworkSpec(MODEL_BY_ID.get(id)), /compress_ratios/);
 });
 
+test("rete del modello scelto nel selettore: il principale, o la sua rete con la frase che dice perché", () => {
+  assert.equal(networkSpecFor(null), networkSpec);
+  assert.equal(networkSpecFor(MODEL_BY_ID.get(PRIMARY_MODEL_ID)), networkSpec);
+  for (const id of ["kimi-k3.1-pro", "gpt-oss-120b"]) {
+    const model = MODEL_BY_ID.get(id);
+    const spec = networkSpecFor(model);
+    assert.ok(spec.intro.startsWith(`Nel selettore è scelto ${model.name}`), id);
+    assert.ok(spec.intro.endsWith(networkSpec.intro), "poi l'introduzione di sempre");
+    assert.equal(spec.sections, networkSpec.sections, "la rete è quella del modello principale");
+    assert.deepEqual(normalizeSpec(spec).warnings, []);
+  }
+});
+
 // ------------------------------------------------------------------------------------------ cervello
 
 test("cervello: strict senza avvisi; regioni, marcatori e percorsi nell'atlante", () => {
@@ -428,12 +441,12 @@ test("installazione: rappresentazioni prima di Fonti, goto da reps.goto, convive
   const index = await source("../js/tabs/modern-llm/index.js");
   const install = index.indexOf("installRepresentations(ui");
   assert.ok(install > index.indexOf('addPane({ id: "modelli"') && install < index.indexOf('addPane({ id: "fonti"'), "il pannello Cervello sta prima di Fonti, dopo i pannelli del tab");
-  assert.match(index, /import\("\.\/network\.js"\)\.then\(\(m\) => m\.networkSpec\)/);
+  assert.match(index, /import\("\.\/network\.js"\)\.then\(\(m\) => m\.networkSpecFor\(tab\.full\?\.model \?\? null\)\),\s+cache: false,/);
   assert.match(index, /import\("\.\/brain\.js"\)\.then\(\(m\) => m\.brainSpec\)/);
   assert.match(index, /async function goto\(\{ kind, id \}\) \{[\s\S]{0,300}?const shown = reps\.goto\(\{ kind, id \}\);\s*if \(shown\) return shown;/);
   // scegliere un sottotab (anche quello attivo) chiude prima il livello; "Cervello" resta prima di "Fonti" nei due
   assert.match(index, /async function showSubtab\(id, \{ restore = true \} = \{\}\) \{[\s\S]{0,300}?closeRepresentation\(\);/);
-  assert.match(index, /bar\.element\.addEventListener\("click"/);
+  assert.match(index, /onReselect: \(\) => closeRepresentation\(\)/, "la scheda già attiva chiude il livello (callback di subtabs.js)");
   assert.match(index, /function placeBrainPane\(to\)/);
   const css = await source("../css/tabs/modern-llm.css");
   assert.match(css, /\.tab\.tab-root\[data-tab="modern-llm"\]\.rep-alt-active > \.mllm-subtabs \{ visibility: visible; \}/);

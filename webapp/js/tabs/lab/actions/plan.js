@@ -9,6 +9,7 @@
  * Coordinate della scena del Laboratorio (scene/layout.js): x verso destra, y verso l'alto, z verso la
  * camera; una cella è CELL = 0,04; i vettori sono stirati ×3 sul lato sottile (VECTOR_STRETCH).
  */
+import { padPlacement } from "../../../core/navMath.js";
 import { CELL, VECTOR_STRETCH } from "../scene/layout.js";
 
 /** Spazio tra un peso e la sua attivazione temporanea: lascia libera l'etichetta "weight (16, 64)" (0,105). */
@@ -194,10 +195,10 @@ export const CODE_FLOOR_PX = 96;
  * accorcia sopra la lavagna, i tre si inseguirebbero senza fine (lavagna stretta → più alta → codice più
  * corto → pad nell'angolo → lavagna larga → più bassa → codice più lungo → pad accanto al codice → …:
  * misurato a 1280 × 800, ~40 spostamenti del pad al secondo). Qui il posto del pad è quello nell'angolo,
- * calcolato come lo calcola il nucleo (`padBottom` di core/navMath.js), e il codice finisce sopra quel
- * posto: il pad ci va e ci resta, e la lavagna si misura su di lui. Finestra troppo bassa per un codice
- * di CODE_MIN_PX sopra il pad: il codice resta di quell'altezza (costante), il pad va dove lo mette il
- * nucleo e la lavagna evita sia il pad vero sia il codice.
+ * calcolato dalla stessa funzione del nucleo (`padPlacement` di core/navMath.js, quella di navPad.js), e
+ * il codice finisce sopra quel posto: il pad ci va e ci resta, e la lavagna si misura su di lui. Finestra
+ * troppo bassa per un codice di CODE_MIN_PX sopra il pad: il codice resta di quell'altezza (costante), il
+ * pad va dove lo mette il nucleo e la lavagna evita sia il pad vero sia il codice.
  *
  * @param {object} o
  * @param {number} o.sw larghezza dello stage   @param {number} o.sh altezza dello stage
@@ -207,20 +208,20 @@ export const CODE_FLOOR_PX = 96;
  *   il nucleo non guarda il codice: conta il pad vero)
  * @param {object|null} [o.code] il pannello del codice visibile   @param {object|null} [o.pad] il pad VERO
  * @param {{w: number, h: number}} [o.padSize] il pad aperto (il nucleo lo piazza con questa misura)
- * @param {Function} o.padBottomFn padBottom del nucleo
+ * @param {Function} [o.padBottomFn] non serve più (il posto lo calcola padPlacement del nucleo): accettato e ignorato
  * @returns {{left: number, maxW: number, codeMax: number|null, fallback: boolean, padSpot: object|null}}
  *   left e maxW della lavagna; codeMax = altezza massima del codice per il pad (null = nessun limite)
  */
-export function deskLayout({ sw, sh, bar, band = bar, chartsLeft = null, code = null, pad = null, padSize = { w: 190, h: 146 }, padBottomFn }) {
+export function deskLayout({ sw, sh, bar, band = bar, chartsLeft = null, code = null, pad = null, padSize = { w: 190, h: 146 } }) {
   let padSpot = null;
   let codeMax = null;
   let fallback = false;
   if (pad) {
     if (chartsLeft !== null) padSpot = pad;
     else {
-      const extent = { left: sw - 14 - padSize.w, right: sw - 14, height: padSize.h };
-      const bottom = padBottomFn(extent, band, sh, padBottomFn(extent, band, sh, 14));
-      const corner = { left: extent.left, right: extent.right, top: sh - bottom - padSize.h, bottom: sh - bottom };
+      // dove il nucleo metterebbe il pad senza il codice (nell'angolo, sopra la barra e il chip se li tocca)
+      const spot = padPlacement({ sw, sh, size: padSize, bar: band });
+      const corner = { left: sw - spot.right - padSize.w, right: sw - spot.right, top: sh - spot.bottom - padSize.h, bottom: sh - spot.bottom };
       if (code && code.right > corner.left) {
         const fits = Math.floor(corner.top - 10 - code.top);
         if (fits >= CODE_MIN_PX) {

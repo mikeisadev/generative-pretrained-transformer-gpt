@@ -20,10 +20,13 @@
  *   copre SOLO la finestra di celle visibili (più un margine), al più `maxCellsPerOverlay` celle;
  *   un `NumbersGroup` assegna al più `maxOverlays` overlay alle matrici più grandi sullo schermo
  *   (il budget per scena) e li ricicla;
- * - `update` confronta la camera con quella dell'ultima volta: se non si è mossa (e i dati non
- *   sono cambiati) esce subito, senza lavoro né allocazioni. Se si è mossa ridisegna l'overlay
- *   solo quando la finestra esce dal margine o cambiano precisione o risoluzione: il testo è
- *   nella texture, quindi zoomando cresce insieme alla cella senza ridisegnare;
+ * - `update` confronta la camera con quella dell'ultima volta e un solo contatore dei dati per
+ *   tutto il gruppo (più le versioni delle heatmap di attachNumbers): se niente è cambiato esce
+ *   subito, senza lavoro né allocazioni. Se la camera si è mossa ridisegna l'overlay solo quando la
+ *   finestra esce dal margine o cambiano precisione o risoluzione: il testo è nella texture, quindi
+ *   zoomando cresce insieme alla cella senza ridisegnare. Se cambiano solo i valori (un altro step
+ *   del training) si riscrivono le celle il cui testo o colore è cambiato, e la texture si ricarica
+ *   sulla GPU solo se almeno una è cambiata;
  * - precisione adattiva, virgola decimale, segno "−", testo nero o bianco scelto per contrasto
  *   (≥ 4,5:1 su ogni colore della colormap): vedi js/shared/weights/display.js.
  */
@@ -45,7 +48,7 @@ import {
   windowFromPoints,
 } from "../shared/weights/display.js";
 import { absMax } from "../shared/weights/stats.js";
-import { CELL, attentionTexture, matrixPlane, weightTexture } from "./visuals.js";
+import { ATTENTION_LUT, CELL, DIVERGING_LUT, MASKED_LUT, matrixPlane } from "./visuals.js";
 
 const FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace";
 const GRID_COLOR = "rgba(3, 6, 12, 0.5)";
@@ -54,46 +57,23 @@ const MAX_TEXTURE_SIDE = 4096;
 
 // ---------------------------------------------------------------- colormap (le stesse di visuals.js)
 
-const LUTS = new Map();
-
-function toBase64(bytes) {
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s);
-}
+const LUTS = new Map([
+  ["diverging", DIVERGING_LUT],
+  ["attention", ATTENTION_LUT],
+  ["masked", MASKED_LUT],
+]);
 
 /**
  * Tabella di 256 colori RGBA della colormap: "diverging" (pesi, 128 = zero, blu negativo →
- * scuro → arancione positivo) o "attention" (0…1, scuro → azzurro). Si ottiene facendo disegnare
- * una rampa a weightTexture / attentionTexture di core/visuals.js: stessi colori delle heatmap
- * esistenti senza riscrivere le formule. "masked" sono i 4 colori del tratteggio del futuro.
+ * scuro → arancione positivo) o "attention" (0…1, scuro → azzurro); "masked" sono i 4 colori del
+ * tratteggio del futuro. Sono le tabelle di core/visuals.js, le stesse di weightTexture e
+ * attentionTexture: le celle hanno esattamente i colori delle heatmap esistenti. Sola lettura.
  * @returns {Uint8Array} 256 × 4 byte (per "masked": 4 × 4)
  */
 export function colormapLUT(name = "diverging") {
-  if (LUTS.has(name)) return LUTS.get(name);
-  const ramp = Uint8Array.from({ length: 256 }, (_, i) => i);
-  if (name === "diverging") {
-    const tex = weightTexture({ shape: [1, 256], data: toBase64(ramp) });
-    LUTS.set(name, new Uint8Array(tex.image.data));
-    tex.dispose();
-  } else if (name === "attention" || name === "masked") {
-    // Matrice 256×256 con l'ultima riga = 0…255: tutta sotto la diagonale (colori dell'attention);
-    // la riga 0 dalla colonna 1 è sopra la diagonale (tratteggio). La texture parte dal basso.
-    const T = 256;
-    const bytes = new Uint8Array(T * T);
-    bytes.set(ramp, (T - 1) * T);
-    const tex = attentionTexture(toBase64(bytes), T);
-    const data = tex.image.data;
-    LUTS.set("attention", new Uint8Array(data.subarray(0, 256 * 4)));
-    const row0 = (T - 1) * T * 4;
-    const masked = new Uint8Array(16);
-    for (let k = 0; k < 4; k++) masked.set(data.subarray(row0 + (4 + k) * 4, row0 + (5 + k) * 4), k * 4); // (0 + j) % 4 con j = 4…7
-    LUTS.set("masked", masked);
-    tex.dispose();
-  } else {
-    throw new Error(`colormap sconosciuta: ${name} (disponibili: diverging, attention)`);
-  }
-  return LUTS.get(name);
+  const table = LUTS.get(name);
+  if (!table) throw new Error(`colormap sconosciuta: ${name} (disponibili: diverging, attention)`);
+  return table;
 }
 
 const textLUTs = new Map();
@@ -161,6 +141,10 @@ class NumbersTarget {
     this.rowLabel = rowLabel;
     this.colLabel = colLabel;
     this._version = 0;
+    // La heatmap di attachNumbers: chi la riscrive segna texture.needsUpdate e la sua versione cresce.
+    this.texture = null;
+    // Avvisa il gruppo di un cambio dei dati (touch): a riposo il gruppo guarda un solo contatore.
+    this.onTouch = null;
     this._maxAbsVersion = -1;
     this._maxAbs = 0;
     this._rgb = [0, 0, 0];
@@ -172,11 +156,12 @@ class NumbersTarget {
 
   /** Cambia quando cambiano i dati (o la texture della heatmap): l'overlay si ridisegna. */
   version() {
-    return this._version;
+    return this.texture ? this._version + this.texture.version * 1e6 : this._version;
   }
 
   touch() {
     this._version++;
+    this.onTouch?.();
   }
 
   /** |valore| massimo, per sapere quanto è largo il numero più lungo (in cache per versione). */
@@ -353,14 +338,19 @@ class NumbersOverlay {
     const required = capWindow(m.visible, m.focus, g.maxCellsPerOverlay);
     const aspect = target.worldAspect();
     const st = this.state;
-    if (st && st.target === target && st.version === target.version() && st.decimals === m.format.decimals && st.showIndex === m.format.showIndex && windowContains(st.window, required)) {
+    if (st && st.target === target && st.decimals === m.format.decimals && st.showIndex === m.format.showIndex && windowContains(st.window, required)) {
       const want = canvasCellSize({ cellH: m.cellH, aspect, pixelRatio: g.pixelRatio, rows: st.window.r1 - st.window.r0, cols: st.window.c1 - st.window.c0, maxPixels: g.pixelBudget });
-      // Stessa risoluzione (a meno di un gradino in più o in meno): non si ridisegna.
-      if (want.ph <= st.ph * 1.2 && want.ph >= st.ph / 2) return false;
+      // Stessa finestra e stessa risoluzione (a meno di un gradino in più o in meno): non si ridisegna,
+      // e se sono cambiati solo i valori (un altro step del training) si riscrivono le celle cambiate.
+      if (want.ph <= st.ph * 1.2 && want.ph >= st.ph / 2) {
+        if (st.version === target.version()) return false;
+        const partial = this.redrawChanged(target, st);
+        if (partial !== null) return partial;
+      }
     }
     const drawn = capWindow(expandWindow(required, g.margin, 2, rows, cols), m.focus, g.maxCellsPerOverlay);
     const size = canvasCellSize({ cellH: m.cellH, aspect, pixelRatio: g.pixelRatio, rows: drawn.r1 - drawn.r0, cols: drawn.c1 - drawn.c0, maxPixels: g.pixelBudget });
-    this.draw(target, drawn, m.format, size);
+    const look = this.draw(target, drawn, m.format, size);
     // Il piano dell'overlay copre esattamente le celle disegnate (coordinate locali della matrice).
     const { rect } = target;
     const cw = (rect.maxX - rect.minX) / cols;
@@ -371,10 +361,70 @@ class NumbersOverlay {
     const y0 = rect.maxY - drawn.r1 * ch;
     this.mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, 1e-4 * Math.min(cw, ch) + 1e-6);
     this.mesh.scale.set(x1 - x0, y1 - y0, 1);
-    this.state = { target, window: drawn, version: target.version(), decimals: m.format.decimals, showIndex: m.format.showIndex, ph: size.ph };
+    this.state = { target, window: drawn, version: target.version(), decimals: m.format.decimals, showIndex: m.format.showIndex, ph: size.ph, ...look };
     return true;
   }
 
+  /** Testo e colore del testo della cella (r, c) della matrice. */
+  cellText(target, r, c, decimals) {
+    return target.masked?.(r, c) ? target.maskedText : formatCell(target.getValue(r, c), decimals);
+  }
+
+  /**
+   * Gli stessi pixel di draw(), ma solo per le celle il cui testo o colore è cambiato (un altro step del
+   * training: con 2-3 decimali molte celle restano uguali). Nessuna cella cambiata = nessun caricamento
+   * della texture sulla GPU. @returns {boolean|null} ridisegnato, o null se serve il disegno completo
+   * (cambia la larghezza del numero più lungo, quindi il corpo del testo, o le celle hanno uno sfondo)
+   */
+  redrawChanged(target, st) {
+    if (target.paintBackground || formatCell(-target.maxAbs(), st.decimals).length !== st.widestLength) return null;
+    const t0 = performance.now();
+    const { ctx } = this;
+    const { window: w, pw, ph, lineWidth, texts, colors } = st;
+    const nc = w.c1 - w.c0;
+    const rgb = target._rgb;
+    // L'interno della cella, senza le righe della griglia (spesse lineWidth, centrate sul bordo).
+    const inset = Math.ceil(lineWidth / 2);
+    let changed = 0;
+    for (let r = w.r0; r < w.r1; r++) {
+      for (let c = w.c0; c < w.c1; c++) {
+        const k = (r - w.r0) * nc + (c - w.c0);
+        const text = this.cellText(target, r, c, st.decimals);
+        const color = target.cellColor(r, c, rgb);
+        if (text === texts[k] && color === colors[k]) continue;
+        texts[k] = text;
+        colors[k] = color;
+        const x = (c - w.c0) * pw;
+        const y = (r - w.r0) * ph;
+        ctx.clearRect(x + inset, y + inset, pw - 2 * inset, ph - 2 * inset);
+        ctx.fillStyle = color;
+        ctx.font = st.font;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        if (text) ctx.fillText(text, x + 0.5 * pw, y + st.yText * ph);
+        if (st.showIndex) {
+          ctx.font = st.indexFont;
+          ctx.textAlign = "left";
+          ctx.textBaseline = "top";
+          ctx.globalAlpha = 0.7;
+          ctx.fillText(`${r},${c}`, x + ph * 0.07, y + ph * 0.06);
+          ctx.globalAlpha = 1;
+        }
+        changed++;
+      }
+    }
+    st.version = target.version();
+    if (!changed) return false;
+    this.texture.needsUpdate = true;
+    const g = this.group;
+    g.stats.partialRedraws++;
+    g.stats.lastRedrawMs = performance.now() - t0;
+    g.stats.maxRedrawMs = Math.max(g.stats.maxRedrawMs, g.stats.lastRedrawMs);
+    g.stats.lastRedrawCells = changed;
+    return true;
+  }
+
+  /** Disegno completo della finestra `w`. @returns l'aspetto usato, per riscrivere poi le singole celle */
   draw(target, w, format, { pw, ph }) {
     const t0 = performance.now();
     const nr = w.r1 - w.r0;
@@ -392,6 +442,7 @@ class NumbersOverlay {
     ctx.clearRect(0, 0, width, height);
     const rgb = target._rgb;
     const colors = new Array(nr * nc);
+    const texts = new Array(nr * nc);
     for (let r = 0; r < nr; r++) {
       for (let c = 0; c < nc; c++) {
         const color = target.cellColor(w.r0 + r, w.c0 + c, rgb);
@@ -403,8 +454,9 @@ class NumbersOverlay {
       }
     }
     // Righe sottili tra le celle: due celle vicine di colore simile restano distinguibili.
+    const lineWidth = Math.max(1, Math.round(ph / 40));
     ctx.strokeStyle = GRID_COLOR;
-    ctx.lineWidth = Math.max(1, Math.round(ph / 40));
+    ctx.lineWidth = lineWidth;
     ctx.beginPath();
     for (let c = 1; c < nc; c++) {
       ctx.moveTo(c * pw, 0);
@@ -425,6 +477,7 @@ class NumbersOverlay {
       fontPx *= (pw * 0.9) / measured; // il font del sistema è più largo del previsto
       ctx.font = `600 ${fontPx.toFixed(1)}px ${FONT}`;
     }
+    const font = ctx.font;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     const yText = showIndex ? 0.58 : 0.5;
@@ -432,21 +485,21 @@ class NumbersOverlay {
     let count = 0;
     for (let r = 0; r < nr; r++) {
       for (let c = 0; c < nc; c++) {
-        const row = w.r0 + r;
-        const col = w.c0 + c;
         const color = colors[r * nc + c];
         if (color !== current) {
           ctx.fillStyle = color;
           current = color;
         }
-        const text = target.masked?.(row, col) ? target.maskedText : formatCell(target.getValue(row, col), decimals);
+        const text = this.cellText(target, w.r0 + r, w.c0 + c, decimals);
+        texts[r * nc + c] = text;
         if (text) ctx.fillText(text, (c + 0.5) * pw, (r + yText) * ph);
         count++;
       }
     }
+    const indexFont = `500 ${(ph * 0.15).toFixed(1)}px ${FONT}`;
     if (showIndex) {
       // Celle grandi: in piccolo, in alto a sinistra, riga e colonna (come si indicizza in Python).
-      ctx.font = `500 ${(ph * 0.15).toFixed(1)}px ${FONT}`;
+      ctx.font = indexFont;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.globalAlpha = 0.7;
@@ -480,6 +533,7 @@ class NumbersOverlay {
     g.stats.lastRedrawMs = performance.now() - t0;
     g.stats.maxRedrawMs = Math.max(g.stats.maxRedrawMs, g.stats.lastRedrawMs);
     g.stats.lastRedrawCells = count;
+    return { pw, ph, lineWidth, font, indexFont, yText, widestLength: widest.length, texts, colors };
   }
 
   dispose() {
@@ -524,22 +578,38 @@ export class NumbersGroup {
     this.active = new Map(); // bersaglio → overlay
     this.pool = [];
     this._signature = new Float64Array(34).fill(NaN);
-    this._versions = new Map();
+    // Versione dei dati di TUTTO il gruppo: ogni touch() di un bersaglio la fa crescere, così a riposo
+    // update() confronta un solo numero invece di interrogare le matrici una per una (110 nel Laboratorio).
+    this.version = 0;
+    this._seenVersion = -1;
+    // Le heatmap di attachNumbers cambiano quando chi le riscrive segna texture.needsUpdate (nessun
+    // evento): se ne confrontano le versioni in un array compatto.
+    this._textures = [];
+    this._textureVersions = [];
     this._dirty = true;
     this._candidates = [];
-    this.stats = { updates: 0, idle: 0, recomputes: 0, redraws: 0, lastRecomputeMs: 0, lastRedrawMs: 0, maxRedrawMs: 0, lastRedrawCells: 0, overlays: 0 };
+    this.stats = { updates: 0, idle: 0, recomputes: 0, redraws: 0, partialRedraws: 0, lastRecomputeMs: 0, lastRedrawMs: 0, maxRedrawMs: 0, lastRedrawCells: 0, overlays: 0 };
   }
 
   add(target) {
     this.targets.add(target);
+    target.onTouch = () => this.version++;
+    this._watch();
     this._dirty = true;
   }
 
   remove(target) {
     this._release(target);
     this.targets.delete(target);
-    this._versions.delete(target);
+    if (target.onTouch) target.onTouch = null;
+    this._watch();
     this._dirty = true;
+  }
+
+  /** Le texture da guardare: quelle dei bersagli di attachNumbers (le NumericMatrix chiamano touch). */
+  _watch() {
+    this._textures = [...new Set([...this.targets].map((t) => t.texture).filter(Boolean))];
+    this._textureVersions = this._textures.map((t) => t.version);
   }
 
   /** Ricalcola al prossimo update anche se la camera è ferma (es. matrici spostate da codice). */
@@ -574,10 +644,15 @@ export class NumbersGroup {
       sig[33] = camera.aspect;
       changed = true;
     }
-    for (const t of this.targets) {
-      const v = t.version();
-      if (this._versions.get(t) !== v) {
-        this._versions.set(t, v);
+    if (this._seenVersion !== this.version) {
+      this._seenVersion = this.version;
+      changed = true;
+    }
+    const textures = this._textures;
+    const seen = this._textureVersions;
+    for (let i = 0; i < textures.length; i++) {
+      if (seen[i] !== textures[i].version) {
+        seen[i] = textures[i].version;
         changed = true;
       }
     }
@@ -901,12 +976,8 @@ export function attachNumbers(mesh, { rows, cols, getValue, range = null, colorm
       return texts[i];
     },
   });
-  // Versione = cambi della texture (riscritta da chi aggiorna la heatmap) + refresh espliciti.
-  let own = 0;
-  target.version = () => own + (texture?.version ?? 0) * 1e6;
-  target.touch = () => {
-    own++;
-  };
+  // Versione = cambi della texture (riscritta da chi aggiorna la heatmap) + refresh espliciti (touch).
+  target.texture = texture;
   const g = group ?? new NumbersGroup({ maxOverlays: 1 });
   g.add(target);
   return {

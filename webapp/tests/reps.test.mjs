@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { BRAIN_PANE_ID, REP_IDS, REP_LINKS, repOfLink } from "../js/core/repLinks.js";
 import { VARIANTS, candidateRows, freeIntervals, placeSwitch } from "../js/core/ui/repSwitch.js";
 
 const SIZES = { full: 322, icons: 104, menu: 48, height: 36 };
@@ -160,4 +161,33 @@ test("placeSwitch: con una vista alternativa i pannelli nascosti del tab cedono 
   // senza la scheda il posto con gli ostacoli soft basta: nessuno spostamento inutile
   const quiet = placeSwitch({ width, stageHeight: 800, sizes: SIZES, height: SIZES.height, obstacles: [box(10, 10, 34, 31), ...hiddenTab] });
   assert.deepEqual(quiet, placeSwitch({ width, stageHeight: 800, sizes: SIZES, height: SIZES.height, obstacles: [box(10, 10, 34, 31), ...hiddenTab.map(({ soft, ...o }) => o)] }));
+});
+
+test("placeSwitch: prime tre file piene a sinistra e a destra → posto di riserva in fondo alla colonna, senza coprire niente", () => {
+  // Transformer con i grafici aperti a 1280 px: ☰ e zoom, barre delle viste nella seconda e terza fila che
+  // arrivano fino al pannello dei grafici (a destra, alto): nelle prime tre file non c'è posto nemmeno per il menu
+  const width = 520;
+  const charts = box(width - 330, 0, 330, 760);
+  const left = width - 330 - 18; // i comandi a sinistra arrivano fino al pannello dei grafici
+  const obstacles = [box(10, 10, left, 34), box(10, 52, left, 40), box(10, 100, left, 40), box(10, 148, left, 40), charts];
+  const spot = placeSwitch({ width, stageHeight: 760, sizes: SIZES, height: SIZES.height, obstacles });
+  assert.equal(spot.variant, "menu");
+  assert.equal(spot.fits, true);
+  assert.equal(spot.reserve, true);
+  assert.ok(spot.row >= 3);
+  for (const o of obstacles) assert.ok(!overlaps(rectOf(spot), o), "non copre nessun comando");
+  // uno stage troppo basso per la riserva: resta il menu nella seconda fila, segnalato
+  const low = placeSwitch({ width, stageHeight: 180, sizes: SIZES, height: SIZES.height, obstacles });
+  assert.equal(low.fits, false);
+});
+
+test("repLinks: id delle rappresentazioni, link diretti e pannello Cervello importabili senza three.js", () => {
+  assert.deepEqual([...REP_IDS], ["main", "network", "brain"]);
+  assert.deepEqual({ ...REP_LINKS }, { rete: "network", cervello: "brain" });
+  assert.equal(BRAIN_PANE_ID, "cervello");
+  assert.equal(repOfLink({ kind: "view", id: "rete" }), "network");
+  assert.equal(repOfLink({ kind: "view", id: "cervello" }), "brain");
+  assert.equal(repOfLink({ kind: "view", id: "toString" }), null, "niente chiavi del prototipo");
+  assert.equal(repOfLink({ kind: "step", id: "rete" }), null);
+  assert.equal(repOfLink(), null);
 });

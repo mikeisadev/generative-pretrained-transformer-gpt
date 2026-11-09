@@ -14,7 +14,9 @@
  *     strength "debole/metafora" → "debole", ai_section → aiSection;
  *   - sources: tutte le fonti citate dal tab (analogie, circuito, numeri), senza doppioni (53);
  *   - facts: i numeri della ricerca con una fonte citata dal tab, più quelli che descrivono le cellule del
- *     circuito (spine della piramidale, scarica dei canestro PV+, minicolonna) (7).
+ *     circuito (spine della piramidale, scarica dei canestro PV+, minicolonna) (7);
+ *   - le cautele della verifica sui numeri "da ricontrollare" (verification.checked_sources) sono in fondo
+ *     alla nota di ogni numero e di ogni fonte che li riguarda, con le parole della verifica.
  * Il titolo è l'unica riga scritta qui (la ricerca non ne dà uno per il tab).
  *
  * Come rigenerarlo: lo script che applica queste regole sta nello scratchpad del round E
@@ -305,6 +307,7 @@ export const brainSpec = {
           year: 2018,
           venue: "Frontiers in Cellular Neuroscience 12:181",
           url: "https://doi.org/10.3389/fncel.2018.00181",
+          note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 25.000–30.000 spine va ricontrollato sul testo.",
         },
         {
           id: "benavides2013",
@@ -343,6 +346,7 @@ export const brainSpec = {
           year: 2000,
           venue: "Journal of Neuroscience 20(1):470-484",
           url: "https://doi.org/10.1523/JNEUROSCI.20-01-00470.2000",
+          note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e relazione soglia-lineare coerente; soglia −54,4 mV e guadagno 7,2 spike/s/mV da ricontrollare.",
         },
         {
           id: "glorot2011",
@@ -738,6 +742,7 @@ export const brainSpec = {
           year: 1992,
           venue: "Journal of Comparative Neurology 326(4):549-560",
           url: "https://doi.org/10.1002/cne.903260405",
+          note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifre 101 miliardi / 30,5 milioni coerenti; da ricontrollare la descrizione del campione («5 uomini anziani»).",
         },
         {
           id: "babadi2014",
@@ -799,7 +804,7 @@ export const brainSpec = {
     {
       claim: "Cervelletto umano, stima stereologica (5 uomini anziani)",
       value: "101 miliardi di cellule granulari e 30,5 milioni di cellule di Purkinje",
-      note: "Metodi diversi danno numeri diversi: per questo non coincide con i 69 miliardi di Azevedo.",
+      note: "Metodi diversi danno numeri diversi: per questo non coincide con i 69 miliardi di Azevedo. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifre 101 miliardi / 30,5 milioni coerenti; da ricontrollare la descrizione del campione («5 uomini anziani»).",
       source: {
         id: "andersen1992",
         title: "A quantitative study of the human cerebellum with unbiased stereological techniques",
@@ -807,6 +812,7 @@ export const brainSpec = {
         year: 1992,
         venue: "Journal of Comparative Neurology 326(4):549-560",
         url: "https://doi.org/10.1002/cne.903260405",
+        note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifre 101 miliardi / 30,5 milioni coerenti; da ricontrollare la descrizione del campione («5 uomini anziani»).",
       },
     },
     {
@@ -824,7 +830,7 @@ export const brainSpec = {
     {
       claim: "Spine di una piramidale umana degli strati 2/3",
       value: "circa 25.000–30.000",
-      note: "Eyal et al. riportano il dato citando Benavides-Piccione et al. 2013.",
+      note: "Eyal et al. riportano il dato citando Benavides-Piccione et al. 2013. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 25.000–30.000 spine va ricontrollato sul testo.",
       source: {
         id: "eyal2018",
         title: "Human cortical pyramidal neurons: from spines to spikes via models",
@@ -832,11 +838,13 @@ export const brainSpec = {
         year: 2018,
         venue: "Frontiers in Cellular Neuroscience 12:181",
         url: "https://doi.org/10.3389/fncel.2018.00181",
+        note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 25.000–30.000 spine va ricontrollato sul testo.",
       },
     },
     {
       claim: "Interneuroni a canestro PV+",
       value: "possono scaricare a oltre 200 Hz",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; volume e pagine (28(12):4954-4967) da ricontrollare.",
       source: {
         id: "hijazi2023",
         title: "Fast-spiking parvalbumin-positive interneurons in brain physiology and Alzheimer's disease",
@@ -844,6 +852,7 @@ export const brainSpec = {
         year: 2023,
         venue: "Molecular Psychiatry 28(12):4954-4967",
         url: "https://doi.org/10.1038/s41380-023-02168-y",
+        note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; volume e pagine (28(12):4954-4967) da ricontrollare.",
       },
     },
     {
@@ -910,6 +919,7 @@ export const brainSpec = {
       year: 2018,
       venue: "Frontiers in Cellular Neuroscience 12:181",
       url: "https://doi.org/10.3389/fncel.2018.00181",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; l'intervallo 25.000–30.000 spine va ricontrollato sul testo.",
     },
     {
       id: "benavides2013",
@@ -935,6 +945,7 @@ export const brainSpec = {
       year: 2000,
       venue: "Journal of Neuroscience 20(1):470-484",
       url: "https://doi.org/10.1523/JNEUROSCI.20-01-00470.2000",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e relazione soglia-lineare coerente; soglia −54,4 mV e guadagno 7,2 spike/s/mV da ricontrollare.",
     },
     {
       id: "glorot2011",
@@ -1219,6 +1230,7 @@ export const brainSpec = {
       year: 1992,
       venue: "Journal of Comparative Neurology 326(4):549-560",
       url: "https://doi.org/10.1002/cne.903260405",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifre 101 miliardi / 30,5 milioni coerenti; da ricontrollare la descrizione del campione («5 uomini anziani»).",
     },
     {
       id: "babadi2014",
@@ -1315,6 +1327,7 @@ export const brainSpec = {
       year: 2023,
       venue: "Molecular Psychiatry 28(12):4954-4967",
       url: "https://doi.org/10.1038/s41380-023-02168-y",
+      note: "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; volume e pagine (28(12):4954-4967) da ricontrollare.",
     },
   ],
 };

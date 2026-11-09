@@ -1,8 +1,10 @@
 /**
  * Il cervello del Laboratorio pesi (soli dati: niente three.js, niente DOM). Generato da
  * scratchpad/tab-lab-core/make_brain.py a partire dalla ricerca verificata (research/brain_data.json,
- * tabs["lab"]): analogie, circuito del cervelletto, fatti e fonti copiati senza riscriverli. Formato:
- * ARCHITECTURE.md, "Cervello" (normalizeBrainSpec di core/brain/spec.js, provato con strict: true).
+ * tabs["lab"]): analogie, circuito del cervelletto, fatti e fonti copiati senza riscriverli. Le cautele
+ * della verifica sui numeri "da ricontrollare" stanno in fondo alla nota di ogni fonte segnata e di ogni
+ * numero che la cita. Formato: ARCHITECTURE.md, "Cervello" (normalizeBrainSpec di core/brain/spec.js,
+ * provato con strict: true).
  */
 export const brainSpec = {
   "title": "Pesi e sinapsi: il Laboratorio e il cervello",
@@ -248,7 +250,8 @@ export const brainSpec = {
         "year": 1992,
         "venue": "Journal of Comparative Neurology 326(4):549-560",
         "url": "https://doi.org/10.1002/cne.903260405",
-        "doi": "10.1002/cne.903260405"
+        "doi": "10.1002/cne.903260405",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifre 101 miliardi / 30,5 milioni coerenti; da ricontrollare la descrizione del campione («5 uomini anziani»)."
       },
       {
         "id": "streng2018",
@@ -257,7 +260,8 @@ export const brainSpec = {
         "year": 2018,
         "venue": "The Cerebellum 17(6):735-746",
         "url": "https://doi.org/10.1007/s12311-018-0960-3",
-        "doi": "10.1007/s12311-018-0960-3"
+        "doi": "10.1007/s12311-018-0960-3",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; divergenza 5–10 cellule e frequenze da ricontrollare sul testo."
       },
       {
         "id": "litwinkumar2017",
@@ -300,7 +304,8 @@ export const brainSpec = {
           "year": 2001,
           "venue": "Synapse 41(3):258-273",
           "url": "https://doi.org/10.1002/syn.1083",
-          "doi": "10.1002/syn.1083"
+          "doi": "10.1002/syn.1083",
+          "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifra 164 × 10^12 coerente; da ricontrollare la descrizione del campione («5 giovani maschi»)."
         },
         {
           "id": "pakkenberg2003",
@@ -451,7 +456,8 @@ export const brainSpec = {
           "year": 2018,
           "venue": "The Cerebellum 17(6):735-746",
           "url": "https://doi.org/10.1007/s12311-018-0960-3",
-          "doi": "10.1007/s12311-018-0960-3"
+          "doi": "10.1007/s12311-018-0960-3",
+          "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; divergenza 5–10 cellule e frequenze da ricontrollare sul testo."
         },
         {
           "id": "busch2023",
@@ -636,7 +642,8 @@ export const brainSpec = {
           "year": 2025,
           "venue": "Nature 640:435-447",
           "url": "https://doi.org/10.1038/s41586-025-08790-w",
-          "doi": "10.1038/s41586-025-08790-w"
+          "doi": "10.1038/s41586-025-08790-w",
+          "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; i 524 milioni di sinapsi vengono da comunicati e sito del progetto, non dall'articolo."
         }
       ],
       "ai_section": "I pesi del modello"
@@ -679,7 +686,8 @@ export const brainSpec = {
           "year": 2006,
           "venue": "PNAS 103(32):12138-12143",
           "url": "https://doi.org/10.1073/pnas.0604911103",
-          "doi": "10.1073/pnas.0604911103"
+          "doi": "10.1073/pnas.0604911103",
+          "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e circa 71 milioni coerente; la deviazione ±10,41 milioni va ricontrollata."
         },
         {
           "id": "azevedo2009",
@@ -882,9 +890,10 @@ export const brainSpec = {
         "year": 1992,
         "venue": "Journal of Comparative Neurology 326(4):549-560",
         "url": "https://doi.org/10.1002/cne.903260405",
-        "doi": "10.1002/cne.903260405"
+        "doi": "10.1002/cne.903260405",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifre 101 miliardi / 30,5 milioni coerenti; da ricontrollare la descrizione del campione («5 uomini anziani»)."
       },
-      "note": "Metodi diversi danno numeri diversi: per questo non coincide con i 69 miliardi di Azevedo."
+      "note": "Metodi diversi danno numeri diversi: per questo non coincide con i 69 miliardi di Azevedo. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifre 101 miliardi / 30,5 milioni coerenti; da ricontrollare la descrizione del campione («5 uomini anziani»)."
     },
     {
       "claim": "Sinapsi nella neocorteccia (5 giovani maschi)",
@@ -896,8 +905,10 @@ export const brainSpec = {
         "year": 2001,
         "venue": "Synapse 41(3):258-273",
         "url": "https://doi.org/10.1002/syn.1083",
-        "doi": "10.1002/syn.1083"
-      }
+        "doi": "10.1002/syn.1083",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifra 164 × 10^12 coerente; da ricontrollare la descrizione del campione («5 giovani maschi»)."
+      },
+      "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifra 164 × 10^12 coerente; da ricontrollare la descrizione del campione («5 giovani maschi»)."
     },
     {
       "claim": "Sinapsi nella neocorteccia (rassegna)",
@@ -922,9 +933,10 @@ export const brainSpec = {
         "year": 2001,
         "venue": "Synapse 41(3):258-273",
         "url": "https://doi.org/10.1002/syn.1083",
-        "doi": "10.1002/syn.1083"
+        "doi": "10.1002/syn.1083",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifra 164 × 10^12 coerente; da ricontrollare la descrizione del campione («5 giovani maschi»)."
       },
-      "note": "Da dire esplicitamente nel pannello."
+      "note": "Da dire esplicitamente nel pannello. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifra 164 × 10^12 coerente; da ricontrollare la descrizione del campione («5 giovani maschi»)."
     },
     {
       "claim": "Sinapsi per neurone corticale (ordine di grandezza)",
@@ -936,9 +948,10 @@ export const brainSpec = {
         "year": 2001,
         "venue": "Synapse 41(3):258-273",
         "url": "https://doi.org/10.1002/syn.1083",
-        "doi": "10.1002/syn.1083"
+        "doi": "10.1002/syn.1083",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifra 164 × 10^12 coerente; da ricontrollare la descrizione del campione («5 giovani maschi»)."
       },
-      "note": "Calcolo indicativo che combina Tang et al. 2001 e Azevedo et al. 2009."
+      "note": "Calcolo indicativo che combina Tang et al. 2001 e Azevedo et al. 2009. Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e cifra 164 × 10^12 coerente; da ricontrollare la descrizione del campione («5 giovani maschi»)."
     },
     {
       "claim": "Informazione in una sinapsi (ippocampo di ratto)",
@@ -976,8 +989,10 @@ export const brainSpec = {
         "year": 2018,
         "venue": "The Cerebellum 17(6):735-746",
         "url": "https://doi.org/10.1007/s12311-018-0960-3",
-        "doi": "10.1007/s12311-018-0960-3"
-      }
+        "doi": "10.1007/s12311-018-0960-3",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; divergenza 5–10 cellule e frequenze da ricontrollare sul testo."
+      },
+      "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; divergenza 5–10 cellule e frequenze da ricontrollare sul testo."
     },
     {
       "claim": "Densità sinaptica nella corteccia frontale umana",
@@ -1041,9 +1056,10 @@ export const brainSpec = {
         "year": 2025,
         "venue": "Nature 640:435-447",
         "url": "https://doi.org/10.1038/s41586-025-08790-w",
-        "doi": "10.1038/s41586-025-08790-w"
+        "doi": "10.1038/s41586-025-08790-w",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; i 524 milioni di sinapsi vengono da comunicati e sito del progetto, non dall'articolo."
       },
-      "note": "Valori diffusi con la pubblicazione (comunicati e sito del progetto)."
+      "note": "Valori diffusi con la pubblicazione (comunicati e sito del progetto). Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente; i 524 milioni di sinapsi vengono da comunicati e sito del progetto, non dall'articolo."
     },
     {
       "claim": "Topo",
@@ -1055,8 +1071,10 @@ export const brainSpec = {
         "year": 2006,
         "venue": "PNAS 103(32):12138-12143",
         "url": "https://doi.org/10.1073/pnas.0604911103",
-        "doi": "10.1073/pnas.0604911103"
-      }
+        "doi": "10.1073/pnas.0604911103",
+        "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e circa 71 milioni coerente; la deviazione ±10,41 milioni va ricontrollata."
+      },
+      "note": "Da ricontrollare (verifica della ricerca dell'8 novembre 2026): Riferimento coerente e circa 71 milioni coerente; la deviazione ±10,41 milioni va ricontrollata."
     },
     {
       "claim": "Elefante africano",

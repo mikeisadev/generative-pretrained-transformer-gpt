@@ -11,9 +11,13 @@ import { SPACING, boxOf, decodeUnit, unitIndex } from "../js/core/neuralNet/layo
 import { ARC_KIND, LINK_LIMITS, pairDepths } from "../js/core/neuralNet/links.js";
 import { ScreenIndex } from "../js/core/neuralNet/pickIndex.js";
 import { gaussian, hashSeed, mulberry32 } from "../js/core/neuralNet/random.js";
-import { PATTERNS, ROLES } from "../js/core/neuralNet/roles.js";
+import { PATTERNS, ROLES, linkSummary } from "../js/core/neuralNet/roles.js";
 import { buildNetworkModel } from "../js/core/neuralNet/model.js";
 import { LIMITS, NetworkSpecError, normalizeSpec } from "../js/core/neuralNet/spec.js";
+import { LONG_NETWORK_RATIO, startsCollapsed } from "../js/core/neuralNet/card.js";
+import { avoidRect, partIndexAt, partTitle, readableHeight, walkParts } from "../js/core/neuralNet/framing.js";
+import { attentionSource, badgeOf, honestyLines, listText, plural, valueSources } from "../js/core/neuralNet/honesty.js";
+import { distanceToBox, occluderOpacity } from "../js/core/neuralNet/occlusion.js";
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} ≉ ${b}`);
 const TOKENS = ["Il", "gatto", "dorme", "sul", "divano"];
@@ -623,3 +627,229 @@ test("esempi: le tre reti e la prova di carico sono valide, oneste sulla scala, 
   assert.ok(audio.sections.some((s) => s.role === "codebook"));
   assert.equal(audio.repeats[0].count, 7);
 });
+
+// ------------------------------------------------------------------------------------------ round E: rifinitura
+test("spec: l'avviso dell'identity conta le lastre scelte (emb a due lastre → x0, una lastra per volta)", () => {
+  const spec = (fromSlab) => ({
+    title: "t",
+    scale: "s",
+    depth: 4,
+    sections: [
+      { id: "emb", label: "Embedding", role: "embedding", neurons: 8, slabs: 2, depth: true },
+      { id: "x0", label: "x", role: "add", neurons: 8, depth: true },
+    ],
+    links: [{ from: "emb", to: "x0", pattern: "identity", fromSlab }],
+  });
+  assert.deepEqual(normalizeSpec(spec(0)).warnings, [], "lastra 0: 8 e 8");
+  assert.deepEqual(normalizeSpec(spec(1)).warnings, [], "lastra 1: 8 e 8");
+  const all = normalizeSpec(spec("all")).warnings;
+  assert.equal(all.length, 1);
+  assert.match(all[0], /16 e 8 unità per posizione: si collegano le prime 8/);
+});
+
+test("spec: slices: false esclude una sezione dalla fetta; senza sezioni partecipanti la rete non ha fette", () => {
+  const base = {
+    title: "t",
+    scale: "s",
+    sections: [
+      { id: "chunks", label: "Chunk", role: "data", neurons: 4, depth: { count: 6, label: "chunk" } },
+      { id: "tok", label: "Token", role: "input", neurons: 4, depth: { count: 5, label: "token" }, slices: false },
+    ],
+  };
+  const { net, layout } = build(base);
+  assert.equal(net.slices.count, 6);
+  assert.equal(net.slices.label, "chunk");
+  const tok = net.byId.get("tok");
+  assert.equal(tok.slices, false);
+  for (let u = 0; u < tok.units; u++) assert.equal(layout.depthU[tok.offset + u], -1, "i token restano sempre accesi");
+  // la prima sezione profonda esclusa: le fette sono quelle della prima che partecipa
+  const first = normalizeSpec({ ...base, sections: [{ ...base.sections[1] }, base.sections[0]] });
+  assert.equal(first.slices.label, "chunk");
+  const none = normalizeSpec({ ...base, sections: [{ ...base.sections[0], slices: false }] });
+  assert.equal(none.slices.count, 1, "nessuna sezione partecipa: niente fette");
+  assert.match(errorsOf({ ...base, sections: [{ ...base.sections[0], slices: "no" }] })[0], /slices.*true o false/);
+});
+
+test("spec: illustrative sui pesi espliciti di attention (ed explicit); card", () => {
+  const W = Array.from({ length: 1 * 3 * 3 }, () => 1 / 3);
+  const spec = (link, extra = {}) => ({
+    title: "t",
+    scale: "s",
+    depth: 3,
+    sections: [{ id: "a", label: "A", role: "attention", neurons: 4, depth: true }],
+    links: [link],
+    ...extra,
+  });
+  const net = normalizeSpec(spec({ within: "a", pattern: "attention", weights: W, illustrative: true }));
+  assert.equal(net.links[0].illustrative, true);
+  assert.equal(normalizeSpec(spec({ within: "a", pattern: "attention", weights: W })).links[0].illustrative, false, "pesi veri se non lo si dice");
+  const ignored = normalizeSpec(spec({ within: "a", pattern: "attention", illustrative: true }));
+  assert.equal(ignored.links[0].illustrative, false);
+  assert.match(ignored.warnings[0], /illustrative senza weights/);
+  assert.match(errorsOf(spec({ within: "a", pattern: "attention", weights: W, illustrative: "sì" }))[0], /illustrative: true o false/);
+  assert.equal(net.card, "auto");
+  assert.equal(normalizeSpec(spec({ within: "a", pattern: "attention" }, { card: "collapsed" })).card, "collapsed");
+  assert.match(errorsOf(spec({ within: "a", pattern: "attention" }, { card: "chiusa" }))[0], /^card: uno tra auto, open, collapsed/);
+});
+
+test("layout: le sezioni che campionano le fette con un altro passo si stendono sulla stessa profondità", () => {
+  const { net, layout } = build({
+    title: "t",
+    scale: "s",
+    depth: { count: 12, label: "frame" },
+    sections: [
+      { id: "fine", label: "36 istanti", role: "input", neurons: 2, depth: 36 },
+      { id: "frames", label: "12 frame", role: "conv", neurons: 2, depth: true },
+      { id: "half", label: "6 voci", role: "latent", neurons: 2, depth: 6 },
+      { id: "words", label: "7 parole", role: "embedding", neurons: 2, depth: { count: 7, label: "parola" }, slices: false },
+    ],
+  });
+  const z = (id, d) => {
+    const s = net.byId.get(id);
+    return layout.positions[3 * (s.offset + unitIndex(s, 0, 0, d)) + 2];
+  };
+  near(layout.dz, SPACING.depth, 1e-9); // il passo della rete non lo stringono i 36 istanti
+  // l'istante p sta alla z della sua frazione (p + 0,5) / D: i 3 istanti del frame 4 attorno al frame 4
+  near((z("fine", 12) + z("fine", 13) + z("fine", 14)) / 3, z("frames", 4));
+  near((z("half", 2) - z("half", 1)), 2 * layout.dz);
+  near((z("half", 1) + 0) / 1, (z("frames", 2) + z("frames", 3)) / 2);
+  // l'estensione è quella delle fette (a meno di mezzo passo), non tre volte tanto
+  const extent = (id) => layout.sections[net.byId.get(id).index].z1 - layout.sections[net.byId.get(id).index].z0;
+  assert.ok(Math.abs(extent("fine") - extent("frames")) < layout.dz, `${extent("fine")} ≈ ${extent("frames")}`);
+  // una sezione esclusa dalle fette tiene il passo della rete
+  near(z("words", 1) - z("words", 0), layout.dz);
+});
+
+test("valori: sulle griglie le head simulate non convergono sull'angolo (niente \"primo token\")", () => {
+  const side = 6;
+  const D = side * side;
+  const w = simulateAttention(4, D, D, { qCols: side, kCols: side, seed: [3] });
+  for (let h = 0; h < 4; h++) {
+    let corner = 0;
+    for (let i = 0; i < D; i++) {
+      let sum = 0;
+      for (let j = 0; j < D; j++) sum += w[(h * D + i) * D + j];
+      near(sum, 1, 1e-4);
+      corner += w[(h * D + i) * D];
+    }
+    assert.ok(corner / D < 0.15, `head ${h}: peso medio sull'angolo ${(corner / D).toFixed(3)}`);
+  }
+  // in fila le quattro personalità restano: la head 1 guarda il primo token
+  const line = simulateAttention(4, 8, 8, { seed: [3] });
+  let sink = 0;
+  for (let i = 0; i < 8; i++) sink += line[(1 * 8 + i) * 8];
+  assert.ok(sink / 8 > 0.4, "attention sink nelle sequenze");
+});
+
+test("onestà: badge vere / in parte vere / simulazione, elenco delle sezioni vere e pesi illustrativi", () => {
+  const values = Float32Array.from({ length: 4 * 3 }, (_, i) => i / 10);
+  const W = Array.from({ length: 3 * 3 }, () => 1 / 3);
+  const spec = (withValues, attention) => ({
+    title: "t",
+    scale: "s",
+    seed: 9,
+    depth: 3,
+    sections: [
+      { id: "a", label: "Ingresso", role: "input", neurons: 4, depth: true, ...(withValues.includes("a") ? { values } : {}) },
+      { id: "b", label: "Attention", role: "attention", neurons: 4, depth: true, ...(withValues.includes("b") ? { values } : {}) },
+    ],
+    links: [{ within: "b", pattern: "attention", ...attention }],
+  });
+  const of = (s) => valueSources(build(s));
+  const real = of(spec(["a", "b"], { weights: W }));
+  assert.equal(real.state, "real");
+  assert.deepEqual(badgeOf(real, 9), { text: "Attivazioni vere", className: "real", title: "I valori sono quelli calcolati dal modello." });
+  assert.deepEqual(honestyLines(real, 9), []);
+  const partial = of(spec(["a"], {}));
+  assert.equal(partial.state, "partial");
+  assert.equal(badgeOf(partial, 9).text, "Attivazioni: in parte vere");
+  assert.match(badgeOf(partial, 9).title, /Valori veri in 1 sezione su 2; le altre sono una simulazione didattica \(seme 9\)/);
+  assert.match(honestyLines(partial, 9)[0], /^Valori veri in 1 sezione su 2: Ingresso\. L'altra è una simulazione didattica \(seme 9\)\.$/);
+  // tutte le attivazioni vere ma pesi di attention illustrativi: in parte vere, e lo si dice
+  const sketch = of(spec(["a", "b"], { weights: W, illustrative: true }));
+  assert.equal(sketch.state, "partial");
+  assert.ok(honestyLines(sketch, 9).some((l) => /^Pesi di attention illustrativi .*: Attention\.$/.test(l)));
+  const sim = of(spec([], {}));
+  assert.equal(sim.state, "simulated");
+  assert.equal(badgeOf(sim, 9).className, "sim");
+  assert.deepEqual(honestyLines(sim, 9), []);
+  assert.equal(attentionSource({ weights: null }), "simulated");
+  assert.equal(plural(1, "neurone", "neuroni"), "1 neurone");
+  assert.equal(plural(4096, "canale", "canali"), "4.096 canali");
+  assert.equal(listText(["a", "b", "c"]), "a, b e c");
+  assert.equal(listText(["a", "b", "c", "d"], 2), "a, b e altre 2");
+});
+
+test("inquadratura delle reti lunghe: altezza leggibile, parti a blocchi interi, la parte guardata", () => {
+  assert.equal(readableHeight(800), 400);
+  assert.equal(readableHeight(500), 250);
+  assert.equal(readableHeight(200), 150, "mai sotto 150 px…");
+  assert.equal(readableHeight(120), 108, "…ma non più del 90% della parte libera");
+  const items = Array.from({ length: 20 }, (_, i) => ({ x0: i * 5, x1: i * 5 + 3, label: `S${i}` }));
+  const groups = [{ x0: 0, x1: 18, label: "Ingresso" }, { x0: 20, x1: 48, label: "Blocco 1" }, { x0: 0, x1: 98, label: "Tutto" }];
+  const parts = walkParts({ items, span: [-2, 100], width: 30, groups });
+  assert.ok(parts.length >= 3);
+  assert.equal(parts[0].x0, -2, "la prima parte comincia dall'ingresso");
+  assert.equal(parts.at(-1).x1, 100, "l'ultima finisce con l'uscita");
+  for (const p of parts) near(p.x1 - p.x0, 30);
+  for (const p of parts.slice(1, -1)) assert.ok(items.some((it) => Math.abs(it.x0 - 0.6 - p.x0) < 1e-9), `la parte ${p.x0} comincia con un blocco`);
+  for (let i = 1; i < parts.length; i++) assert.ok(parts[i].x0 > parts[i - 1].x0, "parti in avanti");
+  for (const it of items) assert.ok(parts.some((p) => it.x0 >= p.x0 - 1e-9 && it.x1 <= p.x1 + 1e-9), `il blocco ${it.label} si vede per intero in una parte`);
+  assert.equal(parts[0].title, "Ingresso", "il titolo: le parentesi della parte (non quella di tutta la rete)");
+  assert.equal(walkParts({ items, span: [-2, 100], width: 90 }).length, 1, "quasi tutta dentro: una parte sola");
+  assert.equal(partIndexAt(parts, -2), 0);
+  assert.equal(partIndexAt(parts, 99), parts.length - 1);
+  assert.equal(partTitle(items, [], 0, 9), "S0 … S1");
+  // il pad nell'angolo in basso a destra: la parte libera si taglia sopra di lui o alla sua sinistra
+  const free = { x0: 12, y0: 300, x1: 1200, y1: 800 };
+  assert.deepEqual(avoidRect(free, { x0: 400, y0: 740, x1: 1190, y1: 790 }), { ...free, y1: 732 }, "pad basso e largo: sopra (resta più area)");
+  assert.deepEqual(avoidRect(free, { x0: 1000, y0: 700, x1: 1190, y1: 790 }), { ...free, x1: 992 }, "pad quasi quadrato: a sinistra resta più area");
+  assert.deepEqual(avoidRect(free, { x0: 1140, y0: 400, x1: 1196, y1: 790 }), { ...free, x1: 1132 }, "pad alto e stretto: a sinistra");
+  assert.equal(avoidRect(free, { x0: 0, y0: 0, x1: 10, y1: 10 }), free, "fuori: niente da togliere");
+});
+
+test("occlusione: le lastre fantasma tra la camera e il punto guardato si attenuano, di lato no", () => {
+  const ghosts = { min: [-4, -6, -9], max: [-1, 6, 9] }; // fantasmi alti e profondi, prima della sezione guardata
+  const focus = [3, 0, 0];
+  // tre quarti da sinistra e dall'alto, da vicino: il raggio attraversa i fantasmi
+  const thick = [3 - 0.6 * 20, 0.45 * 20, 0.66 * 20];
+  near(occluderOpacity(thick, focus, ghosts), 0.12);
+  // di lato: il raggio corre lungo z accanto ai fantasmi
+  assert.equal(occluderOpacity([3 - 0.07 * 40, 0.1 * 40, 40], focus, ghosts), 1);
+  // si guardano proprio i fantasmi: restano pieni
+  assert.equal(occluderOpacity(thick, [-2, 0, 0], ghosts), 1);
+  assert.equal(distanceToBox([0, 0, 0], ghosts), 1);
+});
+
+test("scheda: parte ridotta sul telefono, sugli stage stretti, nelle reti molto lunghe o se la specifica lo chiede", () => {
+  assert.equal(startsCollapsed({ narrow: true, stageWidth: 2000, mode: "open" }), true, "sul telefono sempre");
+  assert.equal(startsCollapsed({ narrow: false, stageWidth: 1220, ratio: 4 }), false);
+  assert.equal(startsCollapsed({ narrow: false, stageWidth: 900, ratio: 4 }), true);
+  assert.equal(startsCollapsed({ narrow: false, stageWidth: 1220, ratio: LONG_NETWORK_RATIO }), true, "rete molto lunga");
+  assert.equal(startsCollapsed({ narrow: false, stageWidth: 1220, ratio: 14, mode: "open" }), false);
+  assert.equal(startsCollapsed({ narrow: false, stageWidth: 1600, ratio: 2, mode: "collapsed" }), true);
+});
+
+test("linkSummary: una voce per sezione; sezioni uguali (i livelli della U-Net) una voce sola con il numero", () => {
+  const emb = { label: "Embedding" };
+  const up1 = { label: "Self- e cross-attention" };
+  const up2 = { label: "Self- e cross-attention" };
+  const mid = { label: "Centro" };
+  const links = [
+    { to: emb, pattern: "lookup", label: "lookup dei token" },
+    { to: emb, pattern: "lookup", label: "lookup delle posizioni" },
+    { to: emb, pattern: "lookup", label: "lookup dei token" },
+    { to: up1, pattern: "explicit", label: "cross-attention al testo" },
+    { to: up2, pattern: "explicit", label: "cross-attention al testo" },
+    { to: mid, pattern: "dense" },
+  ];
+  assert.deepEqual(linkSummary(links, (l) => l.to), [
+    "Embedding (lookup dei token; lookup delle posizioni)",
+    "2 × Self- e cross-attention (cross-attention al testo)",
+    "Centro (collegamenti densi)",
+  ]);
+  // stesso nome ma collegamenti diversi: due voci (non si fondono cose diverse)
+  assert.deepEqual(linkSummary([{ to: up1, pattern: "dense" }, { to: up2, pattern: "identity" }], (l) => l.to), ["Self- e cross-attention (collegamenti densi)", "Self- e cross-attention (uno a uno)"]);
+  assert.deepEqual(linkSummary([], (l) => l.to), []);
+});
+

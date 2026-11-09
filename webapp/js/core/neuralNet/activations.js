@@ -221,10 +221,16 @@ function normalizePerSlice(s, out) {
   }
 }
 
+/** Stili delle head simulate: token precedente, primo token ("attention sink"), vicini, contenuto. */
+const STYLE = Object.freeze({ previous: 0, sink: 1, local: 2, content: 3 });
+
 /**
  * Pesi di attention simulati: Float32Array(heads × Dq × Dk), ogni riga (head, query) somma a 1.
  * Le head hanno comportamenti tipici osservati nei transformer veri: guardare il token precedente,
  * il primo token ("attention sink"), i vicini, oppure poche posizioni scelte dal contenuto.
+ * Su una griglia (feature map di una U-Net) "il primo" e "il precedente" non hanno senso: la prima
+ * posizione è l'angolo in alto a sinistra, e tutte le query che lo guardano disegnerebbero un ventaglio
+ * verso l'angolo che domina le viste da vicino. Lì le head alternano schemi locali e di contenuto.
  * @param {{ causal?: boolean, qCols?: number, kCols?: number, seed?: number[] }} o
  *   qCols/kCols: per le griglie, quante colonne (la distanza tra posizioni è quella nella griglia)
  */
@@ -235,7 +241,7 @@ export function simulateAttention(heads, Dq, Dk, { causal = false, qCols = Dq, k
   const grid = qCols !== Dq || kCols !== Dk;
   const sameSpace = Dq === Dk;
   for (let h = 0; h < heads; h++) {
-    const style = sameSpace ? h % 4 : 3;
+    const style = !sameSpace ? STYLE.content : grid ? (h % 2 === 0 ? STYLE.local : STYLE.content) : h % 4;
     const peaks = Array.from({ length: Dq }, () => [Math.floor(rand() * Dk), Math.floor(rand() * Dk)]);
     for (let i = 0; i < Dq; i++) {
       let max = -Infinity;
@@ -246,9 +252,9 @@ export function simulateAttention(heads, Dq, Dk, { causal = false, qCols = Dq, k
         }
         const dist = grid ? Math.abs(Math.floor(i / qCols) - Math.floor(j / kCols)) + Math.abs((i % qCols) - (j % kCols)) : Math.abs(i - j);
         let z = 0.35 * gaussian(rand);
-        if (style === 0) z += j === i - 1 || (i === 0 && j === 0) ? 3.4 : j === i ? 1.2 : 0;
-        else if (style === 1) z += j === 0 ? 3 : 0.4 * (j === i);
-        else if (style === 2) z += -0.9 * dist;
+        if (style === STYLE.previous) z += j === i - 1 || (i === 0 && j === 0) ? 3.4 : j === i ? 1.2 : 0;
+        else if (style === STYLE.sink) z += j === 0 ? 3 : 0.4 * (j === i);
+        else if (style === STYLE.local) z += -0.9 * dist;
         else z += j === peaks[i][0] ? 3 : j === peaks[i][1] ? 2 : 0.6 * gaussian(rand);
         logits[j] = z;
         max = Math.max(max, z);

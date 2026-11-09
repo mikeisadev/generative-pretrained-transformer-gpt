@@ -26,9 +26,14 @@
 .nn-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 10px 12px 6px; }
 .nn-head-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .nn-title { margin: 0; font-size: 14.5px; line-height: 1.3; }
-.nn-badge { align-self: flex-start; font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+/* Il badge è un pulsante: apre "Scala e onestà" con l'elenco di che cosa è vero. Tre stati: vere (verde),
+   in parte vere (verde acqua: una rete mista), simulazione didattica (giallo). */
+.nn-badge { align-self: flex-start; font: inherit; font-size: 11px; line-height: 1.5; padding: 0 8px; border-radius: 999px; white-space: nowrap; cursor: pointer; }
 .nn-badge.sim { background: rgba(250, 204, 21, 0.14); color: #fde68a; border: 1px solid rgba(250, 204, 21, 0.35); }
 .nn-badge.real { background: rgba(74, 222, 128, 0.12); color: #bbf7d0; border: 1px solid rgba(74, 222, 128, 0.35); }
+.nn-badge.mixed { background: rgba(45, 212, 191, 0.13); color: #99f6e4; border: 1px solid rgba(45, 212, 191, 0.4); }
+.nn-badge:hover { filter: brightness(1.15); }
+.nn-truth { color: #cbd5e1; }
 .nn-collapse { flex: none; font-size: 12px; padding: 3px 9px; }
 
 .nn-controls { padding: 0 12px 8px; border-bottom: 1px solid var(--border, #1e293b); display: grid; gap: 6px; }
@@ -44,7 +49,13 @@
 .nn-range-value { color: var(--muted, #94a3b8); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 12px; }
 .nn-status { margin: 0; min-height: 1.3em; font-size: 12px; color: #a5f3fc; }
 .nn-status:empty { display: none; }
-:is(.nn-btn, .nn-select, .nn-range, .nn-collapse, .nn-index-item, .nn-close):focus-visible { outline: 2px solid var(--accent, #38bdf8); outline-offset: 2px; }
+/* Parti di una rete lunga: ◀ "Parte 1 di 4 · Ingresso, Layer SWA" ▶ · Tutta la rete */
+.nn-walk { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.nn-walk[hidden] { display: none; }
+.nn-walk-step { padding: 4px 9px; }
+.nn-walk-step:disabled { opacity: 0.4; cursor: default; }
+.nn-walk-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #cbd5e1; font-size: 12px; text-align: center; }
+:is(.nn-btn, .nn-select, .nn-range, .nn-collapse, .nn-index-item, .nn-close, .nn-badge):focus-visible { outline: 2px solid var(--accent, #38bdf8); outline-offset: 2px; }
 
 .nn-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px 12px; overscroll-behavior: contain; }
 .nn-text { margin: 0 0 8px; }
@@ -110,6 +121,8 @@
 .nn-card.collapsed .nn-body > :not(.nn-detail) { display: none; }
 .nn-card.collapsed .nn-body:not(:has(.nn-detail:not([hidden]))) { display: none; }
 .nn-card.collapsed .nn-controls { border-bottom: 0; }
+/* ridotta: la densità dei collegamenti (un comando da esplorare) aspetta "Dettagli"; la scena ha più spazio */
+.nn-card.collapsed .nn-controls .nn-row:has(.nn-range) { display: none; }
 
 /* Telefono: la scheda è una fascia in alto, larga quanto lo stage; aperta scorre dentro di sé */
 @media (max-width: 640px) {
@@ -125,6 +138,7 @@
   .nn-title { font-size: 13.5px; }
   .nn-controls { padding: 0 10px 8px; }
   .nn-btn, .nn-select { font-size: 12px; padding: 5px 8px; }
-  .nn-card.collapsed .nn-controls .nn-row:not(:has(.nn-slice)) { display: none; }
+  /* ridotta: restano la fetta e le parti di una rete lunga (sul telefono sono il modo di scorrerla) */
+  .nn-card.collapsed .nn-controls .nn-row:not(:has(.nn-slice)):not(.nn-walk) { display: none; }
   .nn-tip { max-width: min(280px, calc(100% - 12px)); }
 }

@@ -19,7 +19,6 @@ import { NumbersGroup } from "../../../core/matrixNumbers.js";
 import { prefersReducedMotion } from "../../../core/dom.js";
 import { Board } from "./board.js";
 import { Card, LABEL_PX, TokenStrip } from "./cards.js";
-import { padBottom } from "../../../core/navMath.js";
 import { cardRect, codeAboveBoard, deskLayout, framePose, padRect, zAbove } from "./plan.js";
 
 /** Comandi fluttuanti in alto nello stage: la camera non inquadra lì sotto. */
@@ -478,7 +477,6 @@ export class ActionStage {
         code,
         pad: padOn ? rel(pad.getBoundingClientRect()) : null,
         padSize: this._padSize,
-        padBottomFn: padBottom,
       });
       root.style.setProperty("--lab-act-left-px", `${L.left}px`);
       root.style.setProperty("--lab-act-max-w", `${L.maxW}px`);

@@ -278,12 +278,10 @@ export async function createTab(root, app) {
       labPane.selectStyle(id);
       plots?.setStyle(id);
       labPane.setStatus(`Brano scelto: "${lab.songs[id].style.prompt}".`);
-      // La "Rete neurale" mostra i numeri veri del brano: se è aperta si riapre subito con quelli del brano
-      // nuovo (stessa camera; show() è sincrono fino alla costruzione, quindi la scena del tab non si vede).
-      if (network.refresh() && reps.current === "network") {
-        void reps.show("main");
-        void reps.show("network");
-      }
+      // La "Rete neurale" mostra i numeri veri del brano: se è aperta si rifà subito con quelli del brano
+      // nuovo, sulla stessa scena e con la stessa camera (reps.refresh); chiusa, la si costruisce
+      // all'apertura (cache: false).
+      if (reps.current === "network") void reps.refresh("network");
     },
   };
 
@@ -296,12 +294,13 @@ export async function createTab(root, app) {
   // che deve stare prima di "Fonti". Le due viste vivono in un livello sopra lo stage; il nucleo torna da
   // solo all'Architettura quando lo studente chiede qualcosa della scena (un passo, una vista, un'azione,
   // "Genera subito", un link diretto): il tab non ha richieste che arrivino da altre strade (eventi del bus).
-  const network = createNetworkSource();
   const reps = installRepresentations(ui, {
     tabId: "audio",
     app,
     network: {
-      load: network.load,
+      // i numeri dipendono dal brano scelto nel Laboratorio: la specifica si rifà a ogni apertura (~5 ms)
+      load: () => import("./network.js").then((m) => m.buildAudioNetworkSpec(lab, { style: state.style })),
+      cache: false,
       description: "Quattro reti dell'audio neurone per neurone, da sinistra a destra: EnCodec, il codec del tab con i numeri veri, MusicGen e Whisper. Girando la camera vedi il tempo in profondità: convoluzioni tra frame vicini, voci dei codebook, delay pattern, attention tra i frame.",
     },
     brain: {
@@ -310,35 +309,6 @@ export async function createTab(root, app) {
     },
   });
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Paper originali e codice ufficiale da cui vengono i numeri dei modelli reali." });
-
-  /**
-   * La specifica della "Rete neurale" (network.js) con i numeri che il laboratorio ha calcolato sul brano
-   * scelto. Il nucleo carica la specifica una volta e la tiene in cache, ma i numeri cambiano con il brano:
-   * `load` restituisce un oggetto stabile riempito con la rete del brano di adesso, e `refresh` lo riempie
-   * di nuovo quando il brano cambia (true se l'ha fatto). La vista lo legge a ogni apertura, anche quando
-   * il tab torna visibile con la rete aperta. Si costruisce solo dopo la prima apertura (~5 ms).
-   */
-  function createNetworkSource() {
-    let build = null;
-    let filledFor = null;
-    const spec = {};
-    const refresh = () => {
-      if (!build || filledFor === state.style) return false;
-      const next = build(lab, { style: state.style });
-      for (const key of Object.keys(spec)) delete spec[key];
-      Object.assign(spec, next);
-      filledFor = state.style;
-      return true;
-    };
-    return {
-      async load() {
-        ({ buildAudioNetworkSpec: build } = await import("./network.js"));
-        refresh();
-        return spec;
-      },
-      refresh,
-    };
-  }
 
   const err = lab.relativeError();
     const vars = {

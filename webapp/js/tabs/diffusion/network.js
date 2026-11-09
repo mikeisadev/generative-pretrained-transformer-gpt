@@ -299,7 +299,7 @@ function level(p, L, { decoder = false, entering = null } = {}) {
     links.push(
       { from: `${p}_res`, to: `${p}_attn`, pattern: "dense", density: 0.25, label: "GroupNorm e proiezione 1 × 1" },
       { within: `${p}_attn`, pattern: "attention" }, // nessuna maschera: tutte le posizioni con tutte
-      { from: "txt_out", to: `${p}_attn`, pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L.res)), label: "cross-attention al testo, schema illustrativo" }, // dai token alle posizioni
+      { from: "txt_out", to: `${p}_attn`, pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L.res)), illustrative: true, label: "cross-attention al testo, schema illustrativo" }, // dai token alle posizioni
     );
   }
   const ids = sections.map((s) => s.id);
@@ -374,7 +374,7 @@ function unet() {
     { from: previous, to: "un_m_res1", pattern: "conv", density: 0.2 },
     { from: "un_m_res1", to: "un_m_attn", pattern: "dense", density: 0.25, label: "GroupNorm e proiezione 1 × 1" },
     { within: "un_m_attn", pattern: "attention" },
-    { from: "txt_out", to: "un_m_attn", pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L3.res)), label: "cross-attention al testo, schema illustrativo" },
+    { from: "txt_out", to: "un_m_attn", pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L3.res)), illustrative: true, label: "cross-attention al testo, schema illustrativo" },
     { from: "un_m_attn", to: "un_m_res2", pattern: "conv", density: 0.2 },
   );
   resBlocks.push("un_m_res1", "un_m_res2");
@@ -468,11 +468,11 @@ function videoBlock() {
   ];
   const links = [
     { from: "vid_in", to: "vid_spatial", pattern: "dense", density: 0.5 },
-    { within: "vid_spatial", pattern: "attention", weights: videoAttentionMask("spatial") },
+    { within: "vid_spatial", pattern: "attention", weights: videoAttentionMask("spatial"), illustrative: true }, // struttura vera, pesi tutti uguali
     { from: "vid_spatial", to: "vid_add1", pattern: "dense", density: 0.5 },
     { from: "vid_in", to: "vid_add1", pattern: "residual" },
     { from: "vid_add1", to: "vid_temporal", pattern: "dense", density: 0.5 },
-    { within: "vid_temporal", pattern: "attention", weights: videoAttentionMask("temporal") },
+    { within: "vid_temporal", pattern: "attention", weights: videoAttentionMask("temporal"), illustrative: true },
     { from: "vid_temporal", to: "vid_add2", pattern: "dense", density: 0.5 },
     { from: "vid_add1", to: "vid_add2", pattern: "residual" },
     { from: "vid_add2", to: "vid_out", pattern: "dense", density: 0.5 },
@@ -512,7 +512,7 @@ export function buildDiffusionNetworkSpec() {
   const parts = [textEncoder(), unet(), decoderToPixels(), videoBlock()];
   return {
     title: "Rete neurale di Stable Diffusion 1.x e di un blocco video (ridotte)",
-    intro: "La pipeline del tab disegnata neurone per neurone, da sinistra a destra: il text encoder CLIP legge il prompt, la U-Net toglie il rumore dal latente, lo scheduler e il decoder del VAE arrivano ai pixel; in fondo, a parte, un blocco di un denoiser video.\n\nGira la camera («Guarda lo spessore»): nel testo l'attention collega ogni token ai precedenti, nella U-Net le convoluzioni guardano i vicini della griglia, la self-attention collega posizioni lontane e la cross-attention porta le parole del prompt dentro l'immagine; nel video l'attention lavora dentro i frame e tra i frame. La fascia viola sopra la U-Net sono gli archi della cross-attention: scegli una parola in «Fetta» («faro», per esempio) e restano solo i suoi.",
+    intro: "La pipeline del tab disegnata neurone per neurone, da sinistra a destra: il text encoder CLIP legge il prompt, la U-Net toglie il rumore dal latente, lo scheduler e il decoder del VAE arrivano ai pixel; in fondo, a parte, un blocco di un denoiser video.\n\nGira la camera («Guarda lo spessore»): nel testo l'attention collega ogni token ai precedenti, nella U-Net le convoluzioni guardano i vicini della griglia, la self-attention collega posizioni lontane e la cross-attention porta le parole del prompt dentro l'immagine; nel video l'attention lavora dentro i frame e tra i frame. Gli archi viola sopra la U-Net sono la cross-attention: di lato si sovrappongono in una fascia e restano tenui; scegli una parola in «Fetta» («faro», per esempio) e si accendono solo i suoi, oppure gira la camera per vederli tutti.",
     scale: `1 sfera = 1 numero. U-Net: griglia divisa per ${GRID_DIVISOR} in ogni lato (64 × 64 → 8 × 8, 32 × 32 → 4 × 4, 16 × 16 → 2 × 2); il livello più piccolo (8 × 8) resta 2 × 2, quindi il terzo dimezzamento e il primo raddoppio non si vedono. 1 canale ogni ${CHANNEL_DIVISOR}: 1, 2, 4, 4 lastre invece di 320, 640, 1.280, 1.280 (proprio channel_mult [1, 2, 4, 4]); 2 delle 8 head (1 nella cross-attention); a ogni livello un ResNet block e un blocco di attention disegnati su 2 (encoder) o 3 (decoder), quindi una skip connection per livello invece di 12 e il passo t verso 10 ResNet block invece di 22. Testo: 10 dei 77 token, 12 dei 768 numeri (48 dei 3.072 nell'MLP), 4 delle 12 head, 1 dei 12 layer. VAE: 2 dei 512 canali, un raddoppio della griglia disegnato dei tre veri, immagine ${IMAGE_SIDE} × ${IMAGE_SIDE} invece di 512 × 512. Video: 16 token, pochi numeri per token, un blocco solo.`,
     note: `Valori veri, calcolati qui con le funzioni del tab (math.js): il rumore iniziale z_T dell'azione «Generazione» (seed ${GENERATION.seed}) e i seni e coseni del passo t = ${FIRST_T}. Tutto il resto è una simulazione didattica con un seme: il denoiser del tab è simulato (nel browser non c'è una U-Net addestrata), e così attivazioni e pesi della self-attention. Gli archi della cross-attention sono uno schema illustrativo costruito sull'immagine del tab, non calcolato: ogni posizione guarda la parola della sua zona (la torre «faro», la scogliera «scogliera», cielo e mare «tramonto»); una posizione che copre più zone divide il peso in proporzione all'area. Nel blocco video gli archi mostrano la struttura vera dell'attention fattorizzata (chi può guardare chi) con pesi tutti uguali. Il Diffusion Transformer (vista «DiT» del tab) sostituirebbe la U-Net con blocchi transformer sulle patch del latente, come il blocco video senza il tempo.`,
     seed: 23,

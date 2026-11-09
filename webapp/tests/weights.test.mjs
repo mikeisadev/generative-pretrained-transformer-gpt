@@ -35,7 +35,7 @@ import { decodeSnapshot, decodeWeights, parseBenchmark, parseRunInfo, parseTrace
 import { groupOf, groupsFromTrace } from "../js/shared/weights/groups.js";
 import { buildModuleTree, findNode, pythonPath, walkTree } from "../js/shared/weights/moduleTree.js";
 import { parseModuleSource, splitComment } from "../js/shared/weights/pythonSource.js";
-import { engineCompatibility, fingerprint, inferGptConfig, loadBuiltinRun, runsFromFiles, snapshotBracket } from "../js/shared/weights/run.js";
+import { WeightRun, engineCompatibility, fingerprint, inferGptConfig, loadBuiltinRun, runsFromFiles, snapshotBracket, snapshotEntry } from "../js/shared/weights/run.js";
 import { parseSafetensors, safetensorsInfo } from "../js/shared/weights/safetensors.js";
 import { histogram, percentiles, range, tensorStats } from "../js/shared/weights/stats.js";
 import { RunStore, deserializeRun, serializeRun } from "../js/shared/weights/store.js";
@@ -409,6 +409,51 @@ test("run del corso: pesi, config, 11 snapshot a richiesta, motore compatibile",
   assert.equal(engine.weightsSource, "custom");
 });
 
+test("snapshot: unload() libera il decodificato, il prossimo load() lo rilegge; unloadSnapshots tiene quelli indicati", async () => {
+  // 4 pesi in float16: 1, 0,5, −2, 0 (i byte di uno snapshot del training)
+  const halves = Uint16Array.from([0x3c00, 0x3800, 0xc000, 0x0000]);
+  const layout = [{ name: "w", shape: [2, 2], numel: 4, offset: 0 }];
+  const entryAt = (step, raw) => snapshotEntry({ step, file: `s${step}.f16`, meta: {}, layout, totalParams: 4, layoutMatches: true, raw });
+  let reads = 0;
+  const entry = entryAt(7, async () => (reads++, halves.buffer.slice(0)));
+  assert.equal(entry.loaded, false);
+  assert.equal(entry.unload(), false, "niente da togliere");
+  const a = await entry.load();
+  assert.equal(entry.loaded, true);
+  assert.equal(await entry.load(), a, "in cache: lo stesso oggetto");
+  assert.equal(reads, 1);
+  assert.equal(entry.unload(), true);
+  assert.equal(entry.loaded, false);
+  const b = await entry.load();
+  assert.equal(reads, 2, "dopo unload() si rilegge");
+  assert.notEqual(b, a);
+  assert.deepEqual([...b.flat], [1, 0.5, -2, 0]);
+  assert.deepEqual([...a.flat], [...b.flat], "chi teneva il vecchio snapshot lo conserva intatto");
+
+  // un caricamento fallito che finisce DOPO unload() e un nuovo load() non toglie dalla cache quello nuovo
+  let rejectFirst;
+  let calls = 0;
+  const race = entryAt(8, () => (++calls === 1 ? new Promise((_, reject) => (rejectFirst = reject)) : Promise.resolve(halves.buffer.slice(0))));
+  const first = race.load();
+  race.unload();
+  const second = race.load();
+  rejectFirst(new Error("rete"));
+  await assert.rejects(first, /rete/);
+  assert.equal(race.loaded, true);
+  assert.equal(await race.load(), await second);
+
+  // il run: libera tutto tranne gli step da tenere (es. quello mostrato), ignora quelli mai caricati
+  const tensors = new Map([["w", { name: "w", shape: [2, 2], numel: 4, dtype: "float32", data: new Float32Array(4) }]]);
+  const run = new WeightRun({ id: "t", name: "prova", source: "upload", tensors, snapshots: [0, 10, 20, 30].map((s) => entryAt(s, async () => halves.buffer.slice(0))) });
+  const kept = await run.loadSnapshot(10);
+  await run.loadSnapshot(20);
+  await run.loadSnapshot(30);
+  assert.equal(run.unloadSnapshots({ keep: [10] }), 2);
+  assert.deepEqual(run.snapshots.map((s) => s.loaded), [false, true, false, false]);
+  assert.equal(await run.loadSnapshot(10), kept, "lo step tenuto resta in cache");
+  assert.equal(run.unloadSnapshots(), 1);
+});
+
 test("snapshotBracket: step esatti, intermedi e fuori intervallo", () => {
   const steps = [0, 50, 100];
   assert.deepEqual(snapshotBracket(steps, 75), { lo: 50, hi: 100, t: 0.5, clamped: false });
@@ -699,7 +744,8 @@ test("albero dei moduli: ogni riga annotata è davvero quella riga del file gpt/
   });
   for (const file of files.keys()) files.set(file, (await readFile(`${ROOT}${file}`, "utf8")).split("\n"));
   walkTree(tree, (n) => {
-    for (const code of [n.code, n.code?.createdBy, ...(n.code?.items ?? []), ...(n.code?.buffers ?? [])].filter(Boolean)) {
+    // buffer e moduli senza pesi portano il file della loro classe (il Dropout di `sa` sta in attention.py, non in block.py)
+    for (const code of [n.code, n.code?.createdBy, ...(n.code?.items ?? []), ...(n.code?.buffers ?? []), ...(n.code?.noWeights ?? [])].filter(Boolean)) {
       if (!code.line || !code.text) continue;
       const lines = files.get(code.file ?? n.code.file);
       assert.equal(lines[code.line - 1].trim(), code.text, `${n.path}: ${code.file ?? n.code.file}:${code.line}`);
@@ -707,6 +753,10 @@ test("albero dei moduli: ogni riga annotata è davvero quella riga del file gpt/
     }
   });
   assert.ok(checked > 200, `righe controllate: ${checked}`);
+  const sa = findNode(tree, "blocks.0.sa");
+  assert.equal(sa.code.file, "gpt/block.py", "la riga che crea sa");
+  assert.deepEqual(sa.code.noWeights.map((w) => [w.attr, w.type, w.file, w.snippet]), [["dropout", "nn.Dropout", "gpt/attention.py", sa.code.noWeights[0].snippet]]);
+  assert.equal(findNode(tree, "blocks.0.sa.heads.0").code.buffers[0].file, "gpt/attention.py");
 });
 
 test("albero dei moduli: architettura modificata o sconosciuta", { skip: !HAS_DATA }, async () => {
@@ -884,16 +934,24 @@ register(
 );
 const THREE = await import("three");
 const { NumericMatrix, NumbersGroup, attachNumbers, colormapLUT } = await import("../js/core/matrixNumbers.js");
-const { CELL, matrixPlane, weightTexture } = await import("../js/core/visuals.js");
+const { ATTENTION_LUT, CELL, DIVERGING_LUT, MASKED_LUT, attentionTexture, matrixPlane, weightTexture } = await import("../js/core/visuals.js");
 
-/** Canvas finto: registra i testi scritti (con colore e font) a ogni ridisegno. */
+/**
+ * Canvas finto: registra i testi scritti (con colore e font). clearRect di tutto il canvas = un ridisegno
+ * completo (`draws`); di un pezzo = una riscrittura di celle (`partial`): toglie i testi che vi cadono.
+ */
 function fakeCanvas() {
-  const canvas = { width: 0, height: 0, texts: [], draws: 0 };
+  const canvas = { width: 0, height: 0, texts: [], draws: 0, partial: 0 };
   const ctx = {
     font: "10px monospace", fillStyle: "#000", strokeStyle: "", lineWidth: 1, textAlign: "", textBaseline: "", globalAlpha: 1,
-    clearRect() {
-      canvas.texts = [];
-      canvas.draws++;
+    clearRect(x, y, w, h) {
+      if (x <= 0 && y <= 0 && x + w >= canvas.width && y + h >= canvas.height) {
+        canvas.texts = [];
+        canvas.draws++;
+      } else {
+        canvas.texts = canvas.texts.filter((t) => !(t.x >= x && t.x < x + w && t.y >= y && t.y < y + h));
+        canvas.partial++;
+      }
     },
     fillRect() {},
     beginPath() {},
@@ -938,6 +996,8 @@ function scene3d({ maxOverlays = 4, maxCellsPerOverlay = 2500 } = {}) {
 }
 const ffwd = Float32Array.from({ length: 256 * 64 }, (_, i) => Math.sin(i * 0.37) * 0.3 + (i % 7 === 0 ? 0.25 : 0));
 const unpack = (text) => Number(text.replace("−", "-").replace(",", "."));
+/** I numeri scritti (non gli indici "riga,colonna"), in ordine di riga e di colonna come le celle. */
+const numbersOf = (canvas) => canvas.texts.filter((t) => t.font.startsWith("600")).sort((a, b) => a.y - b.y || a.x - b.x);
 
 test("NumericMatrix 256×64: geometria come core/visuals.js, riga 0 in alto, cella sotto il mouse", () => {
   const { group, scene, look, centerHit } = scene3d();
@@ -1067,8 +1127,8 @@ test("NumericMatrix: setData (un altro step del training) ridisegna anche a came
   assert.equal(group.update(camera, H), true);
   const [shown] = group.shown();
   const first = scaled[shown.window.r0 * 64 + shown.window.c0];
-  assert.equal(canvases[0].texts[0].text, formatCell(first, shown.decimals));
-  assert.notEqual(canvases[0].texts[0].text, before);
+  assert.equal(numbersOf(canvases[0])[0].text, formatCell(first, shown.decimals));
+  assert.notEqual(numbersOf(canvases[0])[0].text, before);
   m.setData(scaled, { range: "auto" });
   assert.ok(m.range < scale);
 });
@@ -1138,7 +1198,7 @@ test("attachNumbers su una heatmap di core/visuals.js: colori letti dalla textur
   values = tensor.data.map((v) => -v);
   mesh.material.map.needsUpdate = true;
   assert.equal(group.update(camera, H), true);
-  assert.equal(canvases[0].texts[0].text, formatCell(values[shown.window.r0 * 64 + shown.window.c0], shown.decimals));
+  assert.equal(numbersOf(canvases[0])[0].text, formatCell(values[shown.window.r0 * 64 + shown.window.c0], shown.decimals));
   // Oppure, se cambiano solo i valori, refresh().
   values = tensor.data;
   handle.refresh();
@@ -1164,4 +1224,98 @@ test("attachNumbers su una barra verticale (vettore (n, 1) scalato in x come nel
   assert.equal(canvases[0].texts[0].text, formatCell(values[shown.window.r0], shown.decimals));
   // Le celle sono 3 volte più larghe che alte: il canvas ne rispetta le proporzioni.
   assert.ok(Math.abs(canvases[0].width / canvases[0].height - 3 / (shown.window.r1 - shown.window.r0)) < 0.05);
+});
+
+// ---------------------------------------------------------------- round E: colori esportati, riposo, riscritture parziali
+
+test("visuals.js: le tabelle dei colori esportate sono i colori delle heatmap, byte per byte", () => {
+  // Il vecchio modo (matrixNumbers.js e le azioni del Transformer): disegnare una rampa e leggerne i pixel.
+  const ramp = Uint8Array.from({ length: 256 }, (_, i) => i);
+  const w = weightTexture({ shape: [1, 256], data: Buffer.from(ramp).toString("base64") });
+  assert.deepEqual(Array.from(DIVERGING_LUT), Array.from(w.image.data));
+  const T = 256;
+  const bytes = new Uint8Array(T * T);
+  bytes.set(ramp, (T - 1) * T);
+  const a = attentionTexture(Buffer.from(bytes).toString("base64"), T);
+  assert.deepEqual(Array.from(ATTENTION_LUT), Array.from(a.image.data.subarray(0, 256 * 4)));
+  const row0 = (T - 1) * T * 4; // la riga 0 (sopra la diagonale dalla colonna 1) sta in fondo alla texture
+  for (let k = 0; k < 4; k++) assert.deepEqual(Array.from(MASKED_LUT.subarray(4 * k, 4 * k + 4)), Array.from(a.image.data.subarray(row0 + (4 + k) * 4, row0 + (5 + k) * 4)));
+  // colormapLUT restituisce proprio queste tabelle (nessuna copia, nessun disegno)
+  assert.equal(colormapLUT("diverging"), DIVERGING_LUT);
+  assert.equal(colormapLUT("attention"), ATTENTION_LUT);
+  assert.equal(colormapLUT("masked"), MASKED_LUT);
+  assert.throws(() => colormapLUT("toString"), /colormap sconosciuta/);
+  w.dispose();
+  a.dispose();
+});
+
+test("NumbersGroup a riposo: un solo contatore per tutto il gruppo, nessuna matrice interrogata", () => {
+  const { group, scene, camera, look } = scene3d();
+  const mats = Array.from({ length: 110 }, (_, i) => {
+    const m = new NumericMatrix({ rows: 16, cols: 16, data: ffwd.subarray(i * 64, i * 64 + 256), group });
+    m.object3d.position.set((i % 11) * 0.8 - 4, Math.floor(i / 11) * 0.8 - 4, 0);
+    scene.add(m.object3d);
+    return m;
+  });
+  look(0, 0, 1);
+  group.update(camera, H);
+  let calls = 0;
+  for (const m of mats) {
+    const version = m.target.version.bind(m.target);
+    m.target.version = () => (calls++, version());
+  }
+  for (let i = 0; i < 50; i++) assert.equal(group.update(camera, H), false);
+  assert.equal(calls, 0, "a riposo nessun bersaglio viene interrogato");
+  // Un cambio dei dati di una sola matrice basta a far ricalcolare il gruppo (anche a camera ferma).
+  mats[3].setData(ffwd.subarray(1000, 1256));
+  assert.equal(group.update(camera, H), true);
+  assert.equal(group.update(camera, H), false);
+  for (const m of mats) m.dispose();
+  assert.equal(group._textures.length, 0);
+  group.dispose();
+});
+
+test("NumericMatrix: un altro step riscrive solo le celle cambiate e non ricarica la texture se nessuna cambia", () => {
+  const { group, scene, camera, look, canvases } = scene3d();
+  const data = Float32Array.from(ffwd.subarray(0, 65 * 64));
+  const m = new NumericMatrix({ rows: 65, cols: 64, data, group, range: 0.6 });
+  scene.add(m.object3d);
+  look(0.1, 0.1, 0.8);
+  group.update(camera, H);
+  const canvas = canvases[0];
+  const overlay = group.active.get(m.target);
+  const [shown] = group.shown();
+  const { r0, c0 } = shown.window;
+  const draws = canvas.draws;
+  const uploads = overlay.texture.version;
+  // (1) valori che cambiano sotto la precisione mostrata: niente da riscrivere, niente caricamento sulla GPU
+  const tiny = data.map((v) => v + 1e-7);
+  m.setData(tiny);
+  assert.equal(group.update(camera, H), true, "il gruppo ricalcola: i dati sono cambiati");
+  assert.equal(canvas.draws, draws, "nessun ridisegno completo");
+  assert.equal(overlay.texture.version, uploads, "la texture non si ricarica");
+  // (2) tre celle cambiate: si riscrivono quelle tre, il resto del canvas resta com'era
+  const three = Float32Array.from(tiny);
+  const cells = [[r0, c0], [r0 + 2, c0 + 5], [r0 + 4, c0 + 1]];
+  for (const [r, c] of cells) three[r * 64 + c] += 0.37;
+  const partial = group.stats.partialRedraws;
+  m.setData(three);
+  group.update(camera, H);
+  assert.equal(canvas.draws, draws, "ancora nessun ridisegno completo");
+  assert.equal(group.stats.partialRedraws, partial + 1);
+  assert.equal(group.stats.lastRedrawCells, 3);
+  assert.equal(overlay.texture.version, uploads + 1, "una sola ricarica");
+  // Il risultato è uguale, testo per testo e colore per colore, a un disegno completo degli stessi dati.
+  const afterPartial = numbersOf(canvas).map((t) => [t.x, t.y, t.text, t.color]);
+  overlay.state = null; // forza il disegno completo
+  group.invalidate();
+  group.update(camera, H);
+  assert.equal(canvas.draws, draws + 1);
+  assert.deepEqual(afterPartial, numbersOf(canvas).map((t) => [t.x, t.y, t.text, t.color]));
+  // (3) il numero più lungo cambia larghezza ("−0,55" → "−16,50"): il corpo del testo cambia, disegno completo
+  m.setData(three.map((v) => v * 30));
+  group.update(camera, H);
+  assert.equal(canvas.draws, draws + 2);
+  m.dispose();
+  group.dispose();
 });

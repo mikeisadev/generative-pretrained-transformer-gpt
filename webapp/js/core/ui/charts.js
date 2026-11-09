@@ -34,6 +34,7 @@ import {
   formatValue,
   histogram,
   isFiniteNumber,
+  keepTickLabels,
   linearScale,
   logScale,
   logTicks,
@@ -41,6 +42,7 @@ import {
   niceTicks,
   placeLabels,
   summarize,
+  tickPriority,
   visibleLabel,
   visibleRange,
 } from "./chartMath.js";
@@ -113,6 +115,38 @@ export class ChartsPanel {
       section.setText(title, description);
     }
     return section;
+  }
+
+  /**
+   * Mostra o nasconde la sezione `id` (es. le sezioni di un sottotab non attivo): nascosta non occupa posto
+   * e i suoi grafici non si disegnano. Senza sezioni visibili il pannello dice "Nessun grafico per questa
+   * vista". → false se la sezione non esiste.
+   */
+  setSectionVisible(id, visible) {
+    const section = this.sections.get(id);
+    if (!section) return false;
+    section.setVisible(visible);
+    this.empty.hidden = [...this.sections.values()].some((s) => s.visible);
+    return true;
+  }
+
+  /**
+   * Apre il pannello sulla sezione `id` e la porta in cima allo scorrimento (es. il passo o l'azione che
+   * parla di quei grafici; l'ultima sezione arriva fin dove lo scorrimento lo permette). La rende visibile
+   * se era nascosta. → false se la sezione non esiste.
+   * @param {{open?: boolean}} [o] open: false per scorrere senza aprire il pannello
+   */
+  reveal(id, { open = true } = {}) {
+    const section = this.sections.get(id);
+    if (!section) return false;
+    if (!section.visible) this.setSectionVisible(id, true);
+    if (open) this.open();
+    const align = () => (this.body.scrollTop += section.root.getBoundingClientRect().top - this.body.getBoundingClientRect().top);
+    align();
+    // i grafici di un pannello appena aperto si disegnano al frame dopo (una legenda può cambiare le altezze);
+    // su un pannello già distrutto il secondo allineamento tocca solo un elemento staccato
+    requestAnimationFrame(align);
+    return true;
   }
 
   get isOpen() {
@@ -190,6 +224,17 @@ class ChartSection {
     this.title.textContent = title;
     this.description.textContent = description ?? "";
     this.description.hidden = !description;
+  }
+
+  /** Visibile o nascosta (ChartsPanel.setSectionVisible). */
+  get visible() {
+    return !this.root.hidden;
+  }
+
+  setVisible(visible) {
+    this.root.hidden = !visible;
+    // tornando visibile, i grafici aggiornati mentre era nascosta si ridisegnano (larghezza 0 = niente disegno)
+    if (visible) for (const chart of this.charts.values()) chart.invalidate();
   }
 
   /**
@@ -286,6 +331,7 @@ class Chart {
     this.type = options.type;
     this.options = options;
     this.colors = new Map(); // nome serie/gruppo → colore, stabile per tutta la vita del grafico
+    this.palettePicks = 0; // slot della palette già assegnati (i colori fissati a mano non li consumano)
     this.renderer = new Renderer(this, options);
     this.pointer = null;
     this.destroyed = false;
@@ -366,10 +412,24 @@ class Chart {
     this.root.remove();
   }
 
-  /** Colore categoriale della serie `name`: assegnato alla prima comparsa, poi fisso. */
+  /**
+   * Colore categoriale della serie `name`: quello fissato con setSeriesColor, altrimenti lo slot della
+   * palette alla prima comparsa (in ordine fisso), poi sempre quello.
+   */
   colorFor(name) {
-    if (!this.colors.has(name)) this.colors.set(name, PALETTE[this.colors.size] ?? OVERFLOW_COLOR);
+    if (!this.colors.has(name)) this.colors.set(name, PALETTE[this.palettePicks++] ?? OVERFLOW_COLOR);
     return this.colors.get(name);
+  }
+
+  /**
+   * Fissa il colore di una serie (line) o di un gruppo (scatter), anche prima che arrivino i dati: es. "A"
+   * sempre blu e "B" sempre arancione, qualunque arrivi prima. Un colore CSS (meglio uno slot di PALETTE).
+   */
+  setSeriesColor(name, color) {
+    if (this.destroyed) return;
+    this.colors.set(name, color);
+    this.renderer.recolor?.(name, color);
+    this.invalidate();
   }
 
   /** Formato dei valori (tooltip, etichette): option format > percent > automatico. */
@@ -506,17 +566,22 @@ function plotArea(ctx, { width, height }, yTickLabels, { right = MARGIN.right, x
   return { left, top, right: width - right, bottom, width: width - right - left, height: bottom - top };
 }
 
-/** Griglia orizzontale tenue + etichette dei tick y + titolo dell'asse y (in alto a sinistra). */
-function drawYAxis(ctx, plot, ticks, scale, labels, yLabel) {
+/**
+ * Griglia orizzontale tenue + etichette dei tick y + titolo dell'asse y (in alto a sinistra). Le etichette
+ * troppo vicine (scala log sotto una decade) si saltano, tenendo prima quelle "tonde" (keepTickLabels).
+ */
+function drawYAxis(ctx, plot, ticks, scale, labels, yLabel, { log = false } = {}) {
   ctx.lineWidth = 1;
   ctx.font = FONT;
   ctx.textAlign = "right";
+  const ys = ticks.map((t) => crisp(scale(t)));
+  const keep = keepTickLabels(ys, ticks.map((t) => tickPriority(t, { log })));
   ticks.forEach((t, i) => {
-    const y = crisp(scale(t));
     ctx.strokeStyle = THEME.grid;
-    line(ctx, plot.left, y, plot.right, y);
+    line(ctx, plot.left, ys[i], plot.right, ys[i]);
+    if (!keep[i]) return;
     ctx.fillStyle = THEME.muted;
-    ctx.fillText(labels[i], plot.left - 6, y);
+    ctx.fillText(labels[i], plot.left - 6, ys[i]);
   });
   if (yLabel) {
     ctx.textAlign = "left";
@@ -736,9 +801,15 @@ class LineRenderer extends BaseRenderer {
     this.series.clear();
     this.ignored = 0;
     for (const s of series) {
+      if (s.color) this.chart.colors.set(s.name ?? "serie", s.color); // { name, points, color? }
       const target = this.ensure(s.name);
       for (const p of s.points ?? []) this.push(target, p);
     }
+  }
+
+  recolor(name, color) {
+    const s = this.series.get(name);
+    if (s) s.color = color;
   }
 
   append(name, point) {
@@ -814,7 +885,7 @@ class LineRenderer extends BaseRenderer {
     const yScale = (this.log ? logScale : linearScale)([yAxis.min, yAxis.max], [plot.bottom, plot.top]);
     this.frame = { plot, xScale, yScale };
 
-    drawYAxis(ctx, plot, yAxis.ticks, yScale, yLabels, this.options.yLabel);
+    drawYAxis(ctx, plot, yAxis.ticks, yScale, yLabels, this.options.yLabel, { log: this.log });
     drawXAxis(ctx, plot, xAxis.ticks, xScale, (t) => formatTick(t, xAxis.step, Math.abs(xDomain.max)), this.options.xLabel);
 
     ctx.save();
@@ -1351,6 +1422,10 @@ class ScatterRenderer extends BaseRenderer {
   clear() {
     this.points = [];
     this.ignored = 0;
+  }
+
+  recolor(group, color) {
+    for (const p of this.points) if (p.group === group) p.color = color;
   }
 
   isEmpty() {

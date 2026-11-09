@@ -4,8 +4,8 @@
  *   const model = buildNetworkModel(networkSpec);            // model.js (puro)
  *   const net = new NetworkScene(model);
  *   host.scene.add(net.root);
- *   net.update(camera, width, height, pixelRatio, obstacles?); // SOLO quando la camera è cambiata: LOD ed etichette
- *   net.setSlice(3); net.setEmphasis(["attn"]); net.setDensity(0.4); net.setWave(x | null);
+ *   net.update(camera, width, height, pixelRatio, obstacles?, focus?); // SOLO quando la camera è cambiata: LOD ed etichette
+ *   net.setSlice(3); net.setEmphasis(["attn"]); net.setDensity(0.4); net.setSliceDensity(0.2); net.setWave(x | null);
  *   const u = net.pick(clientX, clientY, camera, canvasRect); net.describe(u);
  *   net.setSectionValues("attn", float32);                   // valori veri aggiornati (es. un altro prompt)
  *   net.dispose();
@@ -17,9 +17,12 @@
  */
 import * as THREE from "three";
 import { writeDisplay } from "./activations.js";
-import { arcLines, axesGizmo, neuronPoints, outline, repaintSection, segmentLines, slabMesh, structure } from "./geometry.js";
+import { arcLines, axesGizmo, ghostBox, neuronPoints, outline, repaintSection, segmentLines, slabMesh, structure } from "./geometry.js";
 import { LabelLayer } from "./labels.js";
+import { plural } from "./honesty.js";
 import { decodeUnit, headOf, takesPartInSlices } from "./layout.js";
+import { ARC_KIND } from "./links.js";
+import { occluderOpacity } from "./occlusion.js";
 import { ScreenIndex } from "./pickIndex.js";
 import { createSharedUniforms } from "./shaders.js";
 
@@ -33,6 +36,13 @@ const MAX_POINT_PX = 20; // diametro massimo di un neurone sullo schermo (pixel 
 const DIMMED = 70; // enfasi (0…255) delle sezioni non scelte
 const EMPHASIS_LINKS = 0.45; // opacità dei collegamenti dritti mentre una sezione è scelta
 const DIMMED_LABEL = 0.4; // opacità dei titoli delle sezioni non scelte
+/**
+ * Opacità degli archi della cross-attention guardati di lato, senza fetta né sezione scelta: da lì gli
+ * archi tra due sezioni si proiettano tutti sulla stessa striscia e fanno una fascia piena che copre la
+ * rete. Di tre quarti, o con una fetta (una parola) o una sezione scelta, tornano pieni.
+ */
+const CROSS_SIDE_OPACITY = 0.3;
+const SLICE_LABEL_ROOM = 2; // unità oltre la sezione occupate dai nomi delle fette (testo di ~1,6 unità)
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -48,25 +58,32 @@ export class NetworkScene {
     this.root.name = "neural-network";
     const S = net.sections.length;
     this.stateData = new Uint8Array(4 * S).fill(255);
-    this.state = new THREE.DataTexture(this.stateData, S, 1, THREE.RGBAFormat);
-    this.state.magFilter = THREE.NearestFilter;
-    this.state.minFilter = THREE.NearestFilter;
-    this.state.colorSpace = THREE.NoColorSpace;
-    this.state.needsUpdate = true;
-    this.uniforms = createSharedUniforms(this.state);
+    this.state = dataTexture(this.stateData, S);
+    // opacità delle lastre fantasma, una colonna per ripetizione (vedi updateGhosts)
+    this.ghostData = new Uint8Array(4 * Math.max(1, layout.repeats.length)).fill(255);
+    this.ghostTexture = dataTexture(this.ghostData, Math.max(1, layout.repeats.length));
+    this.ghostBoxes = layout.repeats.map((r) => ghostBox(r));
+    this.uniforms = createSharedUniforms(this.state, this.ghostTexture);
     this.width = layout.bounds.max[0] - layout.bounds.min[0];
     this.uniforms.uWaveWidth.value = Math.max(1.2, this.width / 40);
+    // le sezioni che si accendono con la fetta: i nomi delle fette stanno accanto a loro (non agli estremi
+    // della rete: nel RAG i chunk accanto all'LLM, in Immagini e video i token accanto al blocco video)
+    const sliced = net.slices.count > 1 ? net.sections.filter((s) => takesPartInSlices(s, net)) : [];
+    this.sliceRun = sliced.length ? { x0: layout.sections[sliced[0].index].box.min[0], x1: layout.sections[sliced.at(-1).index].box.max[0] } : null;
 
     this.slabs = slabMesh(model, this.uniforms);
     this.neurons = neuronPoints(model, this.uniforms);
     this.links = segmentLines(model, this.uniforms, links.segments);
-    this.arcs = arcLines(model, this.uniforms);
+    this.arcs = arcLines(model, this.uniforms, { kinds: [ARC_KIND.attention, ARC_KIND.residual], keepEmpty: true });
+    this.crossArcs = arcLines(model, this.uniforms, { kinds: [ARC_KIND.cross], name: "nn-cross-arcs" });
+    this.sideness = 0; // 1 = camera di lato (vedi update): gli archi della cross-attention si attenuano
     this.sliceLinks = links.sliceSegments.count ? this.buildSliceLinks() : null;
     const struct = structure(model, this.uniforms);
     this.axes = axesGizmo(model);
     this.selection = outline(12, "#e0f2fe", 0.9);
     this.sliceMarker = outline(4 * net.sections.length, "#67e8f9", 0.7); // un taglio per sezione
     this.root.add(this.slabs.mesh, this.neurons, this.links, this.arcs, this.axes.group, this.selection, this.sliceMarker);
+    if (this.crossArcs) this.root.add(this.crossArcs);
     if (this.sliceLinks) this.root.add(this.sliceLinks);
     if (struct.mesh) this.root.add(struct.mesh);
     if (struct.lines) this.root.add(struct.lines);
@@ -78,23 +95,100 @@ export class NetworkScene {
     this.pickRadius = new Float32Array(S); // raggio di presa per sezione (dipende dal LOD)
     // distanza tra neuroni vicini di ogni sezione (y, z se ha profondità, x se ha più lastre): la misura del LOD
     this.spacing = layout.sections.map((b) => Math.min(b.dy, net.sections[b.index].depth.count > 1 ? b.dz : Infinity, b.plates > 1 ? b.xs[1] - b.xs[0] : Infinity));
-    this.tmp = { m: new THREE.Matrix4(), inv: new THREE.Matrix4(), v: new THREE.Vector3(), cam: new THREE.Vector3() };
+    this.tmp = { m: new THREE.Matrix4(), inv: new THREE.Matrix4(), v: new THREE.Vector3(), cam: new THREE.Vector3(), f: new THREE.Vector3() };
     this.slice = null;
     this.emphasis = null;
     this.drawn = links.segments.count;
     this.setDensity(this.defaultDensity());
+    this.updateCrossOpacity();
   }
 
   // ---------------------------------------------------------------- costruzione
-  /** Pesi veri della fetta scelta (link "explicit" con slice: "selected"): posizioni riscritte a ogni cambio di fetta. */
+  /**
+   * Pesi veri della fetta scelta (link "explicit" con slice: "selected"): posizioni riscritte a ogni cambio
+   * di fetta. Il buffer ha posto per tutti; `sliceShown` dice quale peso dell'elenco sta in ogni posto
+   * (setSliceDensity ne mostra solo una parte, i più forti di ogni collegamento, nei primi posti).
+   */
   buildSliceLinks() {
     const { links } = this.model;
     const list = links.sliceSegments;
     this.sliceSlot = this.model.net.slices.count - 1; // senza fetta scelta: quella davanti (l'ultimo token)
+    this.sliceShown = Uint32Array.from({ length: list.count }, (_, i) => i);
+    this.sliceDrawn = list.count;
+    this.sliceSource = null; // colori e sezioni per indice dell'elenco: copiati alla prima setSliceDensity
     return segmentLines(this.model, this.uniforms, list, {
       place: (i, pos, o) => this.placeSliceSegment(i, pos, o),
       owner: () => -1, // sempre in evidenza: sono già sulla fetta scelta
     });
+  }
+
+  /**
+   * Quanti pesi della fetta disegnare: per ogni collegamento i più forti (|peso|), senza ricostruire
+   * niente (il Transformer prima ricostruiva tutta la rete per cambiare la quota: 234-282 ms al 25%).
+   *   share: 0…1 = la stessa quota di ogni collegamento (⌈quota × n⌉, almeno uno se > 0), oppure una
+   *          funzione (link, n) → quanti (es. le nn.Linear in quota, i γ delle LayerNorm tutti)
+   * L'ordine dei posti segue quello dell'elenco (priorità), quindi con share = 1 il disegno è quello di
+   * sempre. Restituisce quanti pesi si vedono.
+   */
+  setSliceDensity(share) {
+    if (!this.sliceLinks) return 0;
+    const { net, links } = this.model;
+    const list = links.sliceSegments;
+    if (!this.sliceSource) this.prepareSliceDensity();
+    const want = new Int32Array(net.links.length);
+    for (const [link, size] of this.sliceSizes) {
+      let k;
+      if (typeof share === "function") k = Math.round(Number(share(net.links[link], size)) || 0);
+      else k = share >= 1 ? size : share > 0 ? Math.max(1, Math.ceil(share * size)) : 0;
+      want[link] = Math.max(0, Math.min(size, k));
+    }
+    let m = 0;
+    for (let i = 0; i < list.count; i++) if (this.sliceRank[i] < want[list.link[i]]) this.sliceShown[m++] = i;
+    const g = this.sliceLinks.geometry;
+    const { color, secA, secB } = this.sliceSource;
+    const pos = g.attributes.position.array;
+    const aColor = g.attributes.aColor.array;
+    const aSecA = g.attributes.aSection.array;
+    const aSecB = g.attributes.aSection2.array;
+    for (let slot = 0; slot < m; slot++) {
+      const i = this.sliceShown[slot];
+      this.placeSliceSegment(i, pos, 6 * slot);
+      aColor.set(color.subarray(8 * i, 8 * i + 8), 8 * slot);
+      aSecA[2 * slot] = aSecA[2 * slot + 1] = secA[i];
+      aSecB[2 * slot] = aSecB[2 * slot + 1] = secB[i];
+    }
+    for (const name of ["position", "aColor", "aSection", "aSection2"]) g.attributes[name].needsUpdate = true;
+    g.setDrawRange(0, 2 * m);
+    this.sliceDrawn = m;
+    return m;
+  }
+
+  /** Una volta: colori e sezioni di ogni peso, e il suo rango nel collegamento (|peso| decrescente). */
+  prepareSliceDensity() {
+    const list = this.model.links.sliceSegments;
+    const g = this.sliceLinks.geometry;
+    const color = g.attributes.aColor.array.slice(0, 8 * list.count);
+    const secA = new Float32Array(list.count);
+    const secB = new Float32Array(list.count);
+    for (let i = 0; i < list.count; i++) {
+      const link = this.model.net.links[list.link[i]];
+      secA[i] = link.to.index;
+      secB[i] = link.from.index;
+    }
+    // il buffer ha i pesi nell'ordine dell'elenco (nessuna setSliceDensity prima di questa): i colori sono quelli
+    this.sliceSource = { color, secA, secB };
+    const byLink = new Map();
+    for (let i = 0; i < list.count; i++) {
+      if (!byLink.has(list.link[i])) byLink.set(list.link[i], []);
+      byLink.get(list.link[i]).push(i);
+    }
+    this.sliceRank = new Uint32Array(list.count);
+    this.sliceSizes = new Map();
+    for (const [link, items] of byLink) {
+      items.sort((a, b) => Math.abs(list.weight[b]) - Math.abs(list.weight[a]) || a - b);
+      items.forEach((i, rank) => (this.sliceRank[i] = rank));
+      this.sliceSizes.set(link, items.length);
+    }
   }
 
   placeSliceSegment(i, pos, o) {
@@ -146,10 +240,10 @@ export class NetworkScene {
       labels.add({ text: `× ${rep.count.toLocaleString("it-IT")}`, sub, big: true, position: [(r.x0 + r.x1) / 2, r.yTop + 0.45, r.z1 + 0.2], world: 0.62, px: [19, 30], priority: 0, ref: { kind: "repeat", id: r.id } });
     }
     for (const g of layout.groups) labels.add({ text: g.label, position: [(g.x0 + g.x1) / 2, g.y + 0.12, 0], world: 0.4, px: [15, 21], priority: 1, nudge: 2, ref: { kind: "group", index: g.index } });
-    // nomi delle posizioni in profondità, ai due lati della rete: dal davanti (vince quando si sovrappongono,
-    // di lato); con centinaia di posizioni se ne scrive una ogni `step` (la scheda le elenca tutte)
-    const { min, max } = layout.bounds;
-    const names = net.slices.names;
+    // nomi delle posizioni in profondità, ai due lati delle sezioni che si accendono con la fetta: dal
+    // davanti (vince quando si sovrappongono, di lato); con centinaia di posizioni se ne scrive una ogni
+    // `step` (la scheda le elenca tutte)
+    const names = this.sliceRun ? net.slices.names : [];
     const step = Math.max(1, Math.ceil(names.length / MAX_SLICE_LABELS));
     this.sliceLabels = [];
     for (let t = names.length - 1; t >= 0; t--) {
@@ -158,8 +252,8 @@ export class NetworkScene {
         continue;
       }
       const z = this.sliceZ(t);
-      const left = labels.add({ text: names[t], position: [min[0] - 0.7, 0, z], anchor: [1, 0.5], world: 0.27, px: [12.5, 16], priority: 3, ref: { kind: "slice", index: t }, color: "#a5f3fc" });
-      const right = labels.add({ text: names[t], position: [max[0] + 0.7, 0, z], anchor: [0, 0.5], world: 0.27, px: [12.5, 16], priority: 3, ref: { kind: "slice", index: t }, color: "#a5f3fc" });
+      const left = labels.add({ text: names[t], position: [this.sliceRun.x0 - 0.7, 0, z], anchor: [1, 0.5], world: 0.27, px: [12.5, 16], priority: 3, ref: { kind: "slice", index: t }, color: "#a5f3fc" });
+      const right = labels.add({ text: names[t], position: [this.sliceRun.x1 + 0.7, 0, z], anchor: [0, 0.5], world: 0.27, px: [12.5, 16], priority: 3, ref: { kind: "slice", index: t }, color: "#a5f3fc" });
       this.sliceLabels[t] = [left, right];
     }
     // assi: etichette corte (il testo intero è nella legenda della scheda)
@@ -223,13 +317,14 @@ export class NetworkScene {
     this.slice = t === null || t === undefined || n <= 1 ? null : Math.min(n - 1, Math.max(0, t));
     if (this.slice === null) this.uniforms.uSlice.value.set(1, 0);
     else this.uniforms.uSlice.value.set(this.slice / n, (this.slice + 1) / n);
-    // pesi veri: sulla fetta scelta (o davanti)
+    // pesi veri: sulla fetta scelta (o davanti); solo quelli disegnati (setSliceDensity)
     if (this.sliceLinks) {
       this.sliceSlot = this.slice ?? n - 1;
       const pos = this.sliceLinks.geometry.attributes.position;
-      for (let i = 0; i < this.model.links.sliceSegments.count; i++) this.placeSliceSegment(i, pos.array, 6 * i);
+      for (let slot = 0; slot < this.sliceDrawn; slot++) this.placeSliceSegment(this.sliceShown[slot], pos.array, 6 * slot);
       pos.needsUpdate = true;
     }
+    this.updateCrossOpacity();
     // la fetta in ogni sezione: un taglio (riquadro x-y) alla z delle sue posizioni, anche quando una
     // sezione ha più posizioni (il tempo prima del passo 2) o meno (la griglia in fondo alla U)
     this.sliceMarker.visible = this.slice !== null;
@@ -266,6 +361,7 @@ export class NetworkScene {
     // con una sezione scelta i collegamenti dritti fanno un passo indietro: gli archi in profondità
     // (attention, residui) sono il meccanismo da guardare
     this.links.material.uniforms.uOpacity.value = this.linkOpacity * (this.emphasis ? EMPHASIS_LINKS : 1);
+    this.updateCrossOpacity();
     this.selection.visible = Boolean(this.emphasis);
     // i titoli delle altre sezioni si attenuano (da vicino passerebbero sopra i neuroni della scelta)
     if (this.labels) for (let s = 0; s < net.sections.length; s++) this.labels.setDim(this.sectionLabels[s], !this.emphasis || this.emphasis.has(s) ? 1 : DIMMED_LABEL);
@@ -289,8 +385,10 @@ export class NetworkScene {
    * punti, etichette. Costa ~0,1 ms per 60 sezioni; non va chiamata a ogni frame a riposo.
    * `obstacles`: rettangoli [x0, y0, x1, y1] dello stage coperti da pannelli DOM (scheda, pad…), che le
    * etichette lasciano liberi (facoltativo).
+   * `focus`: il punto guardato (THREE.Vector3 del mondo, di solito controls.target; facoltativo): le
+   * lastre fantasma dei "× N" che stanno tra la camera e lui si attenuano.
    */
-  update(camera, width, height, pixelRatio = 1, obstacles = null) {
+  update(camera, width, height, pixelRatio = 1, obstacles = null, focus = null) {
     const { net, layout } = this.model;
     const { inv, cam } = this.tmp;
     this.root.updateWorldMatrix(true, false);
@@ -300,6 +398,14 @@ export class NetworkScene {
     this.uniforms.uMaxPoint.value = MAX_POINT_PX * pixelRatio;
     inv.copy(this.root.matrixWorld).invert();
     cam.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(inv);
+    // di lato (camera lungo z) gli archi della cross-attention fanno una fascia: si attenuano
+    const forward = this.tmp.v.setFromMatrixColumn(camera.matrixWorld, 2).transformDirection(inv);
+    const sideness = smoothstep(0.9, 0.98, Math.abs(forward.z));
+    if (Math.abs(sideness - this.sideness) > 0.01) {
+      this.sideness = sideness;
+      this.updateCrossOpacity();
+    }
+    if (focus && this.ghostBoxes.length) this.updateGhosts(cam, this.tmp.f.copy(focus).applyMatrix4(inv));
     let changed = false;
     for (let s = 0; s < net.sections.length; s++) {
       const b = layout.sections[s].box;
@@ -327,6 +433,34 @@ export class NetworkScene {
     if (changed) this.state.needsUpdate = true;
     this.labels?.update(camera, width, height, this.root, obstacles);
     this.pickDirty = true;
+  }
+
+  /** Opacità degli archi della cross-attention: tenui di lato, pieni con una fetta o una sezione scelta. */
+  updateCrossOpacity() {
+    if (!this.crossArcs) return;
+    const full = this.slice !== null || this.emphasis !== null;
+    this.crossArcs.material.uniforms.uOpacity.value = full ? 1 : 1 - (1 - CROSS_SIDE_OPACITY) * this.sideness;
+  }
+
+  /**
+   * Le lastre fantasma che stanno tra la camera e il punto guardato si attenuano (occluderOpacity):
+   * guardando di tre quarti da vicino la sezione dopo un "× N" coprivano metà dell'inquadratura. Quelle
+   * di un blocco scelto restano piene (le si sta guardando). Coordinate della rete; solo a camera mossa.
+   */
+  updateGhosts(cam, focus) {
+    const { net } = this.model;
+    const c = [cam.x, cam.y, cam.z];
+    const f = [focus.x, focus.y, focus.z];
+    let changed = false;
+    this.ghostBoxes.forEach((box, r) => {
+      const chosen = this.emphasis && net.repeats[r].of.every((s) => this.emphasis.has(s.index));
+      const value = Math.round(255 * (chosen ? 1 : occluderOpacity(c, f, box)));
+      if (this.ghostData[4 * r] !== value) {
+        this.ghostData[4 * r] = value;
+        changed = true;
+      }
+    });
+    if (changed) this.ghostTexture.needsUpdate = true;
   }
 
   // ---------------------------------------------------------------- neurone sotto il puntatore
@@ -410,8 +544,8 @@ export class NetworkScene {
     if (!ids) {
       add(layout.bounds);
       box.expandByPoint(this.axes.origin).expandByPoint(this.axes.tips.x).expandByPoint(this.axes.tips.y);
-      // nomi delle fette ai due lati: ~1,6 unità di testo oltre i bordi
-      if (this.model.net.slices.count > 1) box.expandByPoint(this.tmp.v.set(layout.bounds.min[0] - 2, 0, 0)).expandByPoint(this.tmp.v.set(layout.bounds.max[0] + 2, 0, 0));
+      // nomi delle fette ai lati delle sezioni che si accendono con la fetta: ~1,6 unità di testo oltre
+      if (this.sliceRun) box.expandByPoint(this.tmp.v.set(this.sliceRun.x0 - SLICE_LABEL_ROOM, 0, 0)).expandByPoint(this.tmp.v.set(this.sliceRun.x1 + SLICE_LABEL_ROOM, 0, 0));
     }
     else {
       for (const id of Array.isArray(ids) ? ids : [ids]) {
@@ -438,8 +572,11 @@ export class NetworkScene {
     const boxes = [];
     if (!ids) {
       boxes.push(...layout.sections.map((b) => b.box), ...layout.repeats.map((r) => r.box));
+      // il culmine di parentesi e residui; ai lati, il posto dei nomi delle fette (se ci sono)
       const top = layout.bounds.max[1];
-      boxes.push({ min: [layout.bounds.min[0] - 2, top, 0], max: [layout.bounds.max[0] + 2, top, 0] });
+      const x0 = Math.min(layout.bounds.min[0], (this.sliceRun?.x0 ?? Infinity) - SLICE_LABEL_ROOM);
+      const x1 = Math.max(layout.bounds.max[0], (this.sliceRun?.x1 ?? -Infinity) + SLICE_LABEL_ROOM);
+      boxes.push({ min: [x0, top, 0], max: [x1, top, 0] });
       boxes.push({ min: this.axes.origin.toArray(), max: this.axes.tips.y.toArray() });
     } else {
       for (const id of Array.isArray(ids) ? ids : [ids]) {
@@ -474,8 +611,19 @@ export class NetworkScene {
     });
     this.slabs.texture.dispose();
     this.state.dispose();
+    this.ghostTexture.dispose();
     this.root.removeFromParent();
   }
+}
+
+/** Texture di stato RGBA8 di una riga (una colonna per sezione o per ripetizione), letta con texelFetch. */
+function dataTexture(data, width) {
+  const texture = new THREE.DataTexture(data, width, 1, THREE.RGBAFormat);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 /** Testo dell'asse fino alla prima parentesi o al primo ";" (al più 26 caratteri): "numeri del vettore (16 dei 7.168)" → "numeri del vettore". */
@@ -487,10 +635,10 @@ export function shortAxis(text) {
 /** "16 × 8 token", "4 canali · 8 × 8", "17 esperti × 6 · 8 token": la forma disegnata, se la specifica non dice altro. */
 export function sizeText(s) {
   const depth = s.depth.kind === "grid" ? `${s.depth.rows} × ${s.depth.cols}` : s.depth.count > 1 ? `${s.depth.count} ${s.depth.label}` : "";
-  if (s.role === "experts") return `${s.experts}${s.shared ? ` + ${s.shared}` : ""} esperti × ${s.neurons}${depth ? ` · ${depth}` : ""}`;
-  if (s.depth.kind === "grid") return `${s.neurons} canali · ${depth}`;
+  if (s.role === "experts") return `${s.experts}${s.shared ? ` + ${s.shared}` : ""} ${s.experts + s.shared === 1 ? "esperto" : "esperti"} × ${s.neurons}${depth ? ` · ${depth}` : ""}`;
+  if (s.depth.kind === "grid") return `${plural(s.neurons, "canale", "canali")} · ${depth}`;
   const n = s.slabs > 1 ? `${s.slabs} × ${s.neurons}` : `${s.neurons}`;
-  return depth ? `${n} × ${depth}` : `${n} neuroni`;
+  return depth ? `${n} × ${depth}` : s.slabs > 1 ? `${n} neuroni` : plural(s.neurons, "neurone", "neuroni");
 }
 
 /** Scrive i 12 spigoli di una scatola in un contorno di 12 segmenti. */
