@@ -1,9 +1,12 @@
-// Test della logica pura dei componenti condivisi per i numeri dei tensori (js/core/ui/tensorTableMath.js e
-// histogramMath.js): forma della tabella, finestra virtuale con e senza compressione, tastiera, testi delle
-// celle e delle statistiche, intervalli e testi dell'istogramma. Il DOM (TensorTable, Histogram) si prova
-// nel browser.
+// Test dei componenti condivisi per i numeri dei tensori: la logica pura (js/core/ui/tensorTableMath.js e
+// histogramMath.js: forma della tabella, finestra virtuale con e senza compressione, tastiera, testi delle
+// celle e delle statistiche, intervalli e testi dell'istogramma) e, in fondo, TensorTable su un DOM finto
+// minimo (intestazioni dopo un cambio di tensore, virtualizzazione, tastiera, dispose). Disegno, focus
+// visibile e contrasto si provano nel browser.
 import assert from "node:assert/strict";
+import { register } from "node:module";
 import { test } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { binAt, binLabel, binRows, countHeight, countText, edgeDecimals, histogramModel, logCountTicks, seriesColor, summaryText, valuesText } from "../js/core/ui/histogramMath.js";
 import { PALETTE } from "../js/core/ui/chartMath.js";
@@ -265,4 +268,197 @@ test("istogramma: testi dell'intervallo, conteggi e riassunto per gli screen rea
   assert.match(summaryText(two), /2 serie sovrapposte con gli stessi intervalli/);
   assert.match(summaryText(two), /A: 2 valori/);
   assert.match(summaryText(two), /B: 1 valore,/);
+});
+
+// ---------------------------------------------------------------- TensorTable su un DOM finto
+
+// three.js (colormap delle heatmap, via core/matrixNumbers.js) sta in webapp/vendor: nel browser lo trova
+// l'importmap, qui un hook di risoluzione (come in weights.test.mjs).
+const VENDOR = pathToFileURL(fileURLToPath(new URL("../vendor/three/", import.meta.url))).href;
+register(
+  "data:text/javascript," +
+    encodeURIComponent(`export async function resolve(specifier, context, next) {
+      if (specifier === "three") return { url: ${JSON.stringify(`${VENDOR}three.module.min.js`)}, shortCircuit: true };
+      return next(specifier, context);
+    }`),
+);
+
+/**
+ * Elemento finto: quello che TensorTable usa del DOM (attributi, classi, stile, figli, listener, misure).
+ * La griglia è 356 × 312 px come nella sidebar; il campione di 10 caratteri è largo 72 px.
+ */
+class FakeElement {
+  constructor(tag) {
+    this.tagName = tag.toUpperCase();
+    this.children = [];
+    this.parent = null;
+    this.attributes = new Map();
+    this.listeners = new Map();
+    this.dataset = {};
+    const props = new Map();
+    this.style = { setProperty: (k, v) => props.set(k, v), getPropertyValue: (k) => props.get(k) ?? "" };
+    const classes = new Set();
+    this.classList = { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c), toggle: (c, on = !classes.has(c)) => (on ? classes.add(c) : classes.delete(c), on) };
+    Object.assign(this, { id: "", title: "", hidden: false, tabIndex: -1, scrollTop: 0, scrollLeft: 0, connected: false });
+    this._text = "";
+  }
+  set className(v) {
+    for (const c of String(v).split(/\s+/).filter(Boolean)) this.classList.add(c);
+  }
+  set textContent(v) {
+    this.children = [];
+    this._text = String(v);
+  }
+  get textContent() {
+    return this._text + this.children.map((c) => (c instanceof FakeElement ? c.textContent : String(c))).join("");
+  }
+  setAttribute(k, v) {
+    this.attributes.set(k, String(v));
+  }
+  getAttribute(k) {
+    return this.attributes.get(k) ?? null;
+  }
+  removeAttribute(k) {
+    this.attributes.delete(k);
+  }
+  hasAttribute(k) {
+    return this.attributes.has(k);
+  }
+  append(...nodes) {
+    for (const n of nodes) {
+      if (n instanceof FakeElement) {
+        n.remove();
+        n.parent = this;
+      }
+      this.children.push(n);
+    }
+  }
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter((c) => c !== this);
+    this.parent = null;
+  }
+  get isConnected() {
+    let e = this;
+    while (e.parent) e = e.parent;
+    return e.connected;
+  }
+  addEventListener(type, fn) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
+  }
+  removeEventListener(type, fn) {
+    this.listeners.set(type, (this.listeners.get(type) ?? []).filter((f) => f !== fn));
+  }
+  dispatch(type, event = {}) {
+    let prevented = false;
+    const e = { type, target: this, preventDefault: () => (prevented = true), ...event };
+    for (const fn of this.listeners.get(type) ?? []) fn(e);
+    return prevented;
+  }
+  get clientWidth() {
+    return this.classList.contains("tt-grid") ? 356 : 0;
+  }
+  get clientHeight() {
+    return this.classList.contains("tt-grid") ? 312 : 0;
+  }
+  getBoundingClientRect() {
+    return { width: this.classList.contains("tt-probe") ? 72 : this.clientWidth, height: this.clientHeight };
+  }
+  matches() {
+    return false;
+  }
+  focus() {}
+  *walk() {
+    yield this;
+    for (const c of this.children) if (c instanceof FakeElement) yield* c.walk();
+  }
+  all(cls) {
+    return [...this.walk()].filter((e) => e.classList.contains(cls) && e.isConnected);
+  }
+}
+globalThis.document = { createElement: (tag) => new FakeElement(tag) };
+globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
+globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+
+const { TensorTable } = await import("../js/core/ui/tensorTable.js");
+const page = () => Object.assign(new FakeElement("div"), { connected: true });
+const texts = (els) => els.map((e) => e.textContent);
+const rowHeads = (t) => texts(t.root.all("tt-rowhead"));
+const colHeads = (t) => texts(t.root.all("tt-colhead"));
+
+test("TensorTable: un tensore nuovo riscrive le intestazioni (anche sulle righe già visibili)", () => {
+  let kind = "carattere";
+  const t = new TensorTable(page(), { rowLabel: (i) => (kind === "carattere" ? `'${"abcdefghijklmnop"[i]}'` : `k${i}`), colLabel: (j) => (kind === "carattere" ? `${j}` : `x${j}`) });
+  t.setTensor({ name: "token_embedding_table.weight", shape: [16, 64], data: new Float32Array(16 * 64) });
+  assert.deepEqual(rowHeads(t).slice(0, 3), ["'a'", "'b'", "'c'"]);
+  kind = "key"; // le etichette leggono una variabile del chiamante: cambia prima di setTensor
+  t.setTensor({ name: "blocks.1.sa.heads.2.key.weight", shape: [16, 64], data: new Float32Array(16 * 64).fill(0.5) });
+  assert.deepEqual(rowHeads(t).slice(0, 3), ["k0", "k1", "k2"], "le righe riciclate mostrano le etichette del tensore nuovo");
+  assert.deepEqual(colHeads(t).slice(0, 2), ["x0", "x1"]);
+  assert.equal(t.grid.getAttribute("aria-rowcount"), "17");
+  assert.equal(t.grid.getAttribute("aria-colcount"), "65");
+  assert.ok(texts(t.root.all("tt-cell")).every((x) => x === "0,5000"));
+  t.dispose();
+});
+
+test("TensorTable: virtualizzata (256 × 64 e un vettore di 65.536 valori), lo scorrimento ricicla le celle", async () => {
+  const t = new TensorTable(page(), { rowLabel: (i) => `n${i}` });
+  t.setTensor({ name: "ffwd", shape: [256, 64], data: Float32Array.from({ length: 256 * 64 }, (_, k) => k / 1e5) });
+  const cells = t.root.all("tt-cell").length;
+  assert.ok(cells > 0 && cells <= 20 * 8, `${cells} celle nel DOM per 16.384 valori`);
+  t.grid.scrollTop = 2400; // riga 100 in cima
+  t.grid.dispatch("scroll");
+  await new Promise((r) => setTimeout(r, 5));
+  const heads = rowHeads(t);
+  assert.ok(heads.includes("n100") && !heads.includes("n0"), heads.join(" "));
+  const after = t.root.all("tt-cell").length; // a metà c'è il margine sopra e sotto: qualche riga in più, mai tutte
+  assert.ok(after >= cells && after <= 20 * 8, `${after} celle dopo lo scorrimento`);
+  const v = new TensorTable(page(), {});
+  v.setTensor({ name: "vettore", shape: [65536], data: new Float32Array(65536) });
+  assert.equal(v.cols, 1);
+  assert.ok(v.root.all("tt-cell").length <= 20);
+  v.grid.scrollTop = 65536 * 24; // in fondo
+  v.grid.dispatch("scroll");
+  await new Promise((r) => setTimeout(r, 5));
+  assert.ok(rowHeads(v).includes("65535"), "l'ultima riga si raggiunge");
+  t.dispose();
+  v.dispose();
+});
+
+test("TensorTable: tastiera (frecce, PagGiù, Ctrl+Fine, Invio), cella attiva annunciata, dispose", () => {
+  const container = page();
+  const chosen = [];
+  const t = new TensorTable(container, { rowLabel: (i) => `r${i}`, onSelect: (c) => chosen.push(c) });
+  const data = Float32Array.from({ length: 40 * 8 }, (_, k) => (k % 2 ? -k : k) / 1000);
+  t.setTensor({ name: "m", shape: [40, 8], data, rowTitle: "riga del test", colTitle: "colonna del test" });
+  const key = (k, extra = {}) => t.grid.dispatch("keydown", { key: k, ctrlKey: false, metaKey: false, altKey: false, ...extra });
+  assert.equal(key("ArrowDown"), true, "le frecce della tabella non muovono la scena (preventDefault)");
+  key("ArrowRight");
+  assert.deepEqual(t.selected, { i: 1, j: 1, value: data[9] });
+  const id = t.grid.getAttribute("aria-activedescendant");
+  const active = t.root.all("tt-cell").find((c) => c.id === id);
+  assert.ok(active, "aria-activedescendant punta a una cella che esiste");
+  assert.equal(active.getAttribute("aria-label"), "riga del test 1 (r1) · colonna del test 1 · −0,009000");
+  key("PageDown");
+  assert.ok(t.selected.i > 1);
+  key("End", { ctrlKey: true });
+  assert.deepEqual([t.selected.i, t.selected.j], [39, 7]);
+  key("Enter");
+  assert.deepEqual(chosen.at(-1), { i: 39, j: 7, value: data[39 * 8 + 7] });
+  assert.equal(key("a"), false, "le lettere restano alla navigazione");
+  t.dispose();
+  assert.equal(container.children.length, 0, "dispose toglie la tabella dal DOM");
+  for (const [type, list] of t.grid.listeners) assert.equal(list.length, 0, `listener "${type}" rimasto`);
+});
+
+test("TensorTable: refresh dopo un cambio sul posto; colonne più larghe se il numero si allarga", () => {
+  const t = new TensorTable(page(), {});
+  const data = new Float32Array(4).fill(0.25);
+  t.setTensor({ name: "v", shape: [2, 2], data });
+  const narrow = t.sizes.cellW;
+  data.fill(-12.5); // "−12,5000": un carattere in più di "−0,2500"
+  t.refresh();
+  assert.ok(t.sizes.cellW > narrow, `${t.sizes.cellW} > ${narrow}`);
+  assert.ok(texts(t.root.all("tt-cell")).every((x) => x === "−12,5000"));
+  t.dispose();
 });

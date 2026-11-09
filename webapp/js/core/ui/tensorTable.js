@@ -80,6 +80,7 @@ export class TensorTable {
     this.raf = 0;
     this.disposed = false;
     this.sizes = { cellW: 64, rowHeadW: 40, charW: 7.2 };
+    this.cellChars = 0; // caratteri del numero più largo all'ultima misura (larghezza delle colonne)
     this.rowPool = [];
     this.colPool = [];
 
@@ -143,6 +144,11 @@ export class TensorTable {
     this.active = null;
     this.hovered = null;
     this.version++;
+    // Le intestazioni riciclate scrivono l'etichetta solo quando cambia l'indice che mostrano: con un
+    // tensore nuovo le righe visibili sono di nuovo 0, 1, 2… ma le etichette cambiano ("k3" della key di
+    // una head invece di "'$'" dell'embedding di prima), quindi si riscrivono tutte.
+    for (const row of this.rowPool) row.i = -1;
+    for (const head of this.colPool) head.j = -1;
     // Il nuovo tensore riparte dall'angolo in alto a sinistra.
     this.grid.scrollTop = 0;
     this.grid.scrollLeft = 0;
@@ -160,6 +166,9 @@ export class TensorTable {
     if (!this.tensor || this.disposed) return;
     this.version++;
     this.maxAbs = finiteAbsMax(this.tensor.data, this.rows * this.cols);
+    // Un numero più largo di prima (es. da "−9,9999" a "−12,3456") non deve uscire dalla cella: si
+    // rimisura solo se cambia la larghezza in caratteri (misurare forza il layout: niente a ogni step).
+    if (widestText(this.maxAbs, this.format) !== this.cellChars) this.measure();
     this.render();
     this.renderStatus();
   }
@@ -204,6 +213,7 @@ export class TensorTable {
     if (w > 0) this.sizes.charW = w / 10;
     const { charW } = this.sizes;
     const chars = widestText(this.maxAbs ?? 0, this.format);
+    this.cellChars = chars;
     let labelChars = String(Math.max(0, this.rows - 1)).length;
     if (typeof this.options.rowLabel === "function" && this.rows) {
       const step = Math.max(1, Math.floor(this.rows / LABEL_SAMPLE));

@@ -153,11 +153,16 @@
 .tf-numbers-bar { position: absolute; top: var(--tf-numbers-top, 56px); left: 10px; z-index: 11; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: calc(100% - 20px); }
 .tf-numbers-bar[hidden], .tf-numbers-step[hidden], .tf-training-controls[hidden] { display: none; }
 .tf-numbers-bar .tf-arrange { background: var(--panel); }
-/* il gruppo dello step si restringe (fino a un cursore di 90 px) invece di finire sotto il codice; una
-   larghezza vera e non solo flex-basis: la barra (posizionata, larga quanto il contenuto) la conta */
-.tf-numbers-step { flex: 0 1 auto; width: 300px; max-width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; }
+/* il gruppo dello step (cursore, cartellino dello step, ▶) si restringe fino a un cursore di 90 px invece di
+   finire sotto il codice; una larghezza vera e non solo flex-basis: la barra (posizionata, larga quanto il
+   contenuto) la conta */
+.tf-numbers-step { flex: 0 1 auto; width: 330px; max-width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; }
 .tf-numbers-step .tf-step { flex: 1 1 auto; min-width: 90px; }
 .tf-numbers-step .tf-bar-btn { flex: none; }
+/* cartellino dello step accanto al cursore: vero (azzurro) o stima (giallo, come l'etichetta del pannello) */
+.tf-bar-step { flex: none; min-width: 66px; padding: 2px 6px; font-size: 12px; line-height: 1.3; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; color: #e0f2fe; border: 1px solid transparent; border-radius: 6px; }
+.tf-bar-step:empty { display: none; }
+.tf-bar-step.estimate { color: #fef08a; background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.45); }
 /* I suggerimenti della navigazione (nav-hud) scendono sotto la barra, alla sua altezza vera (--tf-numbers-h,
    misurata da numbersView.js: la barra va a capo quando il codice o i grafici stringono la scena), e sotto il
    selettore delle rappresentazioni quando questo trova posto solo più in basso (--rep-safe-top del nucleo). */
@@ -186,7 +191,6 @@
   .tf-numbers-bar .tf-arrange-label { display: none; }
   .tf-numbers-bar .tf-arrange-short { display: inline; }
   .tf-numbers-bar .tf-arrange-option, .tf-numbers-bar .tf-bar-btn { padding: 4px 7px; font-size: 12px; }
-  .tf-numbers-step { width: 260px; }
   .tab:not(.sidebar-collapsed) .tf-numbers-bar { display: none; }
 }
 
@@ -210,6 +214,10 @@
 .tf-check { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; font-size: 12.5px; color: var(--text); cursor: pointer; }
 .tf-check input { margin-top: 2px; accent-color: var(--accent); }
 .tf-check small { color: var(--muted); }
+/* pulsante dentro una frase (porta a un'azione): sembra un link, ma è un pulsante vero (tastiera, lettori di schermo) */
+.tf-text-link { display: inline; padding: 0; font: inherit; color: #7dd3fc; background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.tf-text-link:hover { color: #bae6fd; }
+.tf-text-link:focus-visible { outline: 2px solid #e0f2fe; outline-offset: 2px; border-radius: 3px; }
 
 /* Etichetta onesta della sorgente: vero (azzurro) o stima (giallo) */
 .tf-source-note { margin: 8px 0 4px; padding: 6px 10px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: rgba(56, 189, 248, 0.06); }

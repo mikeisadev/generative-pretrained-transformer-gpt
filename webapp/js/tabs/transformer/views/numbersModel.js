@@ -98,10 +98,12 @@ export function float16RoundingCheck(final, snap) {
 }
 
 /**
- * Etichetta onesta della sorgente: titolo breve (cursore, barra dello stage) e frase (pannello).
+ * Etichetta onesta della sorgente: titolo (aria-valuetext del cursore, suggerimento), testo breve
+ * (scheda, etichetta della cella), `tag` (il cartellino accanto al cursore nella barra dello stage: lo
+ * studente vede quale step guarda e se è una stima anche con la sidebar chiusa) e frase (pannello).
  * `lastCheck` = risultato di float16RoundingCheck tra l'ultimo snapshot e i pesi finali (o null se
  * non ancora calcolato: allora non si promette niente).
- * @returns {{title: string, short: string, detail: string, estimate: boolean}}
+ * @returns {{title: string, short: string, tag: string, detail: string, estimate: boolean}}
  */
 export function sourceLabel(source, { steps = [], lastCheck = null, format = (v) => String(v) } = {}) {
   const last = steps[steps.length - 1];
@@ -109,6 +111,7 @@ export function sourceLabel(source, { steps = [], lastCheck = null, format = (v)
     return {
       title: "Pesi finali (float32)",
       short: "Pesi finali",
+      tag: "Pesi finali",
       detail: "I numeri esatti del checkpoint (data/weights.f32.bin): gli stessi che usa il motore della web app per generare testo. Float32: circa 7 cifre significative.",
       estimate: false,
     };
@@ -118,6 +121,7 @@ export function sourceLabel(source, { steps = [], lastCheck = null, format = (v)
     return {
       title: `Step ${STEP(source.step)}: stima lineare tra ${STEP(lo)} e ${STEP(hi)}`,
       short: `≈ step ${STEP(source.step)} (stima)`,
+      tag: `≈ ${STEP(source.step)} stima`,
       detail: `Non è un vero step del training: è la media pesata degli snapshot ${STEP(lo)} (${pct(1 - source.t)}) e ${STEP(hi)} (${pct(source.t)}). Il training vero non va in linea retta tra due snapshot: la stima serve solo a vedere il cambiamento in modo continuo.`,
       estimate: true,
     };
@@ -129,6 +133,7 @@ export function sourceLabel(source, { steps = [], lastCheck = null, format = (v)
       return {
         title: `Step ${STEP(step)} (float16: i pesi finali arrotondati)`,
         short: `Step ${STEP(step)} (pesi finali in float16)`,
+        tag: `Step ${STEP(step)}`,
         detail: `Verificato sui file: ognuno dei ${INT.format(lastCheck.count)} valori è il peso finale arrotondato a 16 bit (scarto massimo ${format(lastCheck.maxAbsDiff)}). È l'ultimo snapshot del training che ha prodotto i pesi della web app.`,
         estimate: false,
       };
@@ -136,6 +141,7 @@ export function sourceLabel(source, { steps = [], lastCheck = null, format = (v)
     return {
       title: `Step ${STEP(step)} (float16)`,
       short: `Step ${STEP(step)}`,
+      tag: `Step ${STEP(step)}`,
       detail: `Attenzione: questo snapshot NON coincide con i pesi finali del checkpoint (${INT.format(lastCheck.beyond)} valori su ${INT.format(lastCheck.count)} differiscono più dell'arrotondamento a 16 bit, scarto massimo ${format(lastCheck.maxAbsDiff)}). ${f16}`,
       estimate: false,
     };
@@ -144,6 +150,7 @@ export function sourceLabel(source, { steps = [], lastCheck = null, format = (v)
     return {
       title: `Step ${STEP(step)}: pesi iniziali (float16)`,
       short: `Step ${STEP(step)} (inizio)`,
+      tag: `Step ${STEP(step)}`,
       detail: `Prima del training: numeri casuali scelti dall'inizializzazione di PyTorch. Il modello non sa ancora niente. ${f16}`,
       estimate: false,
     };
@@ -151,6 +158,7 @@ export function sourceLabel(source, { steps = [], lastCheck = null, format = (v)
   return {
     title: `Step ${STEP(step)} (float16)`,
     short: `Step ${STEP(step)}`,
+    tag: `Step ${STEP(step)}`,
     detail: `Snapshot vero del training, registrato allo step ${STEP(step)} di ${STEP(last)}. ${f16}`,
     estimate: false,
   };

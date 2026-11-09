@@ -59,10 +59,11 @@
 .hist-plot { position: relative; width: 100%; border-radius: 6px; outline: none; }
 .hist-plot:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 .hist-canvas { display: block; }
-.hist-tip { position: absolute; top: 4px; z-index: 2; display: grid; gap: 2px; min-width: 128px; max-width: 220px; padding: 5px 8px; font-size: 12px; color: var(--muted); background: var(--panel-solid); border: 1px solid #334155; border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); pointer-events: none; }
-.hist-tip strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-.hist-tip-row { display: flex; align-items: center; gap: 6px; }
-.hist-tip-row b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.hist-tip { position: absolute; top: 4px; z-index: 2; display: grid; gap: 2px; min-width: 128px; max-width: 240px; padding: 5px 8px; font-size: 12px; color: var(--muted); background: var(--panel-solid); border: 1px solid #334155; border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); pointer-events: none; }
+.hist-tip strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* il conteggio resta su una riga ("175 valori"); il nome della serie, se lungo ("≈ step 750 (stima)"), va a capo */
+.hist-tip-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; }
+.hist-tip-row b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hist-tip-key, .hist-key { flex: none; width: 12px; height: 2px; border-radius: 1px; background: var(--c); }
 .hist-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--text); }
 .hist-legend li { display: inline-flex; align-items: center; gap: 6px; }

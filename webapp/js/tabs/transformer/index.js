@@ -303,7 +303,7 @@ function installFlowButton(tab) {
         ? "Ferma il pacchetto dei dati che scorre sul binario."
         : "Fai ripartire il pacchetto dei dati che scorre sul binario."
       : ui.player?.action
-        ? "Durante un'azione il pacchetto lo muove l'azione."
+        ? "Durante un'azione il flusso dei dati lo gestisce l'azione (alcune lo fermano, altre muovono il pacchetto da sé)."
         : "Il flusso dei dati scorre nelle viste Architettura e Pesi.";
   };
   flow.onChange(sync);

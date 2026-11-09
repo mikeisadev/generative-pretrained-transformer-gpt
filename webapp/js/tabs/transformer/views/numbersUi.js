@@ -182,14 +182,24 @@ export function tensorList({ groups, onPick }) {
 /**
  * Barra in alto a sinistra dello stage (sotto ☰ e il selettore dello zoom): sorgente, step e ▶.
  * Sul telefono la sidebar è un cassetto: qui si scorre il training guardando la scena.
+ * Accanto al cursore il cartellino dello step ("Step 1000", in giallo "≈ 750 stima"): senza, con la
+ * sidebar chiusa o scorsa altrove la scena mostrerebbe una stima senza dirlo. Per gli screen reader lo
+ * step è già nell'aria-valuetext del cursore: il cartellino è solo visivo (aria-hidden).
  */
 export function numbersBar({ switchElement, step, play }) {
-  const stepBox = el("div", { className: "tf-bar-tools tf-numbers-step" }, step.element, play.element);
+  const tag = el("span", { className: "tf-bar-step", ariaHidden: "true" });
+  const stepBox = el("div", { className: "tf-bar-tools tf-numbers-step" }, step.element, tag, play.element);
   const element = el("div", { className: "tf-numbers-bar", role: "group", ariaLabel: "Sorgente dei pesi della vista Pesi numerici" }, switchElement, stepBox);
   return {
     element,
     setTraining(on) {
       stepBox.hidden = !on;
+    },
+    /** @param {{tag: string, title: string, estimate: boolean}} label da sourceLabel */
+    setLabel(label) {
+      tag.textContent = label.tag;
+      tag.title = label.title;
+      tag.classList.toggle("estimate", label.estimate);
     },
   };
 }

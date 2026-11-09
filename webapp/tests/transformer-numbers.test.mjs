@@ -105,6 +105,23 @@ test("etichette oneste: pesi finali, step 0, snapshot intermedio, stima lineare 
   assert.match(ko.detail, /1\.200 valori/);
 });
 
+test("cartellino dello step nella barra dello stage: corto, e la stima si dichiara anche lì", () => {
+  const check = { matches: true, maxAbsDiff: 0.00097, count: 209729, beyond: 0 };
+  const tags = [
+    sourceLabel({ kind: "snapshot", step: 0 }, { steps: STEPS }),
+    sourceLabel({ kind: "snapshot", step: 1000 }, { steps: STEPS }),
+    sourceLabel({ kind: "snapshot", step: 5000 }, { steps: STEPS, lastCheck: check }),
+    sourceLabel({ kind: "snapshot", step: 5000 }, { steps: STEPS, lastCheck: { ...check, matches: false, beyond: 3 } }),
+  ];
+  assert.deepEqual(tags.map((l) => l.tag), ["Step 0", "Step 1000", "Step 5000", "Step 5000"]);
+  assert.ok(tags.every((l) => !l.estimate));
+  const est = sourceLabel(trainingSource(2600, STEPS, { interpolate: true }), { steps: STEPS });
+  assert.equal(est.tag, "≈ 2600 stima");
+  assert.equal(est.estimate, true);
+  // sta nella barra accanto al cursore (gruppo largo 330 px): al più 13 caratteri
+  for (const l of [...tags, est, sourceLabel(FINAL_SOURCE, { steps: STEPS })]) assert.ok(l.tag.length <= 13, l.tag);
+});
+
 test("verifica float16: un valore entro mezzo passo è arrotondamento, oltre no", () => {
   // valori esatti in float16: differenza zero
   const exact = Float32Array.from([0, 0.5, -0.25, 1.5, 2 ** -20]);

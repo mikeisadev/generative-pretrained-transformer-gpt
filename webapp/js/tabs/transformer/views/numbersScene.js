@@ -11,10 +11,14 @@
  * - Camera: minDistance abbassata (≈ 0,2) solo qui, perché i numeri compaiono da vicino (celle di
  *   ~36 px); voli sul tensore e sulla cella.
  * - Le tre carte di una head (query, key, value) sono sovrapposte: quella scelta passa davanti.
- * - Puntatore: cella sotto il mouse (tensore, riga, colonna, valore) e clic su una cella.
- * Uscendo (exit) tutto torna com'era: texture, carte, minDistance, listener, overlay.
+ * - Con uno step del training le attivazioni calcolate con i pesi finali (pattern di attention, probabilità,
+ *   prossimo token) si attenuano: non corrispondono ai pesi mostrati.
+ * - Puntatore: cella sotto il mouse (tensore, riga, colonna, valore), ricalcolata anche quando la camera si
+ *   muove da sola sotto il mouse fermo (rotellina, tasti, voli), e clic su una cella.
+ * Uscendo (exit) tutto torna com'era: texture, carte, opacità, minDistance, listener, overlay.
  */
 import * as THREE from "three";
+import { setBaseOpacity } from "../../../core/lod.js";
 import { NumbersGroup, attachNumbers } from "../../../core/matrixNumbers.js";
 import { CELL } from "../../../core/visuals.js";
 import { SceneTextures } from "../actions/sceneTextures.js";
@@ -25,6 +29,8 @@ export const NUMBERS_MIN_DISTANCE = 0.2;
 /** Altezza della cella sullo schermo quando la camera vola su una cella: 4 decimali leggibili. */
 const CELL_TARGET_PX = 72;
 const CLICK_SLOP = 5; // px: oltre è un trascinamento (navigazione), non un clic
+/** Opacità (rispetto a quella normale) delle attivazioni dei pesi finali mentre la vista mostra uno step del training. */
+const STALE_ACTIVATION_OPACITY = 0.2;
 
 export class NumbersScene {
   /**
@@ -48,6 +54,7 @@ export class NumbersScene {
     this.highlighted = null;
     this.cards = new Map(); // mesh → z originale (carte delle head spostate davanti)
     this.saved = null;
+    this.dimmed = null; // materiale → opacità di base, mentre le attivazioni dei pesi finali sono attenuate
     this.pending = 0;
     this.downAt = null;
     this.lastMove = null;
@@ -58,9 +65,32 @@ export class NumbersScene {
       ["pointermove", (e) => this.move(e)],
       ["pointerdown", (e) => (this.downAt = [e.clientX, e.clientY])],
       ["pointerup", (e) => this.up(e)],
-      ["pointerleave", () => this.hover(null)],
+      [
+        "pointerleave",
+        () => {
+          this.lastMove = null;
+          this.hover(null);
+        },
+      ],
     ];
-    this.onControlsStart = () => this.hover(null); // la camera si muove: la cella sotto il puntatore cambia
+    this.dragging = false;
+    // Si trascina la scena: niente etichetta mentre gira (la cella sotto il puntatore cambia di continuo).
+    this.onControlsStart = () => {
+      this.dragging = true;
+      this.hover(null);
+    };
+    // Fine del trascinamento o di una tacca della rotellina (le OrbitControls la avvolgono in start/end, con lo
+    // zoom già applicato in mezzo): la cella sotto il puntatore si ricalcola.
+    this.onControlsEnd = () => {
+      this.dragging = false;
+      if (this.lastMove) this.schedulePick();
+    };
+    // La camera si muove senza il mouse (rotellina, tasti, "Centra", "Mostra nella scena"): sotto il
+    // puntatore fermo c'è un'altra cella e l'etichetta va ricalcolata, altrimenti ne descriverebbe una che
+    // non c'è più. "change" delle OrbitControls arriva solo quando la camera si muove: niente lavoro a riposo.
+    this.onCameraChange = () => {
+      if (!this.dragging && this.lastMove) this.schedulePick();
+    };
   }
 
   /** Entra nella vista con la sorgente `views` (Map nome → Float32Array). */
@@ -87,6 +117,8 @@ export class NumbersScene {
     this.offFrame = host.onFrame(() => this.group.update(host.camera, host.container.clientHeight));
     for (const [type, fn] of this.listeners) this.canvas.addEventListener(type, fn);
     host.controls.addEventListener("start", this.onControlsStart);
+    host.controls.addEventListener("end", this.onControlsEnd);
+    host.controls.addEventListener("change", this.onCameraChange);
   }
 
   /**
@@ -127,6 +159,36 @@ export class NumbersScene {
     const depths = cardDepths(Object.fromEntries(CARD_KINDS.map((k) => [k, this.cards.get(meshes[k])])), card.kind);
     for (const k of CARD_KINDS) meshes[k].position.z = depths[k];
     this.group.invalidate(); // matrici spostate da codice: i numeri si ricalcolano anche a camera ferma
+  }
+
+  /**
+   * Pattern di attention, probabilità del prossimo carattere e prossimo token sono ATTIVAZIONI, non pesi: il
+   * motore le ha calcolate con i pesi finali sul prompt d'esempio (model.json). Accanto ai pesi di uno step del
+   * training non corrisponderebbero più (allo step 0 si vedrebbe l'attention del modello addestrato vicino a
+   * pesi casuali, come se non dipendesse dai pesi): si attenuano finché la sorgente non torna ai pesi finali.
+   * setBaseOpacity (core/lod.js) convive con le sfumature dello zoom semantico.
+   */
+  dimFinalActivations(on) {
+    if (!this.active || on === Boolean(this.dimmed)) return;
+    if (!on) {
+      for (const [material, base] of this.dimmed) setBaseOpacity(material, base);
+      this.dimmed = null;
+      return;
+    }
+    this.dimmed = new Map();
+    const { registry } = this.tab.arch;
+    const { n_layer: layers, n_head: heads } = this.tab.spec.config;
+    const roots = [registry.get("logits"), registry.get("next_token")];
+    for (let l = 0; l < layers; l++) for (let h = 0; h < heads; h++) roots.push(registry.get(`blocks.${l}.heads.${h}.pattern`));
+    for (const root of roots) {
+      root?.traverse((o) => {
+        const material = o.material;
+        if (!material || Array.isArray(material) || this.dimmed.has(material)) return;
+        const base = material.userData.baseOpacity ?? material.opacity;
+        this.dimmed.set(material, base);
+        setBaseOpacity(material, base * STALE_ACTIVATION_OPACITY);
+      });
+    }
   }
 
   /** Mesh della heatmap di un tensore (per inquadrarlo). */
@@ -182,8 +244,12 @@ export class NumbersScene {
   move(event) {
     if (event.pointerType === "touch") return; // sul telefono l'etichetta arriva con un tocco (up)
     this.lastMove = event;
+    if (!this.dragging) this.schedulePick();
+  }
+
+  /** Cella sotto l'ultima posizione del mouse, al prossimo frame: un raycast per frame al più (94 piani: ~0,1 ms). */
+  schedulePick() {
     if (this.pending) return;
-    // un raycast per frame al più (94 piani: ~0,1 ms), non uno per evento del mouse
     this.pending = requestAnimationFrame(() => {
       this.pending = 0;
       if (!this.active || !this.lastMove) return;
@@ -205,6 +271,7 @@ export class NumbersScene {
   /** Esce dalla vista: texture, carte, camera e listener come prima; overlay e numeri liberati. */
   exit() {
     if (!this.active) return;
+    this.dimFinalActivations(false);
     this.active = false;
     cancelAnimationFrame(this.pending);
     this.pending = 0;
@@ -212,6 +279,10 @@ export class NumbersScene {
     this.offFrame = null;
     for (const [type, fn] of this.listeners) this.canvas.removeEventListener(type, fn);
     this.host.controls.removeEventListener("start", this.onControlsStart);
+    this.host.controls.removeEventListener("end", this.onControlsEnd);
+    this.host.controls.removeEventListener("change", this.onCameraChange);
+    this.lastMove = null;
+    this.dragging = false;
     this.textures.restore();
     for (const [mesh, z] of this.cards) mesh.position.z = z;
     this.cards.clear();

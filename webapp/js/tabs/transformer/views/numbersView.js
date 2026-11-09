@@ -139,6 +139,13 @@ export function createNumbersView(tab) {
       chips.element,
       el("label", { className: "tf-check", htmlFor: interpolateBox.id }, interpolateBox, el("span", {}, "Interpola tra gli snapshot ", el("small", {}, "(stima lineare: non è un vero step del training)"))),
       plays[0].element,
+      el(
+        "p",
+        { className: "hint" },
+        "Qui cambiano solo i pesi. Pattern di attention e probabilità della scena sono attivazioni calcolate con i pesi finali sul prompt d'esempio: negli step del training restano attenuati. Li vedi nascere insieme ai pesi nell'azione ",
+        el("button", { type: "button", className: "tf-text-link", onclick: () => startTrainingAction() }, "«Il training completo»"),
+        ".",
+      ),
     );
     bar = numbersBar({ switchElement: switches[1].element, step: barStep, play: plays[1] });
     bar.element.hidden = true;
@@ -159,8 +166,8 @@ export function createNumbersView(tab) {
   function renderInfo() {
     info.replaceChildren(
       el("h3", {}, "Pesi numerici: i numeri dentro le matrici"),
-      el("p", {}, "Ogni cella colorata della scena è un numero che il modello ha imparato. Come in una foto: da lontano vedi i colori, avvicinandoti vedi i singoli pixel e qui, al loro posto, il numero vero."),
-      el("p", { className: "hint" }, "Avvicinati con la rotellina (o con il pizzico) a una matrice: quando una cella è grande abbastanza sullo schermo compare il suo valore, con più decimali più ti avvicini. Sono i float32 che il motore della web app usa davvero. Passa sopra una cella (o toccala) per riga, colonna e valore; un clic la apre nella tabella qui sotto."),
+      el("p", {}, "Ogni cella colorata della scena è un peso del modello, cioè un numero. Come in una foto: da lontano vedi i colori, avvicinandoti vedi i singoli pixel e qui, al loro posto, il numero vero."),
+      el("p", { className: "hint" }, "Avvicinati con la rotellina (o con il pizzico) a una matrice: quando una cella è grande abbastanza sullo schermo compare il suo valore, con più decimali più ti avvicini. Con «Pesi finali» sono i float32 che il motore della web app usa davvero; negli step del training sono i numeri degli snapshot salvati durante l'addestramento. Passa sopra una cella (o toccala) per riga, colonna e valore; un clic la apre nella tabella qui sotto."),
       el("h4", {}, "Da dove vengono i pesi"),
       el("div", { className: "tf-arrange-row" }, switches[0].element),
       trainingBox,
@@ -301,6 +308,7 @@ export function createNumbersView(tab) {
     state.source = source;
     state.views = views;
     if (changed) scene.setViews(views, { heatmaps: source.kind === "final" ? "final" : "write" });
+    scene.dimFinalActivations(source.kind !== "final");
     const writeMs = scene.stats.writeMs;
     refreshCard({ heavy: !live || throttle("lastPanel", PANEL_UPDATES_PER_SECOND) });
     syncLabel();
@@ -320,6 +328,7 @@ export function createNumbersView(tab) {
   function syncStepUi(source = state.source) {
     const label = sourceLabel(source, { steps: state.steps, lastCheck: state.lastCheck, format: preciseText });
     for (const s of [panelStep, barStep]) s?.set(state.step, label.title);
+    bar?.setLabel(label);
     chips?.set(source.kind === "snapshot" ? source.step : null);
     const out = trainingBox.querySelector(".tf-step-value");
     if (out) out.textContent = label.short;
@@ -494,6 +503,13 @@ export function createNumbersView(tab) {
     if (event?.pointerType === "touch" || !canHover()) showTip(hit, event, { sticky: true });
   }
 
+  /** L'azione del training completo (heatmap, attention e probabilità vere di ogni snapshot): torna all'Architettura da sé. */
+  function startTrainingAction() {
+    ui.sidebar.select("azioni");
+    if (narrowScreen()) ui.sidebar.toggleCollapsed(true);
+    void ui.player?.start("training-run");
+  }
+
   async function openInLab() {
     const target = labTarget(state.selected, state.source);
     const shown = await tab.app.goto(LAB_TAB, target);
@@ -503,11 +519,15 @@ export function createNumbersView(tab) {
 
   // ---------------------------------------------------------------- etichetta della cella nella scena
   function showTip(hit, event, { sticky = false } = {}) {
-    clearTimeout(tipTimer);
     if (!hit || !state.active) {
-      if (!tip.dataset.sticky) tip.hidden = true;
+      // L'etichetta di un tocco resta fino al suo timer: sul telefono a ogni tocco segue un pointerleave
+      // (il dito si stacca), che non deve né spegnerla né fermarne il timer (resterebbe per sempre).
+      if (tip.dataset.sticky) return;
+      clearTimeout(tipTimer);
+      tip.hidden = true;
       return;
     }
+    clearTimeout(tipTimer);
     const p = state.run.tensor(hit.name);
     const axes = tensorAxes(hit.name, p.shape, { vocab: state.run.vocab, config: state.run.config });
     const label = sourceLabel(state.source, { steps: state.steps, lastCheck: state.lastCheck, format: preciseText });
@@ -581,6 +601,7 @@ export function createNumbersView(tab) {
       stopPlay();
       clearTimeout(trailing);
       clearTimeout(tipTimer);
+      delete tip.dataset.sticky;
       scene.exit();
       state.source = FINAL_SOURCE;
       info.hidden = true;
