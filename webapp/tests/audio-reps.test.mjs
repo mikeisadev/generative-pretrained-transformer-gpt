@@ -111,6 +111,14 @@ test("rete: i numeri dichiarati sono coerenti tra loro e con le fonti del tab", 
   assert.deepEqual([...MUSICGEN.delays], [0, 1, 2, 3]);
   assert.equal(WHISPER_TINY.mlp, 4 * WHISPER_TINY.width);
   assert.equal(WHISPER_TINY.audioPositions, WHISPER.nFrames / 2, "la seconda convoluzione ha passo 2");
+  // MusicGen small, un layer (audiocraft/modules/transformer.py, niente bias): self-attention e cross-attention hanno 4
+  // matrici dim × dim ciascuna, il feed-forward 2 matrici dim × ffn. Il feed-forward è quindi metà dei pesi del layer,
+  // non "la maggior parte": il testo della sezione deve dire così
+  assert.equal(2 * MUSICGEN.dim * MUSICGEN.ffn, 2 * 4 * MUSICGEN.dim ** 2);
+  assert.match(sectionOf("mg_ffn").text, /metà dei pesi del layer/);
+  assert.doesNotMatch(sectionOf("mg_ffn").text, /maggior parte/);
+  // l'errore relativo del laboratorio è misurato sui frame dei due brani insieme (lab.js: trainRvq su entrambi)
+  assert.doesNotMatch(sectionOf("toy_r2").text, /sul brano/);
   // le stesse cifre compaiono nelle fonti del tab (content.js), non sono state scritte a parte
   return source("../js/tabs/audio/content.js").then((content) => {
     for (const fact of ["8·5·4·2 = 320", "75 al secondo", "1024 voci", "2048 voci per codebook", "ritardi 0, 1, 2, 3", "3000 frame", "1500 posizioni", "80 bande Mel", "39 milioni"]) assert.ok(content.includes(fact), fact);
@@ -320,6 +328,9 @@ test("rete: la finestra comincia 6 frame prima della seconda nota e il codebook 
     const changes = [];
     for (let d = 1; d < WINDOW_FRAMES; d++) if (cb1[d] !== cb1[d - 1]) changes.push(d);
     assert.ok(changes.some((d) => Math.abs(d - 6) <= 1), `${style}: cambia attorno all'attacco (${changes.join(",")})`);
+    // il testo della scheda dice anche che dopo l'attacco la voce cambia ancora qualche volta (il volume della nota
+    // nuova si assesta): nessun cambio prima dell'attacco, almeno uno dopo
+    assert.ok(changes.every((d) => d >= 5) && changes.some((d) => d > 7), `${style}: cambi solo attorno e dopo l'attacco (${changes.join(",")})`);
     // nomi delle fette: gli istanti dei frame, gli stessi del log-Mel (due frame di Whisper per frame)
     const n = nets[style];
     assert.deepEqual(n.slices.names, Array.from({ length: WINDOW_FRAMES }, (_, d) => `${(start + d) * 20} ms`));
