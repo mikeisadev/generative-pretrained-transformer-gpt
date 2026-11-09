@@ -40,7 +40,7 @@ export async function createTab(root, app) {
   root.classList.add("lab-tab");
   const ui = createTabLayout(root, { code: true, charts: true, player: true, hint: touch.matches ? TAB_HINT_TOUCH : TAB_HINT_MOUSE });
   const spec = await fetchJson("data/model.json"); // gli snippet del codice vero (gpt/export.py)
-  const state = new LabState({ loadBuiltin: () => loadBuiltinRun(), store: new RunStore() });
+  const state = new LabState({ loadBuiltin: () => loadBuiltinRun(), store: createStore() });
   const tab = createTabObject({ app, ui, spec, state });
 
   // pannelli della sidebar: Modello, Tensore, Run (poi la fase 2, poi Cervello e Fonti)
@@ -101,6 +101,19 @@ export async function createTab(root, app) {
     deactivate: () => ui.host.stop(), // l'azione in corso si congela e riprende al ritorno (come nel Transformer)
     goto: (target) => gotoTarget(tab, target),
   };
+}
+
+/**
+ * Il salvataggio nel browser, se c'è. In un iframe in sandbox o in certe navigazioni private anche solo
+ * leggere `indexedDB` lancia SecurityError (il costruttore di RunStore lo legge): senza questo try il tab
+ * non si apriva affatto. Senza store i run restano in memoria e il pannello Run lo dice.
+ */
+function createStore() {
+  try {
+    return new RunStore();
+  } catch {
+    return null;
+  }
 }
 
 /** Il pannello "Fonti" (stile condiviso .sources-list di core.css). */

@@ -28,7 +28,7 @@ Schema di ``trace.json`` (float arrotondati; entropie in nat, cioè con ln)::
 
     {
       "format_version": 1,
-      "config": {...},                 # GPTConfig.to_dict() (anche i campi aggiunti); null se il modello non ha config
+      "config": {...},                 # GPTConfig.to_dict(), anche con i campi aggiunti (null senza config)
       "train_config": {...},           # TrainConfig: batch_size, max_iters, eval_interval, eval_iters,
                                        #              learning_rate, seed
       "total_params": 209729,          # valori di uno snapshot (per il GPT del corso: i parametri)
@@ -126,7 +126,7 @@ _TOP_LEVEL = {
 _INDEX = re.compile(r"[0-9]+")
 _LAYERNORM_GROUP = re.compile(r"blocks\.([^.]+)\.layernorm")
 # Le head del GPT del corso: con questi nomi l'entropia dell'attention non ha bisogno di spiegazioni.
-_COURSE_HEAD = re.compile(r"blocks\.([0-9]+)\.sa\.heads\.[0-9]+")
+_COURSE_HEAD = re.compile(r"blocks\.[0-9]+\.sa\.heads\.[0-9]+")
 TOP_K = 5
 
 
@@ -197,7 +197,7 @@ def parameter_groups(model: nn.Module) -> dict[str, list[str]]:
 
 
 def _flow_order(groups: list[str]) -> list[str]:
-    """``groups`` (in ordine di comparsa) con ogni ``blocks.<i>.layernorm`` dopo gli altri gruppi del blocco."""
+    """``groups`` (in ordine di comparsa) con ``blocks.<i>.layernorm`` dopo gli altri gruppi del blocco."""
 
     def position(item: tuple[int, str]) -> float:
         index, group = item
@@ -246,20 +246,21 @@ def attention_notes(
             "Per averla aggiungi all'attention un metodo attention_weights con gli stessi argomenti di "
             "forward che restituisce le probabilità (B, T, T) di una head o (B, H, T, T) di H head."
         )]
-    notes = [f"attention: {problem}: modulo saltato nell'entropia dell'attention" for problem in problems]
+    notes = [f"attention: {problem} (modulo saltato nell'entropia dell'attention)" for problem in problems]
     if not rows or not any(rows):
-        notes.append("attention: i moduli con attention_weights non hanno dato probabilità valide nel forward "
-                     "(errori qui sopra, o moduli mai chiamati): l'entropia dell'attention non c'è")
+        notes.append("attention: i moduli con attention_weights non hanno dato probabilità valide nel "
+                     "forward (errori qui sopra, o moduli mai chiamati): l'entropia dell'attention non c'è")
         return notes
     if _course_attention(sites):
         return notes
     layers = list(dict.fromkeys(layer or "il modello intero" for _, layer in sites))
+    patterns = list(dict.fromkeys(_pattern(path) for path, _ in sites))
     heads = sorted({len(row) for row in rows})
-    per_layer = str(heads[0]) if len(heads) == 1 else "da " + " a ".join(map(str, (heads[0], heads[-1])))
+    per_layer = str(heads[0]) if len(heads) == 1 else f"da {heads[0]} a {heads[-1]}"
     notes.append(
-        f"attention: attention_entropy[strato][head] viene da {_count(len(sites), 'modulo', 'moduli')} con "
-        f"attention_weights ({_few([path for path, _ in sites])}): {_count(len(rows), 'strato', 'strati')} "
-        f"({_few(layers)}), {per_layer} head per strato, numerate nell'ordine del forward"
+        f"attention: attention_entropy[strato][head] viene dai moduli con attention_weights "
+        f"{_few(patterns)}: {_count(len(rows), 'strato', 'strati')} ({_span(layers)}) con {per_layer} head "
+        "ciascuno, numerate nell'ordine del forward"
     )
     return notes
 
@@ -365,9 +366,20 @@ def _finite_json(value: Any) -> tuple[Any, int]:
 
 
 def _few(items: list[str], limit: int = 3) -> str:
-    """I primi nomi di un elenco: "a, b, c e altri 4"."""
-    shown = ", ".join(items[:limit])
-    return f"{shown} e altri {len(items) - limit}" if len(items) > limit else shown
+    """I primi nomi di un elenco: "a, b, c e altri 4" (con uno solo in più: "a, b, c, d")."""
+    if len(items) <= limit + 1:
+        return ", ".join(items)
+    return f"{', '.join(items[:limit])} e altri {len(items) - limit}"
+
+
+def _span(items: list[str]) -> str:
+    """Un elenco ordinato in breve: "blocks.0 … blocks.5"."""
+    return ", ".join(items) if len(items) <= 3 else f"{items[0]} … {items[-1]}"
+
+
+def _pattern(path: str) -> str:
+    """Il percorso con gli indici al posto di "*": blocks.3.attn → blocks.*.attn (come la web app)."""
+    return ".".join("*" if _INDEX.fullmatch(part) else part for part in path.split("."))
 
 
 def _count(n: int, one: str, many: str) -> str:
@@ -564,7 +576,7 @@ class TrainingRecorder(TrainingCallback):
 
     def _eval_batch_metrics(self, model: nn.Module) -> dict[str, Any]:
         x, y = self._eval_x.to(self._device), self._eval_y.to(self._device)
-        # problems: un'attention modificata che non dà probabilità valide si salta (con una nota), non si ferma.
+        # problems: un'attention che non dà probabilità valide si salta con una nota, non ferma il training.
         with capture_attention(model, problems=self._attention_problems) as attention:
             logits, loss = model(x, y)
         log_probs = F.log_softmax(logits, dim=-1)  # (B, T, V)
@@ -584,7 +596,8 @@ class TrainingRecorder(TrainingCallback):
 
     def notes(self) -> list[str]:
         """Che cosa è stato adattato o saltato per questa architettura (vuoto per il GPT del corso)."""
-        rows = next((s["attention_entropy"] for s in reversed(self.snapshots) if "attention_entropy" in s), None)
+        with_attention = [s["attention_entropy"] for s in self.snapshots if "attention_entropy" in s]
+        rows = with_attention[-1] if with_attention else None
         group_note = grouping_note(name for names in self._groups.values() for name in names)
         return [
             *self._config_notes,

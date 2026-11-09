@@ -136,6 +136,10 @@ _INDEX = re.compile(r"[0-9]+")
 _ROW_SUM_ATOL = 1e-2
 
 
+class AttentionWeightsError(ValueError):
+    """``attention_weights`` ha restituito qualcosa che non sono probabilità di attention leggibili."""
+
+
 @dataclass(frozen=True)
 class AttentionSite:
     """Un modulo che espone le probabilità di attention e lo strato del modello a cui appartiene."""
@@ -218,10 +222,6 @@ def capture_attention(
             hk.remove()
 
 
-class AttentionWeightsError(ValueError):
-    """``attention_weights`` ha restituito qualcosa che non sono probabilità di attention leggibili."""
-
-
 def _capture_site(site, attention, next_head, problems, module, args, kwargs, _output) -> None:
     """Hook di un modulo di attention: chiede le probabilità con gli stessi argomenti del forward."""
     where = f"{site.path}.{ATTENTION_METHOD}()"
@@ -256,15 +256,15 @@ def _report(message: str, problems: list[str] | None) -> None:
 def _attention_probabilities(value: Any) -> torch.Tensor:
     """Il risultato di ``attention_weights``, staccato dal grafo, se sono davvero probabilità leggibili."""
     if not isinstance(value, torch.Tensor) or not value.is_floating_point():
-        raise AttentionWeightsError(f"atteso un tensore float di probabilità, ottenuto {type(value).__name__}")
+        raise AttentionWeightsError(f"atteso un tensore float, ottenuto {type(value).__name__}")
     if value.dim() not in (3, 4) or value.shape[-1] != value.shape[-2]:
-        raise AttentionWeightsError(f"forma {tuple(value.shape)}, attese (B, T, T) per una head o (B, H, T, T)")
+        raise AttentionWeightsError(f"forma {tuple(value.shape)}, attese (B, T, T) o (B, H, T, T)")
     value = value.detach()
     if not bool(torch.isfinite(value).all()):
         raise AttentionWeightsError("probabilità non finite (NaN o infinito): il training è divergente?")
     rows = value.float().sum(-1)
     if bool((value < 0).any()) or not torch.allclose(rows, torch.ones_like(rows), atol=_ROW_SUM_ATOL):
-        raise AttentionWeightsError("non sono probabilità: ogni riga deve sommare a 1 (softmax dopo la maschera)")
+        raise AttentionWeightsError("non sono probabilità: ogni riga deve sommare a 1 (softmax e maschera)")
     return value
 
 

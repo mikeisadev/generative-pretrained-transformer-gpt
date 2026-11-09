@@ -40,7 +40,7 @@ const { linearSteps } = await import("../js/tabs/lab/actions/linearAction.js");
 const { attentionSteps, attentionValueSteps } = await import("../js/tabs/lab/actions/attentionAction.js");
 const { layerNormSteps } = await import("../js/tabs/lab/actions/layerNormAction.js");
 const { ffnSteps } = await import("../js/tabs/lab/actions/ffnAction.js");
-const { logitsSteps } = await import("../js/tabs/lab/actions/logitsAction.js");
+const { logitsSteps, rowExample } = await import("../js/tabs/lab/actions/logitsAction.js");
 const { trainingStepSteps } = await import("../js/tabs/lab/actions/trainingAction.js");
 const { historySteps } = await import("../js/tabs/lab/actions/historyAction.js");
 const { LabScene } = await import("../js/tabs/lab/scene/labScene.js");
@@ -533,7 +533,12 @@ test("numeri all'italiana per la lavagna", () => {
   assert.equal(F.sci(0.000999), "1,0 · 10⁻³");
   assert.equal(F.sci(-0.0099951), "−1,0 · 10⁻²");
   assert.equal(F.sci(1e-8, 1), "1 · 10⁻⁸");
-  assert.equal(F.num(0.0000996), "1,0 · 10⁻⁴");
+  assert.equal(F.num(0.00000999), "1,0 · 10⁻⁵");
+  // l'esempio di riga della lavagna dei logits viene dal vocabolario vero (la riga 12 del corso è «?», «e» è la 43)
+  const vocab = [..."\n !$&',-.3:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"];
+  assert.equal(rowExample(vocab), "la riga 43 è «e»…");
+  assert.equal(rowExample(["a", "b"]), "la riga 0 è «a»…");
+  assert.equal(rowExample(["\n", "1"]), "una riga per token");
   assert.equal(F.pct(0.4123), "41,2%");
   assert.equal(F.pct(0.0004), "0,04%");
   assert.equal(F.int(209729), "209.729");

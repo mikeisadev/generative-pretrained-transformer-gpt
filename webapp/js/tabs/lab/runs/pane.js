@@ -18,11 +18,13 @@ const REMEMBER_KEY = "lab.rememberRuns";
 
 export function createRunsPane(pane, tab) {
   const { state } = tab;
+  let loadToken = 0; // cresce a ogni caricamento: il più recente decide il run A
   const list = el("ul", { className: "lab-run-list", ariaLabel: "Run disponibili" });
   const status = el("div", { className: "lab-upload-status", role: "status", ariaLive: "polite" });
   const storage = el("p", { className: "lab-storage hint" });
   const cardBox = el("div", { className: "lab-card-box" });
-  const remember = el("input", { type: "checkbox", checked: readRemember(), onchange: (e) => writeRemember(e.target.checked) });
+  // senza salvataggio nel browser (IndexedDB vietato) la casella non promette niente: spenta e detta
+  const remember = el("input", { type: "checkbox", checked: Boolean(state.store) && readRemember(), disabled: !state.store, onchange: (e) => writeRemember(e.target.checked) });
   const folderInput = filePicker({ directory: true, onFiles: (files) => load(files) });
   const filesInput = filePicker({ directory: false, onFiles: (files) => load(files) });
   const dropArea = el(
@@ -36,7 +38,7 @@ export function createRunsPane(pane, tab) {
       el("button", { type: "button", className: "lab-primary", onclick: () => folderInput.click() }, "Scegli una cartella"),
       el("button", { type: "button", onclick: () => filesInput.click() }, "Scegli i file"),
     ),
-    el("label", { className: "lab-check" }, remember, " Ricordali in questo browser (restano solo qui, sul tuo computer)"),
+    el("label", { className: "lab-check" }, remember, state.store ? " Ricordali in questo browser (restano solo qui, sul tuo computer)" : " Ricordali in questo browser: non disponibile qui (i run restano finché la pagina è aperta)"),
     el(
       "details",
       { className: "lab-accepted" },
@@ -112,11 +114,26 @@ export function createRunsPane(pane, tab) {
     storage.textContent = saved.length ? `Salvati in questo browser: ${fmtInt(saved.length)} run, ${formatBytes(usage.saved)}${quota}.` : `Nessun run salvato in questo browser${quota}.`;
   }
 
-  async function choose(id) {
+  /** Il run A (pulsante «Mostra» o un caricamento). Con `token` vale solo se nessun caricamento più recente è partito. */
+  async function choose(id, token = null) {
+    if (token !== null && token !== loadToken) return false;
     tab.ui.director.noteUserIntent(); // la camera vola sul nuovo modello anche se lo studente si stava muovendo
-    const ok = await state.setRunA(id);
-    if (ok) tab.setCaption(`Nella scena: «${state.entry(id)?.name}», ${state.current?.view?.label ?? "pesi finali"}.`);
+    return state.setRunA(id);
   }
+
+  // La didascalia dice quale run c'è nella scena, comunque sia cambiato (pannello Run, Confronto, confronti
+  // pronti, link, «Dimentica» del run A): scritta solo nel pulsante «Mostra», restava il nome del run di prima.
+  // Niente step: la targhetta in alto lo dice e resta aggiornata (la didascalia no, se si muove il cursore).
+  let captionRun = null;
+  state.on("weights", ({ runId }) => {
+    if (runId === captionRun) return;
+    const first = captionRun === null;
+    captionRun = runId;
+    if (first || tab.ui.player?.action) return; // all'avvio la didascalia è di index.js; un'azione ha la sua
+    const entry = state.entry(runId);
+    const run = state.run(runId);
+    tab.setCaption(`Nella scena: «${entry?.name ?? ""}»${run ? `, ${fmtInt(run.totalParams)} parametri` : ""}. Avvicinati per le celle colorate e poi i numeri veri.`);
+  });
 
   async function save(id) {
     const result = await state.saveRun(id);
@@ -146,6 +163,10 @@ export function createRunsPane(pane, tab) {
    * registro; il primo nuovo diventa il run A. Errori per run, in italiano, con file e campo.
    */
   async function load(files) {
+    // il gettone si prende subito: se lo studente carica altro mentre questi file si leggono, vince l'ultimo
+    // caricamento chiesto (per il run A e per la riga di stato); i run di quello prima entrano comunque nell'elenco
+    const token = ++loadToken;
+    const latest = () => token === loadToken;
     const total = files.reduce((s, f) => s + (f.size ?? 0), 0);
     status.replaceChildren(el("p", { className: "lab-busy" }, `Leggo ${fmtInt(files.length)} file (${megabytes(total)})…`));
     tab.ui.sidebar.select("run");
@@ -153,7 +174,7 @@ export function createRunsPane(pane, tab) {
     try {
       result = await runsFromFiles(files, { defaultVocab: state.builtin?.vocab ?? null });
     } catch (error) {
-      showStatus([], [error.message]); // oltre il limite totale: nessun file letto
+      showStatus([], [error.message], null, latest()); // oltre il limite totale: nessun file letto
       return { added: [], errors: [error.message] };
     }
     const { added, duplicates } = state.addRuns(result.runs);
@@ -167,20 +188,31 @@ export function createRunsPane(pane, tab) {
     }
     if (result.ignored.length) ok.push(`Ignorati ${fmtInt(result.ignored.length)} file: ${result.ignored.slice(0, 4).map((i) => `${i.path} (${i.reason})`).join("; ")}${result.ignored.length > 4 ? "…" : ""}.`);
     if (!result.runs.length && !bad.length) bad.push("Nessun run riconosciuto: serve una cartella con weights.json (+ weights.f32.bin), run.json, un .safetensors oppure trace.json con gli snapshot.");
-    showStatus(ok, bad);
-    if (remember.checked && state.store) {
-      for (const id of added) {
-        const saved = await state.saveRun(id);
-        if (!saved.ok) showStatus([...ok], [...bad, `«${state.entry(id)?.name}» non salvato nel browser: ${saved.reason}.`]);
-      }
-    }
+    const saving = remember.checked && state.store && added.length > 0;
+    showStatus(ok, bad, saving ? "Salvo in questo browser…" : null, latest());
+    // Prima si mostra il run (lo studente lo vede subito nella scena), poi si salva nel browser: salvare
+    // un run grande richiede secondi e "Caricato «…»" con la scena ancora sul run di prima confonde.
     const first = added[0] ?? duplicates[0];
-    if (first) await choose(first);
+    if (first) await choose(first, token);
+    if (saving) {
+      const failed = [];
+      for (const [k, id] of added.entries()) {
+        if (!state.has(id)) continue; // dimenticato nel frattempo
+        if (latest() && added.length > 1) showStatus(ok, bad, `Salvo in questo browser: ${fmtInt(k + 1)} di ${fmtInt(added.length)}…`);
+        const saved = await state.saveRun(id);
+        if (!saved.ok) failed.push(`«${state.entry(id)?.name ?? id}» non salvato nel browser: ${saved.reason}.`);
+      }
+      if (latest()) showStatus(ok, [...bad, ...failed]);
+      else if (failed.length) showStatus([], failed, null, false);
+    }
     return { added, duplicates, errors: result.errors };
   }
 
-  function showStatus(ok, bad) {
-    status.replaceChildren(...ok.map((t) => el("p", { className: "lab-ok-line" }, t)), ...bad.map((t) => el("p", { className: "lab-error" }, t)));
+  /** La riga di stato del caricamento; `replace: false` (un caricamento superato) aggiunge invece di sostituire. */
+  function showStatus(ok, bad, busy = null, replace = true) {
+    const lines = [...ok.map((t) => el("p", { className: "lab-ok-line" }, t)), ...bad.map((t) => el("p", { className: "lab-error" }, t)), ...(busy ? [el("p", { className: "lab-busy" }, busy)] : [])];
+    if (replace) status.replaceChildren(...lines);
+    else status.append(...lines);
   }
 
   state.on("runs", () => render());

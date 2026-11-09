@@ -93,7 +93,8 @@ button.lab-tree-toggle:hover { color: var(--text); }
 .lab-run-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .lab-run { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: #0b1324; }
 .lab-run.is-a { border-color: var(--accent); background: rgba(56, 189, 248, 0.06); }
-.lab-run.is-b { box-shadow: inset 3px 0 0 #f472b6; }
+/* B ha lo stesso arancione di grafici, istogrammi e pannello Confronto (era rosa: due colori per la stessa cosa) */
+.lab-run.is-b { box-shadow: inset 3px 0 0 var(--an-b, #d95926); }
 .lab-run-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .lab-run-head strong { overflow-wrap: anywhere; }
 .lab-run-facts { margin: 3px 0 6px; font-size: 12px; color: var(--muted); }
@@ -142,6 +143,9 @@ button.lab-tree-toggle:hover { color: var(--text); }
 .lab-tip strong { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; color: #e0f2fe; word-break: break-all; }
 .lab-tip span { color: #cbd5e1; }
 .lab-tip span:last-child { color: #fde68a; font-variant-numeric: tabular-nums; }
+/* La scena del Laboratorio ha celle chiare e numeri fino in fondo: la didascalia del nucleo ha un fondo suo,
+   altrimenti il testo si perde sui colori (fit-content + margin auto la centra tra il left e il right del nucleo). */
+.lab-tab .caption:not(:empty) { width: fit-content; margin-inline: auto; padding: 4px 12px; border-radius: 10px; background: rgba(13, 17, 23, 0.86); }
 .lab-drop-overlay { position: absolute; inset: 12px; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 2px dashed var(--accent); border-radius: 16px; background: rgba(13, 17, 23, 0.82); pointer-events: none; font-size: 15px; }
 .lab-drop-overlay[hidden] { display: none; }
 .lab-drop-overlay span { color: var(--muted); font-size: 13px; }

@@ -40,13 +40,21 @@ gpt/                    il modello, un file per ogni step della lezione
   generation.py         10. generazione token per token (con temperature)
   loss.py               cross-entropy condivisa da bigram e GPT
   weights.py            inventario dei pesi e modifica di un singolo peso
-  export.py             genera webapp/data/model.json dal codice e dal checkpoint
+  export.py             genera webapp/data/model.json dal codice e dal checkpoint; capture_attention
+  recording.py          registra la storia di un training (loss, metriche, snapshot), anche di un'architettura modificata
+  runs.py               run esportabili per il Laboratorio pesi: pesi, storia del training, run.json
+  benchmark.py          benchmark deterministico e confrontabile (protocollo finestre-contigue-v1)
 experiments/            script da proiettare in aula, nell'ordine del video
   01_data_and_tokenization.py … 06_edit_a_weight.py
-tests/                  pytest: forme, maschera causale, loss, generazione, overfitting, bug
+tests/                  pytest: forme, maschera causale, loss, generazione, overfitting, bug, registrazione, run, benchmark
 webapp/                 web app 3D a tab (Three.js, KaTeX, highlight.js inclusi; vedi webapp/ARCHITECTURE.md)
-scripts/serve_webapp.py esporta i dati del modello e avvia la web app
-scripts/record_training.py rifà il training registrandone la storia (webapp/data/training/)
+  js/…                  nuove: core/neuralNet/ (rete neurale), core/brain/ (cervello 3D), shared/weights/ (pesi e run), tabs/lab/ (Laboratorio pesi)
+scripts/
+  serve_webapp.py       esporta i dati del modello e avvia la web app
+  record_training.py    rifà il training registrandone la storia (webapp/data/training/, o una cartella tua)
+  export_run.py         esporta un checkpoint come run da caricare nel Laboratorio pesi (runs/<nome>/)
+  benchmark.py          misura un checkpoint o un run, oppure confronta due benchmark
+  export_benchmark_data.py  rigenera (o controlla) webapp/data/benchmark/
 train.py, generate.py   punti di ingresso
 reference/              notebook ed export originali di Karpathy, non modificati
 ```
@@ -153,8 +161,53 @@ controlla che coincida con il Python. `--not-engine-compatible` serve quando cam
 cambiare le forme (GELU, un'altra attivazione): il motore JS eseguirebbe ReLU e darebbe numeri sbagliati,
 così il Laboratorio mostra i pesi senza eseguirli. I run esportati stanno in `runs/`, che git ignora.
 
+### Un'architettura modificata, dall'idea al confronto
+
+Lo stesso flusso vale per qualunque modifica del codice in `gpt/`: più blocchi, un feed-forward più
+largo, RMSNorm al posto di LayerNorm, un'attention scritta in un altro modo, moduli con nomi nuovi. Per
+esempio 6 blocchi con il feed-forward largo 3·C invece di 4·C:
+
+```bash
+# 1. modifico il codice: in gpt/config.py un campo nuovo, ffn_mult: int = 4, e in gpt/feedforward.py
+#    hidden = config.ffn_mult * config.n_embd (ogni campo di GPTConfig diventa un'opzione dello script)
+
+# 2. registro il training in una cartella mia (le opzioni vengono da GPTConfig e TrainConfig: --help)
+python scripts/record_training.py --n-layer 6 --ffn-mult 3 --threads 1 \
+    --checkpoint checkpoints/sei-blocchi/gpt.pt --out checkpoints/sei-blocchi/training --no-export
+
+# 3. esporto il run con storia e benchmark, misurato dal codice modificato (prima di tornare indietro)
+python scripts/export_run.py checkpoints/sei-blocchi/gpt.pt --name "6 blocchi, FFN 3C" \
+    --trace checkpoints/sei-blocchi/training --benchmark
+
+# 4. carico runs/6-blocchi-ffn-3c nel tab Laboratorio pesi e lo confronto con il GPT del corso;
+#    in terminale: python scripts/benchmark.py webapp/data/benchmark/builtin.json runs/6-blocchi-ffn-3c/benchmark.json
+```
+
+- **La registrazione non si ferma per un nome nuovo** (`gpt/recording.py`). I parametri con i nomi del
+  corso restano nei loro gruppi (`blocks.0.attention`, `blocks.0.ffwd`, `blocks.0.layernorm`, `ln_f`…);
+  un nome nuovo va nel suo modulo: il sotto-modulo del blocco numerato (`blocks.0.norm1.weight` →
+  `blocks.0.norm1`) o, fuori dai blocchi, i primi due livelli del nome (`transformer.wte`), con la stessa
+  regola della web app. I gruppi stanno in `group_params` del trace e alimentano i grafici per gruppo
+  (norma del gradiente, update ratio, deviazione standard dei pesi) e il confronto tensore per tensore.
+- **L'entropia dell'attention per head** viene da ogni modulo che ha il metodo `attention_weights`, come
+  `Head` del corso, ovunque sia nel modello: riceve gli argomenti di `forward` e restituisce le
+  probabilità `(B, T, T)` di una head oppure `(B, H, T, T)` di tutte le head insieme (attention "fusa").
+  Un'attention che non lo espone (per esempio con `F.scaled_dot_product_attention`) salta solo questa
+  metrica: loss train e validation, learning rate, gradienti, update ratio, snapshot dei pesi, testo
+  generato e probabilità sul prompt ci sono sempre.
+- **Le note** spiegano ogni adattamento (gruppi nuovi, attention letta da moduli nuovi o saltata, valori
+  non finiti di un training divergente scritti come `null`): stanno nel campo `notes` di
+  `training/trace.json` e le stampa `record_training.py` alla fine. Il GPT del corso non ne ha: il suo
+  trace è identico a prima.
+- **I dati del corso sono protetti**: se il modello o il training non sono quelli di riferimento e il
+  comando scriverebbe in `webapp/data` o su `checkpoints/gpt.pt`, `record_training.py` si ferma *prima*
+  del training e dice che cosa aggiungere (`--out`, `--checkpoint`, `--no-export`).
+- **Una classe tua, fuori da `gpt/`**: usa `gpt.recording.TrainingRecorder` come callback di
+  `gpt.training.train`; vale per ogni modello con l'interfaccia `logits, loss = model(idx, targets)`.
+
 | Comando | Che cosa fa |
 |---|---|
+| `python scripts/record_training.py [--n-layer N …] [--max-iters N …] [--snapshot-steps 0,50,…] --checkpoint CKPT --out DIR --no-export` | riaddestra registrando la storia in `DIR` (`trace.json` + snapshot) per `export_run.py --trace`; le opzioni del modello e del training sono i campi di `GPTConfig` e `TrainConfig` |
 | `python scripts/export_run.py CKPT --name NOME [--description …] [--note …] [--trace DIR] [--benchmark] [--out DIR] [--force]` | esporta un checkpoint in `runs/<nome>/`; `--force` sostituisce un run esistente cancellando solo i file del run |
 | `python scripts/benchmark.py SORGENTE [--out benchmark.json]` | misura un checkpoint `.pt` o una cartella di run (anche `webapp/data`) |
 | `python scripts/benchmark.py A B` | tabella di confronto A/B in italiano; A e B possono essere anche `benchmark.json` già calcolati |
@@ -183,8 +236,8 @@ Un modello che tira a caso ha loss ln 65 = 4.17 nat: lo snapshot dello step 0 è
 i tensori dello state_dict, quindi esporta anche pesi con nomi o forme che il codice attuale non sa più
 ricostruire. Per *misurarli*, invece, serve il codice che li esegue: lancia `--benchmark` con il codice
 modificato, prima di tornare indietro, e confronta poi i `benchmark.json` (quello del GPT del corso è
-`webapp/data/benchmark/builtin.json`). Se aggiungi moduli con nomi nuovi, `scripts/record_training.py`
-si ferma con un messaggio chiaro: aggiorna `group_of` in `gpt/recording.py`, oppure addestra con `train.py`.
+`webapp/data/benchmark/builtin.json`). La storia del training di un'architettura modificata si registra
+come quella del corso (vedi "Un'architettura modificata, dall'idea al confronto").
 
 **Sicurezza.** I checkpoint si leggono con `torch.load(weights_only=True)`: un file scaricato non può
 eseguire codice. I nomi dei file letti dai JSON (snapshot, binario dei pesi) devono stare accanto al

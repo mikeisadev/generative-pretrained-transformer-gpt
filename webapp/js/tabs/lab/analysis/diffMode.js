@@ -107,11 +107,16 @@ export function createDiffMode({ scene, state, actionRunning = () => false }) {
       reason = actionRunning() ? "action" : "other";
       notify();
     }),
-    // la scena si ricostruisce per un altro run A: i valori e i veli di prima non ci sono più
+    // la scena si ricostruisce per un altro run A: i valori e i veli di prima non ci sono più; e il motivo
+    // dello spegnimento (es. "è partita un'azione") riguardava il run di prima: non va più detto
     state.on("runA", () => {
       mine = new Map();
       veiled = new Set();
       buffers.clear();
+      if (!on && reason) {
+        reason = "";
+        notify();
+      }
     }),
   ];
 
