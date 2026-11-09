@@ -212,6 +212,41 @@
 /* ------------------------------------------------------------------------------------------------
    Architettura completa (full/*.js)
    ------------------------------------------------------------------------------------------------ */
+/* Sei pannelli nella sidebar (uno in più della vista d'insieme): schede un po' più compatte, così stanno
+   su una riga sola (con "Fonti" da sola sulla seconda riga la barra sembrava rotta). */
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(button[data-pane="full-pesi"]:not([hidden])) { gap: 2px; padding-left: 8px; padding-right: 8px; }
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(button[data-pane="full-pesi"]:not([hidden])) button { padding: 6px 8px; font-size: 13px; }
+
+/* 901-1280 px: core.css toglie l'etichetta "Zoom: …" quando lo stage ha una barra strumenti (qui il
+   selettore del modello), ma con "Auto" è l'unico posto che dice il livello attivo. Torna quando lo
+   stage è abbastanza largo da tenerla accanto al selettore del modello (sidebar chiusa, o da 1240 px). */
+@media (min-width: 901px) and (max-width: 1280px) {
+  .tab-root[data-tab="modern-llm"].sidebar-collapsed .lod-switch .lod-title { display: inline; }
+}
+@media (min-width: 1240px) and (max-width: 1280px) {
+  .tab-root.tab[data-tab="modern-llm"] .lod-switch .lod-title { display: inline; }
+}
+
+/* Con i grafici aperti (460 px a destra, sopra lo stage) il selettore del modello finirebbe sotto il
+   pannello: scende nella seconda fila, sotto il pulsante ☰ (come la barra del Transformer). */
+@media (min-width: 901px) {
+  .tab-root[data-tab="modern-llm"]:has(.charts-panel.open) .mllm-toolbar { top: 56px; left: 10px; right: auto; }
+}
+
+/* Vista completa, grafici aperti: il codice è ridotto alla sua intestazione (full/index.js) e, invece di
+   restare tagliato sotto i grafici, sta accanto a loro: si legge quale codice c'è e ▁ lo riapre. */
+@media (min-width: 901px) {
+  .mllm-full:has(.charts-panel.open) > .code-panel.minimized { right: 474px; width: min(340px, 28vw); }
+}
+
+/* «Grafici» si illumina quando un passo o un'azione ha dei grafici ma accanto alla scena non c'era
+   posto per aprirli da soli (full/index.js, openChartsIfRoom). */
+.charts-fab.mllm-charts-hint { border-color: var(--accent); color: #e0f2fe; box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.35); animation: mllm-charts-hint 0.9s ease-in-out 3; }
+@keyframes mllm-charts-hint { 50% { box-shadow: 0 0 0 7px rgba(56, 189, 248, 0.1); } }
+@media (prefers-reduced-motion: reduce) {
+  .charts-fab.mllm-charts-hint { animation: none; }
+}
+
 /* Selettore del modello nella barra strumenti dello stage (posizione: core.css, .stage-toolbar) */
 .mllm-toolbar-label { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid #334155; border-radius: 10px; background: var(--panel); font-size: 12px; color: var(--muted); }
 .mllm-select { font: inherit; font-size: 13px; color: var(--text); background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 4px 6px; max-width: 100%; }

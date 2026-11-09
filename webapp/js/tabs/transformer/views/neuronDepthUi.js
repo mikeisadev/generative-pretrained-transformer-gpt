@@ -14,6 +14,7 @@ import { el, fmt } from "../../../core/dom.js";
 import { LINK_LIMITS } from "../../../core/neuralNet/links.js";
 import { ACTIVATION, AXIS_COLORS, HEAD_COLORS, LINK_COLORS, ROLES } from "../../../core/neuralNet/roles.js";
 import { DEPTH_FRACTIONS } from "./neuronDepthSpec.js";
+import { segmentedSwitch } from "./segmented.js";
 
 /** Le due disposizioni della vista Rete neurale (id usati anche da tab.neuronsView e dall'evento "neurons-layout"). */
 export const ARRANGEMENTS = Object.freeze([
@@ -41,49 +42,18 @@ function icon(id) {
 
 /**
  * Interruttore della disposizione: un radiogroup con due voci (frecce, Home/Fine, tabindex mobile).
- * Spazio e Invio sono della voce: niente pausa del player né passo del Percorso (preventDefault).
+ * Spazio e Invio sono della voce: niente pausa del player né passo del Percorso (vedi segmented.js).
  * @returns {{ element: HTMLElement, set(id: string): void }}
  */
 export function arrangementSwitch({ value, onChange, compact = false }) {
-  const group = el("div", { className: `tf-arrange${compact ? " compact" : ""}`, role: "radiogroup", ariaLabel: "Disposizione della rete neurale" });
-  const buttons = ARRANGEMENTS.map((a) =>
-    el(
-      "button",
-      { type: "button", role: "radio", className: "tf-arrange-option", dataset: { arrangement: a.id }, title: a.title, onclick: () => choose(a.id) },
-      icon(a.id),
-      el("span", { className: "tf-arrange-label" }, a.label),
-      el("span", { className: "tf-arrange-short" }, a.short),
-    ),
-  );
-  group.append(...buttons);
-  const choose = (id, focus = false) => {
-    set(id);
-    if (focus) buttons.find((b) => b.dataset.arrangement === id)?.focus();
-    onChange(id);
-  };
-  group.addEventListener("keydown", (e) => {
-    const i = buttons.indexOf(document.activeElement);
-    if (i < 0) return;
-    const keys = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
-    let next = null;
-    if (e.key in keys) next = (i + keys[e.key] + buttons.length) % buttons.length;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = buttons.length - 1;
-    else if (e.key === " " || e.key === "Enter") next = i;
-    if (next === null) return;
-    e.preventDefault(); // la pagina non scorre, il Percorso non cambia passo, il player non va in pausa
-    choose(buttons[next].dataset.arrangement, true);
+  return segmentedSwitch({
+    options: ARRANGEMENTS.map((a) => ({ ...a, icon: () => icon(a.id) })),
+    value,
+    onChange,
+    compact,
+    ariaLabel: "Disposizione della rete neurale",
+    dataKey: "arrangement",
   });
-  function set(id) {
-    for (const b of buttons) {
-      const on = b.dataset.arrangement === id;
-      b.setAttribute("aria-checked", String(on));
-      b.classList.toggle("active", on);
-      b.tabIndex = on ? 0 : -1;
-    }
-  }
-  set(value);
-  return { element: group, set };
 }
 
 /**

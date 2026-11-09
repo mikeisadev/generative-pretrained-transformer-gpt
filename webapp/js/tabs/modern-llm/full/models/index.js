@@ -2,7 +2,8 @@
  * Registro dei modelli della vista "Architettura LLM moderni completa" (SOLI DATI).
  *
  * Ogni modulo di modello esporta un oggetto con questi campi (tutti dati, nessuna funzione):
- *   id, name, short, checkpoint, org, role, released, license, repo, repoUrl, headline, why
+ *   id, name, short, version (es. "checkpoint 1017": accanto al nome), org, role, released, license, repo,
+ *   repoUrl, headline, why
  *   config        campi del config usati dalla vista (con il nome originale nei commenti)
  *   layers        { base, kinds: stringa con un carattere per layer, flags: {nome: {layers, label}},
  *                   segments: [{id, label, sub, from, to, color}] }  (from/to: numeri di layer)

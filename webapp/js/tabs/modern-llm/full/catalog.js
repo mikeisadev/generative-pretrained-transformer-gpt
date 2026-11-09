@@ -95,13 +95,14 @@ export const FULL_LEVELS = [
 
 /**
  * Pezzi dell'architettura con una vista propria (view:full-<id>): `anchor` è l'ancora della scena
- * (full/model.js, anchorsOf); se il modello scelto non ha quel pezzo la vista lo dice.
+ * (full/model.js, anchorsOf), `also` altre ancore da inquadrare insieme (i pesi con la scheda «Dove
+ * sono i pesi»); se il modello scelto non ha quel pezzo la vista lo dice.
  */
 export const FULL_SECTIONS = [
   { id: "full-data", anchor: "macro:data", title: "Dati e pre-training", keywords: ["dati", "corpus", "token", "pre-training"] },
   { id: "full-context", anchor: "macro:context", title: "Estensione del contesto", keywords: ["contesto lungo", "YaRN", "1M", "long context"] },
   { id: "full-post", anchor: "macro:post", title: "Post-training: SFT, RL, distillazione", keywords: ["SFT", "RL", "GRPO", "OPD", "distillazione"] },
-  { id: "full-weights", anchor: "macro:weights", title: "I pesi: il checkpoint", keywords: ["checkpoint", "safetensors", "shard", "pesi", "precisione"] },
+  { id: "full-weights", anchor: "macro:weights", also: ["macro:weights-share"], title: "I pesi: il checkpoint", keywords: ["checkpoint", "safetensors", "shard", "pesi", "precisione", "dove sono i pesi"] },
   { id: "full-deploy", anchor: "macro:deploy", title: "Deployment", keywords: ["deployment", "expert parallel", "EPLB", "prefill", "decode", "GPU"] },
   { id: "full-capabilities", anchor: "macro:capabilities", title: "Come emergono le capacità", keywords: ["capacità", "emergenza", "scaling", "induction head", "grokking"] },
   { id: "full-tokenizer", anchor: "blocks:tokenizer", title: "Tokenizer", keywords: ["tokenizer", "BPE", "token speciali", "DSML", "think"] },

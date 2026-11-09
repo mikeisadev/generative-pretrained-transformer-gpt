@@ -19,7 +19,8 @@ export class DataFlow {
     this.length = path.getLength();
     this.stations = [...stations].sort((a, b) => a.distance - b.distance);
     this.onStation = onStation;
-    this.playing = true;
+    this._playing = true;
+    this.listeners = new Set();
     this.distance = 0;
     this.pause = 0;
     this.current = null;
@@ -35,6 +36,27 @@ export class DataFlow {
     this.packet.add(new THREE.PointLight(COLORS.flow, 4, 4));
     scene.add(this.packet);
     this.moveTo(0);
+  }
+
+  /**
+   * Il giro automatico del pacchetto è in corso? Lo cambiano il pulsante "Flusso", le viste che lo
+   * nascondono e le azioni che prendono il pacchetto: chi mostra lo stato (il pulsante) lo sa da onChange.
+   */
+  get playing() {
+    return this._playing;
+  }
+
+  set playing(value) {
+    const playing = Boolean(value);
+    if (playing === this._playing) return;
+    this._playing = playing;
+    for (const fn of this.listeners) fn(playing);
+  }
+
+  /** fn(playing) a ogni cambio; restituisce la funzione che smette di ascoltare. */
+  onChange(fn) {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
   }
 
   toggle() {

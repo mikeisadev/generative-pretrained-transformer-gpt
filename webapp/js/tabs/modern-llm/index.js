@@ -71,7 +71,7 @@ import { RegionCompass } from "./regionCompass.js";
 import { gridBox, nearestRegionAt, REGION_BY_ID, REGION_H, REGION_W, REGIONS, ROWS, regionBox, regionCenter, regionShell, STEP_X, STEP_Y } from "./regions.js";
 import { installSceneClick } from "./sceneClick.js";
 import { Snippets } from "./snippets.js";
-import { createSubtabs } from "./subtabs.js";
+import { createSubtabs, RESET_TITLE } from "./subtabs.js";
 
 const BUILDERS = {
   compare: buildCompare,
@@ -118,6 +118,8 @@ const MIN_ZOOM_DISTANCE = 6;
  * alla scena ma sopra (grafici a tutto schermo, codice in basso).
  */
 const NARROW = window.matchMedia("(max-width: 899px)");
+/** Sidebar a cassetto sopra la scena (stessa soglia di core/layout.js e core.css). */
+const DRAWER = window.matchMedia("(max-width: 900px)");
 /** Confini della navigazione libera: la griglia dei meccanismi, oppure il diagramma della Panoramica. */
 const GRID_BOX = gridBox();
 const MACRO_BOX = macroBox();
@@ -337,6 +339,9 @@ export async function createTab(root, app) {
     },
   });
 
+  // i due Percorsi condividono i progressi del tab: "Azzera" li azzera entrambi, e lo dice
+  if (tab.menu.resetButton) tab.menu.resetButton.title = RESET_TITLE;
+
   const views = buildViews(tab, frameWhole);
   paneViews.append(renderViews(tab, views));
   paneModels.append(renderModels(model));
@@ -354,6 +359,14 @@ export async function createTab(root, app) {
   ui.player.on("state", () => {
     const id = ui.player.action?.id ?? null;
     root.querySelectorAll(".mllm-actions .action-card").forEach((c) => c.classList.toggle("active", c.dataset.action === id));
+  });
+  // Sul telefono la sidebar è un cassetto sopra la scena: un'azione avviata dal suo elenco (o con
+  // "Avvia l'animazione" in un passo) partiva dietro il cassetto. Alla partenza di un'azione si chiude.
+  let lastRun = null;
+  ui.player.on("state", () => {
+    const run = ui.player.action ? ui.player.run : null;
+    if (run !== null && run !== lastRun && DRAWER.matches) sidebar.toggleCollapsed(true);
+    lastRun = run;
   });
 
   // --- "Dove sei": etichetta della regione più vicina mentre lo studente passeggia
@@ -424,6 +437,10 @@ export async function createTab(root, app) {
   const capturePose = () => ({ position: host.camera.position.clone(), target: host.controls.target.clone() });
   const restorePose = (p) => {
     director.cancel();
+    // Le OrbitControls tagliano la distanza a maxDistance a ogni frame, e il limite della navigazione è
+    // ancora quello dell'altro sottotab (si ricalcola più tardi): un volo di 0,01 s finisce prima che la
+    // navigazione lo allarghi, e la camera ricordata tornava più vicina (es. 450 invece di 1.900).
+    host.controls.maxDistance = Math.max(host.controls.maxDistance, 1.01 * p.position.distanceTo(p.target));
     return director.flyTo(p.position, p.target, 0.01);
   };
 
@@ -480,6 +497,7 @@ export async function createTab(root, app) {
       compass.setEnabled(true);
     }
     subtab = id;
+    root.classList.toggle("mllm-full", id === "full"); // regole CSS solo della vista completa
     swapPanes(id);
     swapCharts(id);
     nav.setBounds(navBounds); // confini da ricalcolare: il contenuto è cambiato

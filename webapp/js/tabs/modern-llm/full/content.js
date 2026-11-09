@@ -6,6 +6,7 @@
  * Campi dei sottopunti del percorso (letti da full/index.js; nomi diversi da quelli della vista
  * d'insieme, così i test di quella restano validi):
  *   anchor  ancora della scena da inquadrare (full/model.js, anchorsOf)   layer  layer del Dettaglio
+ *   also    altre ancore da inquadrare insieme a `anchor` (es. la scheda «Dove sono i pesi»)
  *   play    id dell'azione animata (full/catalog.js)                       code   chiave di full/snippets.js
  *   charts  id della sezione di grafici
  * Il percorso segue il modello principale: scegliendo un passo con un altro modello attivo si torna a lui.
@@ -64,6 +65,7 @@ export const FULL_PATH = [
         id: "full-weights",
         title: "I pesi: 510 GB, 96.085 tensori",
         anchor: "macro:weights",
+        also: ["macro:weights-share"],
         code: "names",
         charts: "full-pesi",
         text: `<p>Il risultato del training è un file: il <strong>checkpoint</strong>, 510,3 GB in formato <em>safetensors</em> (8 byte con la lunghezza dell'intestazione, un JSON con nome, forma e posizione di ogni tensore, poi i numeri grezzi: niente codice eseguibile). Dentro ci sono 96.085 tensori; il numero di file (48 shard) <em>non è verificato</em>.</p>

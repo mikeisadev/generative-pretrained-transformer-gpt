@@ -130,6 +130,21 @@ const views = [
     text: "Lo zoom più vicino: i blocchi interni del denoiser, il latente, il passo t, il VAE (o il cubo del video se stai guardando la parte video).",
     keywords: ["dettaglio", "detail", "zoom in", "da vicino", "componenti", "blocchi interni"],
   },
+  // Rappresentazioni del nucleo (core/representations.js: REP_LINKS), stessi id in ogni tab
+  {
+    id: "rete",
+    kind: "view",
+    title: "Rete neurale (Immagini e video)",
+    text: "Stable Diffusion disegnata neurone per neurone, da sinistra a destra: text encoder CLIP con l'attention causale tra i token, U-Net con la griglia del latente in profondità (convoluzioni tra vicini, downsample e upsample, skip connection, self-attention e cross-attention verso il testo, passo t diffuso a ogni blocco), scheduler e decoder del VAE fino ai pixel; in fondo un blocco video con attention spaziale e temporale.",
+    keywords: ["rete neurale", "neural network", "neuroni", "rappresentazione", "U-Net", "convoluzione", "convolution", "griglia del latente", "canali", "skip connection", "cross-attention", "self-attention", "attention causale", "CLIP", "text encoder", "downsampling", "upsampling", "passo t", "timestep embedding", "broadcast", "VAE decoder", "attention temporale", "attention spaziale", "profondità", "spessore", "3D"],
+  },
+  {
+    id: "cervello",
+    kind: "view",
+    title: "Cervello (Immagini e video)",
+    text: "Le analogie tra la diffusione e la via visiva del cervello, ognuna con cosa hanno in comune, dove non regge e le fonti: dalla retina al talamo, a V1, V2/V4 e alla corteccia inferotemporale; il modello 3D con le regioni, la radiazione ottica e il microcircuito di neuroni.",
+    keywords: ["cervello", "brain", "neuroscienze", "analogie", "via visiva", "corteccia visiva", "V1", "V4", "corteccia inferotemporale", "IT", "retina", "fotorecettori", "cellule gangliari", "talamo", "genicolato laterale", "LGN", "radiazione ottica", "area MT", "movimento", "codifica predittiva", "immaginazione", "sogno", "concept cells", "Hubel e Wiesel", "Neocognitron", "fMRI", "Takagi"],
+  },
 ];
 
 export const searchIndex = [...steps, ...actions, ...views];

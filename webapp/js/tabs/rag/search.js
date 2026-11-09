@@ -87,4 +87,33 @@ const views = [
   },
 ];
 
-export const searchIndex = [...steps, ...actions, ...views];
+/**
+ * Le rappresentazioni del nucleo (selettore "Architettura · Rete neurale · Cervello"): stessi id di
+ * REP_LINKS in core/representations.js, aperti da goto con reps.goto.
+ */
+const representations = [
+  {
+    id: "rete",
+    kind: "view",
+    title: "Rete neurale (Database vettoriale (RAG))",
+    text: "La pipeline del RAG come rete, da sinistra a destra: il nostro embedder (feature, hashing con il segno, normalizzazione L2) e la ricerca nel database con i chunk in profondità (confronto con la domanda, similarità del coseno, top-k e soglia), con i numeri veri della domanda; poi, illustrativi, un encoder neurale con l'attention bidirezionale e il mean pooling e un LLM con l'attention causale che legge il prompt aumentato.",
+    keywords: [
+      "neural network", "neuroni", "rete orizzontale", "profondità", "feature hashing", "trucco dell'hashing", "tf-idf",
+      "normalizzazione L2", "prodotto scalare", "cosine similarity", "top-k", "soglia", "encoder", "E5", "multilingual-e5-small",
+      "BERT", "attention bidirezionale", "mean pooling", "decoder", "attention causale", "Llama 3", "prompt aumentato",
+    ],
+  },
+  {
+    id: "cervello",
+    kind: "view",
+    title: "Cervello (Database vettoriale (RAG))",
+    text: "Il RAG e la memoria del cervello: sistemi di apprendimento complementari (ippocampo veloce, neocorteccia lenta), teoria dell'indice ippocampale, completamento di pattern in CA3, separazione nel giro dentato, con dove l'analogia non regge e le fonti; il circuito trisinaptico dell'ippocampo in 3D.",
+    keywords: [
+      "brain", "neuroscienze", "memoria", "ippocampo", "hippocampus", "corteccia entorinale", "via perforante", "giro dentato",
+      "CA3", "CA1", "subiculum", "circuito trisinaptico", "neocorteccia", "concept cells", "pattern completion", "Hopfield",
+      "prefrontale", "confabulazione", "analogie",
+    ],
+  },
+];
+
+export const searchIndex = [...steps, ...actions, ...views, ...representations];

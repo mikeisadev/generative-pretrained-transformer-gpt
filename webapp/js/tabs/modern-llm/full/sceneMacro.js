@@ -12,6 +12,7 @@ import * as THREE from "three";
 import { glow } from "../shapes.js";
 import { MACRO_NOTES, UNVERIFIED_LABEL } from "./content.js";
 import { arrow, bigBlock, flatBox, rectBox, textPlate } from "./draw.js";
+import { bigPrecisions, MACRO_WEIGHTS } from "./layout.js";
 import { formatCount, formatGB, formatShare } from "./model.js";
 import { label } from "../../../core/visuals.js";
 
@@ -53,13 +54,15 @@ export function buildMacro(group, model, layout, totals) {
     }
   });
 
-  // barra dei byte per precisione sotto la fase dei pesi (segmenti proporzionali ai GB)
+  // barra dei byte per precisione sotto la fase dei pesi (segmenti proporzionali ai GB); misure e
+  // ingombro della colonna in layout.js (MACRO_WEIGHTS), che tiene le schede di sintesi più in basso
   const precisionBars = [];
   const weights = layout.stages.find((s) => s.id === "weights");
   if (weights && model.precision?.length) {
+    const W = MACRO_WEIGHTS;
     const total = model.precision.reduce((a, p) => a + p.gb, 0);
-    const barY = weights.y - weights.h / 2 - 9 * k - ((model.pipeline.find((s) => s.id === "weights")?.unverified?.length ?? 0) * 11.5 * k);
-    const barH = 8 * k;
+    const barY = weights.y - weights.h / 2 - W.barGap * k - (model.pipeline.find((s) => s.id === "weights")?.unverified?.length ?? 0) * W.doubtStep * k;
+    const barH = W.barH * k;
     let x = weights.x - weights.w / 2;
     for (const p of model.precision) {
       const w = (p.gb / total) * weights.w;
@@ -67,15 +70,19 @@ export function buildMacro(group, model, layout, totals) {
       precisionBars.push({ mesh, x0: x, w });
       x += w;
     }
-    const big = model.precision.filter((p) => p.gb / total > 0.12);
+    const big = bigPrecisions(model);
     const legend = textPlate({
       w: weights.w,
-      h: 8 * k + big.length * 6.4 * k,
+      h: W.legendHead * k + big.length * W.legendLine * k,
       size: 4.6 * k,
       lines: [{ text: `${formatGB(total)}${model.precision.some((p) => p.estimate) ? " (stima)" : ""} per precisione:`, color: "#e2e8f0", bold: true }, ...big.map((p) => ({ text: `${p.dtype} · ${p.what}: ${formatGB(p.gb)}`, color: DTYPE_COLORS[p.dtype] }))],
     });
-    legend.place(group, weights.x, barY - barH / 2 - legend.opts.h / 2 - 1.5 * k, 0.4);
-    anchors.set("macro:weights", rectBox({ x: weights.x, y: (weights.y + weights.h / 2 + barY - barH) / 2, w: weights.w, h: weights.h / 2 + weights.y - barY + barH + 14 * k }, 4 * k));
+    const legendY = barY - barH / 2 - legend.opts.h / 2 - W.legendGap * k;
+    legend.place(group, weights.x, legendY, 0.4);
+    // l'ancora comprende la legenda: inquadrare «I pesi» la fa leggere (prima restava tagliata)
+    const top = weights.y + weights.h / 2;
+    const bottom = legendY - legend.opts.h / 2;
+    anchors.set("macro:weights", rectBox({ x: weights.x, y: (top + bottom) / 2, w: weights.w, h: top - bottom }, 4 * k));
   }
 
   // schede di sintesi in basso

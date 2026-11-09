@@ -142,7 +142,7 @@ export function renderModels({ onModel }) {
           return el(
             "article",
             { className: `mllm-model${active ? " active" : ""}` },
-            el("h3", {}, m.name, m.checkpoint ? el("span", { className: "muted" }, ` · ${m.checkpoint}`) : null),
+            el("h3", {}, m.name, m.version ? el("span", { className: "muted" }, ` · ${m.version}`) : null),
             el("p", { className: "hint" }, `${m.org} · ${m.role}`),
             el("p", { className: "mllm-why" }, m.why),
             el("table", {}, el("tbody", {}, ...rows.map(([k, v]) => el("tr", {}, el("th", {}, k), el("td", {}, v))))),

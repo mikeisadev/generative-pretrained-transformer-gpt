@@ -13,7 +13,7 @@ export const KIMI_K31_PRO = {
   id: "kimi-k3.1-pro",
   name: "Kimi K3.1 Pro",
   short: "Kimi K3.1 Pro",
-  checkpoint: "backbone K3",
+  version: "backbone K3", // versione mostrata accanto al nome (il blocco `checkpoint` più sotto è il file)
   org: "Moonshot AI",
   role: "Alternativo: attention lineare ibrida",
   released: "K3: API 16/07/2026, pesi 26-27/07/2026; K3.1 Pro: API 23/10/2026, pesi tra il 02 e il 04/11/2026 (fonti discordi)",

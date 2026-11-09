@@ -149,8 +149,12 @@ export function buildBlocks(group, model, strip, layout) {
     batch.lines.rect(rect, c.color, 0.2);
     // il testo sta all'inizio della barra (una barra srotolata è lunga centinaia di unità) o, se la
     // barra è più corta del testo, subito dopo la sua fine (layout.js ha già contato l'ingombro)
-    const plate = textPlate({ w: r.labelW, h: r.h - 0.6, size: 3.4, align: "left", lines: [{ text: `${c.title}  ·  ${c.sub}`, color: c.color, bold: true }] });
-    plate.place(group, r.labelX0 + r.labelW / 2, rect.y, 0.4);
+    // un'etichetta fuori dalla barra ha uno sfondo scuro davanti alle frecce (il tubo di raggio 0,35 a
+    // z 0,4 con la punta più larga arriva a z 1,3): una freccia che passa di lì (in Kimi quella verso il
+    // Draft MTP) le scorre dietro invece di attraversare il testo
+    const outside = r.labelX0 >= r.x1;
+    const plate = textPlate({ w: r.labelW, h: r.h - 0.6, size: 3.4, align: "left", lines: [{ text: `${c.title}  ·  ${c.sub}`, color: c.color, bold: true }], background: outside ? "rgba(13, 17, 23, 0.92)" : null });
+    plate.place(group, r.labelX0 + r.labelW / 2, rect.y, outside ? 1.4 : 0.4);
     segments(group, r.ticks.map((x) => [x, r.y + r.h / 2, x, -STRIP.blockH / 2]), { color: c.color, z: -0.3, opacity: 0.45 });
     // l'ancora comprende l'etichetta: il segnaposto del meccanismo va dopo, e inquadrare la cache la fa leggere
     anchors.set(`blocks:cache-${c.id}`, rectBox({ x: (r.x0 + r.labelEnd) / 2, y: r.y, w: r.labelEnd - r.x0, h: r.h }, 3));

@@ -17,6 +17,8 @@ import { el } from "../../core/dom.js";
 
 /** Tasto che passa all'altro sottotab (fuori da navigazione, Percorso e player: vedi navMath.js). */
 export const SUBTAB_KEY = "KeyV";
+/** Tooltip di "Azzera" nei due Percorsi: i passi visti sono del tab (stesso tabId), non del sottotab. */
+export const RESET_TITLE = "Azzera i passi visti di tutto il tab: vista d'insieme e architettura completa";
 const TEXT_TARGETS = "input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog'], dialog";
 
 /**
@@ -67,7 +69,9 @@ export function createSubtabs({ root, items, current, onSelect, isBlocked = () =
 
   const context = el("div", { className: "mllm-subtabs-context", ariaLive: "polite" });
   const element = el("div", { className: "mllm-subtabs" }, tablist, context);
-  root.append(element);
+  // Primo nel DOM (la posizione la decide il CSS): con il tasto Tab, dopo la barra dei tab si arriva qui
+  // e poi alla sidebar e alla scena. In fondo alla radice del tab servivano più di 40 pressioni.
+  root.prepend(element);
   root.classList.add("mllm-has-subtabs");
 
   let selected = null;

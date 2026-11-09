@@ -133,6 +133,26 @@ export function stripLayout(strip, model) {
 // ------------------------------------------------------------------------------------------------
 
 export const MACRO = { stageW: 112, stageH: 120, step: 134, noteY: -128, noteH: 76, titleY: 96 };
+/** Misure (a scala 1) della colonna sotto la fase dei pesi: le usa anche sceneMacro.js per disegnarla. */
+export const MACRO_WEIGHTS = { doubtStep: 11.5, barGap: 9, barH: 8, legendGap: 1.5, legendHead: 8, legendLine: 6.4, bigShare: 0.12 };
+const MACRO_GAP = 6;
+
+/** Precisioni abbastanza grandi da avere una riga nella legenda sotto la barra dei byte. */
+export function bigPrecisions(model) {
+  const total = (model.precision ?? []).reduce((a, p) => a + p.gb, 0);
+  return (model.precision ?? []).filter((p) => p.gb / total > MACRO_WEIGHTS.bigShare);
+}
+
+/**
+ * Quanto scende (a scala 1, dal centro delle fasi) la colonna sotto la fase dei pesi: metà fase,
+ * pillole "da verificare", barra dei byte per precisione e la sua legenda.
+ */
+export function macroWeightsColumn(model) {
+  const W = MACRO_WEIGHTS;
+  const doubts = model.pipeline.find((s) => s.id === "weights")?.unverified?.length ?? 0;
+  if (!model.precision?.length) return MACRO.stageH / 2 + doubts * W.doubtStep;
+  return MACRO.stageH / 2 + W.barGap + doubts * W.doubtStep + W.barH / 2 + W.legendGap + W.legendHead + bigPrecisions(model).length * W.legendLine;
+}
 
 /**
  * La pipeline da sinistra a destra, con la fase "weights" in x = 0. `scale` ingrandisce tutto (testi
@@ -146,7 +166,10 @@ export function macroLayout(model, scale = 1) {
   const first = stages[0];
   const last = stages.at(-1);
   const split = stages[Math.min(stages.length - 1, Math.max(0, center - 1))];
-  const noteY = M.noteY * scale;
+  // Le schede di sintesi stanno sotto la colonna dei pesi (pillole, barra dei byte, legenda: sceneMacro.js):
+  // con due pillole o tre righe di legenda la legenda finiva sopra la scheda «Dove sono i pesi».
+  const legendBottom = -macroWeightsColumn(model) - MACRO_GAP;
+  const noteY = Math.min(M.noteY, legendBottom - M.noteH / 2) * scale;
   const capabilities = { x: (first.x - first.w / 2 + split.x + split.w / 2) / 2, y: noteY, w: split.x + split.w / 2 - (first.x - first.w / 2), h: M.noteH * scale };
   const weightsShare = { x: (stages[center].x - stages[center].w / 2 + last.x + last.w / 2) / 2, y: noteY, w: last.x + last.w / 2 - (stages[center].x - stages[center].w / 2), h: M.noteH * scale };
   const minX = first.x - first.w / 2 - 8 * scale;

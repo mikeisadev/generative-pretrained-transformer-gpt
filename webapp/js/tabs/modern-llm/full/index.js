@@ -16,10 +16,11 @@
  *   full.focusMechanism(regionId); full.setModel(id); full.model; full.dispose();
  */
 import * as THREE from "three";
-import { el, sleep } from "../../../core/dom.js";
+import { el, prefersReducedMotion, sleep } from "../../../core/dom.js";
 import { LODController, setGroupOpacity } from "../../../core/lod.js";
 import { Menu } from "../../../core/ui/menu.js";
 import { installSceneClick } from "../sceneClick.js";
+import { RESET_TITLE } from "../subtabs.js";
 import { fullActions } from "./actions.js";
 import { FULL_ACTION_IDS, FULL_CATEGORIES, FULL_LEVELS, FULL_SECTIONS, MARKER_LABELS } from "./catalog.js";
 import { FULL_PATH } from "./content.js";
@@ -48,11 +49,21 @@ const MARKER_H = { macro: 16, blocks: 7, detail: 2.7 };
 /** Lo zoom apre il Dettaglio del layer sotto il punto guardato solo subito dopo un gesto dello studente. */
 const USER_INPUT_WINDOW_MS = 1500;
 const NARROW = window.matchMedia("(max-width: 899px)");
+/** Pannello dei grafici (css/charts.css) e scena che deve restare accanto perché si aprano da soli. */
+const CHARTS_WIDTH = 460;
+const MIN_SCENE_BESIDE_CHARTS = 700;
+const CHARTS_HINT_MS = 2600;
+/** Scena libera sotto la quale il codice di un passo parte ridotto (solo intestazione). */
+const MIN_SCENE_BESIDE_CODE = 600;
+/** Telefono: stage più stretto di così (larghezza/altezza visibili) e larghezza mostrata alla soglia del Dettaglio. */
+const PHONE_ASPECT = 0.85;
+const PHONE_DETAIL_SPAN = 140;
+const PHONE_HINT = "Pizzica con due dita per leggere i blocchi; tocca un layer per aprirne il Dettaglio.";
 /** Pane della sidebar della vista completa (id univoci nel tab). */
 export const FULL_PANES = [
   { id: "full-percorso", title: "Percorso" },
   { id: "full-azioni", title: "Azioni", hint: "Animazioni passo per passo sul modello scelto. Le scelte degli esperti sono simulate (non sono pubbliche): le didascalie lo dicono." },
-  { id: "full-viste", title: "Viste", hint: "Livelli dello zoom, pezzi dell'architettura, il layer del Dettaglio, le ripetizioni e i 16 meccanismi." },
+  { id: "full-viste", title: "Viste", hint: "Livelli dello zoom, ripetizioni «× N», il layer del Dettaglio, i pezzi dell'architettura e i 16 meccanismi." },
   { id: "full-modelli", title: "Modelli", hint: "I tre modelli aperti della vista e il panorama degli open-weight, con la marcatura di verifica." },
   { id: "full-pesi", title: "Pesi", hint: "Dove sono i parametri, in quali precisioni e con quali nomi di tensore." },
   { id: "full-fonti", title: "Fonti", hint: "Come sono stati ottenuti i numeri, fonti e ciò che resta da verificare." },
@@ -95,7 +106,8 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
     widgetParent: stage,
     // (active per primo: il costruttore chiama onChange quando `lod` non esiste ancora)
     onChange: (id) => active && id === "detail" && lod.mode === "auto" && followTargetLayer(),
-    onPick: (mode) => mode !== "auto" && flyToLevel(mode),
+    // come nella vista d'insieme: il livello scelto dallo studente resta bloccato ("Auto" lo sblocca)
+    onPick: (mode) => mode !== "auto" && flyToLevel(mode, { lock: true }),
   });
   lod.setEnabled(false);
   for (const g of Object.values(roots)) g.visible = false;
@@ -114,6 +126,7 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
     })),
   }));
   const menu = new Menu(panes["full-percorso"], steps, { tabId: "modern-llm", onSelect: (item) => !silentSelect && selectStep(item) });
+  if (menu.resetButton) menu.resetButton.title = RESET_TITLE;
 
   // Azioni
   const fx = createActionContext();
@@ -159,7 +172,11 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
 
   // ultimo gesto di navigazione dello studente (rotellina, trascinamento, tasti, pad)
   let lastUserInput = -Infinity;
-  const offInput = nav.on("input", (source) => source !== "home" && (lastUserInput = performance.now()));
+  const offInput = nav.on("input", (source) => {
+    if (source !== "home") lastUserInput = performance.now();
+    // il suggerimento del telefono sparisce al primo gesto: ha già fatto il suo lavoro
+    if (active && ui.caption.textContent === PHONE_HINT) tab.setCaption("");
+  });
 
   // --- interazione con la scena
   const canvas = host.renderer.domElement;
@@ -171,14 +188,20 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
     lastHover = e;
     hoverFrame = requestAnimationFrame(() => {
       hoverFrame = 0;
-      updateHover(lastHover);
+      // il clic su un segnaposto può aver appena spento il sottotab (si passa alla vista d'insieme):
+      // il raggio non guarda la visibilità, quindi il suggerimento ricomparirebbe sopra l'altra scena
+      if (active) updateHover(lastHover);
     });
   };
   const onLeave = () => hideTip();
   canvas.addEventListener("pointermove", onMove);
   canvas.addEventListener("pointerleave", onLeave);
   const offResize = host.onResize(() => active && updateThresholds());
-  ui.charts.onResize(() => active && updateThresholds());
+  ui.charts.onResize(() => {
+    if (!active) return;
+    syncCodeWithCharts();
+    updateThresholds();
+  });
 
   // =============================================================================================
 
@@ -314,9 +337,18 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
     // l'anatomia vera: con il ramo Engram (layer 1 e 14) è più larga, e il suo volo finirebbe oltre la
     // soglia (meno l'isteresi dell'8% di core/lod.js), restando nei Blocchi
     const aw = anatomy ? Math.max(ANATOMY_SIZE.w, anatomy.box.maxX - anatomy.box.minX) : ANATOMY_SIZE.w;
-    const detail = 1.3 * fitDistance(aw, ANATOMY_SIZE.h);
+    let detail = 1.3 * fitDistance(aw, ANATOMY_SIZE.h);
+    // Telefono in verticale: l'anatomia (200 unità) entra intera già a una distanza a cui i titoli dei
+    // Blocchi sono di 8 px, e pizzicando si passava al Dettaglio prima di poterli leggere. Qui la soglia
+    // è la distanza che mostra circa 4 blocchi; i voli verso l'anatomia bloccano il Dettaglio (focusAnchor).
+    if (phoneStage()) detail = Math.min(detail, fitDistance(PHONE_DETAIL_SPAN, 0));
     const blocks = Math.max(detail * 1.5, Math.sqrt(1.05 * fitDistance(s.maxX - s.minX, s.maxY - s.minY) * 1.05 * fitDistance(m.maxX - m.minX, m.maxY - m.minY)));
     return { detail, blocks };
+  }
+
+  /** Stage stretto e verticale (telefono): la scena è molto più alta che larga. */
+  function phoneStage() {
+    return NARROW.matches && host.visibleAspect() < PHONE_ASPECT;
   }
 
   /** Box3 di un'ancora (livello:pezzo) in coordinate di scena, o null se il modello non ce l'ha. */
@@ -331,37 +363,65 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
    * Inquadra un'ancora al suo livello: la distanza minima tiene lo zoom automatico sul livello
    * giusto (un blocco piccolo inquadrato da vicino finirebbe nel Dettaglio). `pad`: spazio in basso
    * per la barra del player; `wide`: un pezzo dell'anatomia con il suo intorno; `with`: blocchi in più.
+   * Se il livello dell'ancora è quello bloccato nel selettore (dallo studente o da un'azione sulla
+   * Panoramica) resta bloccato e la camera può avvicinarsi quanto serve per leggere: senza blocco la
+   * Panoramica da vicino lascerebbe il posto ai Blocchi. `keepMode`: blocca comunque (scelta di un livello).
    */
-  async function focusAnchor(anchor, { layer = null, pad = false, wide = false, with: extra = [], duration = 1.1, margin = 1.05 } = {}) {
+  async function focusAnchor(anchor, { layer = null, pad = false, wide = false, with: extra = [], also = [], duration = 1.1, margin = 1.05, keepMode = false } = {}) {
     const [level] = anchor.split(":");
+    let keep = keepMode || lod.mode === level;
+    // sul telefono la soglia del Dettaglio è più vicina dell'anatomia intera (thresholds): il volo blocca
+    // il livello, altrimenti atterrerebbe nei Blocchi (il selettore mostra «Dettaglio», «Auto» lo sblocca)
+    if (!keep && level === "detail" && phoneStage()) {
+      lod.setMode("detail");
+      keep = true;
+    }
+    // un pezzo della Panoramica (una fase, i pesi, le capacità) si legge solo da vicino, dove lo zoom
+    // automatico mostrerebbe i Blocchi: la Panoramica resta bloccata (vale per passi, viste, segnaposto)
+    if (!keep && level === "macro" && anchor !== "macro:all") {
+      lod.setMode("macro");
+      keep = true;
+    }
     if (level === "detail") selectLayer(layer ?? layerForAnchor(model, anchor, selectedLayer), { fly: false });
     const box = anchorBox(anchor);
     if (!box) return false;
     for (const i of extra) if (i >= 0 && blocksScene.blockBoxes[i]) box.union(blocksScene.blockBoxes[i]);
+    for (const a of also) {
+      const other = anchorBox(a);
+      if (other) box.union(other);
+    }
     // un pezzo piccolo del Dettaglio si guarda con il suo intorno (mai una scheda a tutto schermo)
     const minHalf = wide ? { x: 56, y: 34 } : level === "detail" && anchor !== "detail:layer" ? { x: 48, y: 30 } : null;
     if (minHalf) {
       const c = box.getCenter(new THREE.Vector3());
       box.expandByPoint(new THREE.Vector3(c.x - minHalf.x, c.y - minHalf.y, 0)).expandByPoint(new THREE.Vector3(c.x + minHalf.x, c.y + minHalf.y, 0));
     }
+    // una fase della Panoramica vista da vicino: si vedono anche le frecce verso le fasi accanto
+    if (keep && level === "macro" && model.pipeline.some((s) => anchor === `macro:${s.id}`)) box.expandByVector(new THREE.Vector3(macroL.stages[0].w * 0.4, 0, 0));
     const height = box.max.y - box.min.y;
     if (pad) box.min.y -= height * (NARROW.matches ? 0.5 : 0.32);
     box.max.y += height * 0.06; // spazio per il selettore dello zoom in alto
-    if (lod.mode !== "auto") lod.setMode("auto");
-    const t = thresholds();
-    const minDistance = level === "macro" ? t.blocks * 1.1 : level === "blocks" ? t.detail * 1.12 : 6;
+    if (!keep && lod.mode !== "auto") lod.setMode("auto");
     hideTip();
     await sleep(30);
     await tab.codePending;
+    // le soglie dipendono dalla scena libera: si calcolano dopo che il codice chiesto insieme è aperto
+    // (o ridotto, vedi showSnippet), altrimenti un passo dei Blocchi poteva atterrare nella Panoramica
+    const t = thresholds();
+    const minDistance = keep ? 6 : level === "macro" ? t.blocks * 1.1 : level === "blocks" ? t.detail * 1.12 : 6;
     await director.focus(box, { showFrame: false, margin, direction: FRONT, minDistance, duration });
     return true;
   }
 
-  /** Scelta di un livello (selettore dello zoom o pannello Viste): inquadra tutto il livello. */
+  /**
+   * Scelta di un livello (selettore dello zoom, pannello Viste, link diretti): inquadra tutto il livello
+   * e, con `lock`, lo blocca subito (il selettore lo mostra durante tutto il volo, non solo alla fine).
+   */
   function flyToLevel(level, { lock = false } = {}) {
-    if (level === "detail") return focusAnchor("detail:layer");
+    if (lock) lod.setMode(level);
+    if (level === "detail") return focusAnchor("detail:layer", { keepMode: lock });
     const anchor = level === "macro" ? "macro:all" : "blocks:all";
-    return focusAnchor(anchor, { margin: level === "macro" ? 1.05 : 1.14 }).then(() => lock && lod.setMode(level));
+    return focusAnchor(anchor, { keepMode: lock, margin: level === "macro" ? 1.05 : 1.14 });
   }
 
   function focusSection(section) {
@@ -369,7 +429,7 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
       tab.setCaption(`${section.title}: ${model.name} non ha questo pezzo.`);
       return Promise.resolve(false);
     }
-    return focusAnchor(section.anchor, { layer: section.layer ?? null });
+    return focusAnchor(section.anchor, { layer: section.layer ?? null, also: section.also ?? [] });
   }
 
   /** Cambia il layer del Dettaglio (pannello Viste, clic su un blocco, ancore del percorso). */
@@ -401,20 +461,21 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
 
   function toggleExpandAll() {
     expanded = expanded.size ? new Set() : new Set(strip.groups.map((g) => g.id));
-    afterStripChange("Ripetizioni srotolate: ogni layer ha il suo blocco." , "Ripetizioni compresse in blocchi «× N».");
+    afterStripChange(expanded.size > 0 ? "Ripetizioni srotolate: ogni layer ha il suo blocco." : "Ripetizioni compresse in blocchi «× N».");
   }
 
   function toggleGroup(id) {
-    if (expanded.has(id)) expanded.delete(id);
-    else expanded.add(id);
-    afterStripChange("Gruppo srotolato nei layer veri.", "Gruppo compresso in «× N».");
+    // la didascalia parla del gruppo cliccato: altri gruppi possono restare srotolati
+    const opening = !expanded.has(id);
+    if (opening) expanded.add(id);
+    else expanded.delete(id);
+    afterStripChange(opening ? "Gruppo srotolato nei layer veri: clic sulla sua etichetta per comprimerlo di nuovo." : "Gruppo compresso in «× N».");
   }
 
-  function afterStripChange(onText, offText) {
-    const wasExpanded = expanded.size > 0;
+  function afterStripChange(text) {
     ui.player.stop();
     rebuild();
-    tab.setCaption(wasExpanded ? onText : offText);
+    tab.setCaption(text);
     focusAnchor("blocks:layers");
   }
 
@@ -463,6 +524,17 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
     const sprites = Object.values(markers).flat().filter((s) => s.userData.mechanism === regionId);
     if (!sprites.length) return;
     const base = sprites.map((s) => s.scale.clone());
+    if (prefersReducedMotion()) {
+      // niente movimento: il segnaposto resta un po' più grande per lo stesso tempo, senza pulsare
+      sprites.forEach((s, i) => s.scale.copy(base[i]).multiplyScalar(1.25));
+      const timer = setTimeout(() => stopPulse?.(), 1600);
+      stopPulse = () => {
+        clearTimeout(timer);
+        sprites.forEach((s, i) => s.scale.copy(base[i]));
+        stopPulse = null;
+      };
+      return;
+    }
     let t = 0;
     const off = host.onFrame((dt) => {
       t += dt;
@@ -485,15 +557,75 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
     } else tab.setCaption("");
     if (item.code) showSnippet(item.code);
     else tab.hideCode();
-    if (item.charts) tab.openCharts(item.charts);
-    if (item.anchor) focusAnchor(item.anchor, { layer: item.layer ?? null, wide: item.anchor.startsWith("detail:") && item.anchor !== "detail:layer" });
+    if (item.charts) openChartsIfRoom(item.charts);
+    if (item.anchor) focusAnchor(item.anchor, { layer: item.layer ?? null, also: item.also ?? [], wide: item.anchor.startsWith("detail:") && item.anchor !== "detail:layer" });
   }
+
+  /**
+   * Grafici chiesti da un passo o da un'azione: si aprono da soli solo se accanto resta abbastanza
+   * scena (l'architettura è una striscia larga: a 1280 px con la sidebar aperta resterebbero 440 px).
+   * Altrimenti il pulsante «Grafici» si illumina per qualche secondo: sono lì quando li vuoi.
+   */
+  function openChartsIfRoom(sectionId) {
+    if (ui.charts.isOpen || (!NARROW.matches && stage.clientWidth - CHARTS_WIDTH >= MIN_SCENE_BESIDE_CHARTS)) {
+      tab.openCharts(sectionId);
+      return;
+    }
+    const fab = ui.charts.button;
+    clearTimeout(chartsHintTimer);
+    fab.classList.remove("mllm-charts-hint");
+    void fab.offsetWidth; // l'animazione riparte anche se era già accesa
+    fab.classList.add("mllm-charts-hint");
+    fab.title = "Questo passo ha dei grafici: aprili qui";
+    chartsHintTimer = setTimeout(() => {
+      fab.classList.remove("mllm-charts-hint");
+      fab.removeAttribute("title");
+    }, CHARTS_HINT_MS);
+  }
+  let chartsHintTimer = 0;
 
   function showSnippet(key) {
     const s = FULL_SNIPPETS[key];
-    if (s) tab.showCode(s);
-    else tab.hideCode();
+    if (!s) return tab.hideCode();
+    const request = tab.showCode(s);
+    request.then(() => {
+      if (request !== tab.codePending || NARROW.matches) return;
+      const panel = ui.codePanel.root;
+      if (panel.hidden) return;
+      // sotto i grafici aperti il codice sarebbe una striscia tagliata: resta ridotto finché si chiudono
+      if (ui.charts.isOpen) return minimizeCodeForCharts();
+      // Accanto alla striscia larga dell'architettura, con meno di ~600 px di scena libera (1280 px con la
+      // sidebar aperta: ne restavano 350) il codice parte ridotto alla sua intestazione, come sul telefono:
+      // il titolo dice cosa c'è, ▁ lo espande. Se lo studente l'ha espanso a mano, resta espanso.
+      if (!codeExpandedByUser && stage.clientWidth - panel.offsetWidth - 14 < MIN_SCENE_BESIDE_CODE) panel.classList.add("minimized");
+    });
   }
+
+  /**
+   * Grafici e codice stanno entrambi a destra, i grafici sopra: del codice restava visibile una striscia
+   * di 100 px con il titolo tagliato, che in più toglieva quello spazio alla scena. Con i grafici aperti
+   * il codice si riduce alla sua intestazione (nascosta sotto i grafici) e alla chiusura torna com'era.
+   */
+  let codeMinimizedForCharts = false;
+  function minimizeCodeForCharts() {
+    const panel = ui.codePanel.root;
+    if (panel.hidden || panel.classList.contains("minimized")) return;
+    panel.classList.add("minimized");
+    codeMinimizedForCharts = true;
+  }
+  function syncCodeWithCharts() {
+    if (NARROW.matches) return;
+    if (ui.charts.isOpen) minimizeCodeForCharts();
+    else if (codeMinimizedForCharts) {
+      codeMinimizedForCharts = false;
+      if (!ui.codePanel.root.hidden && !ui.codePanel.userMinimized) ui.codePanel.root.classList.remove("minimized");
+    }
+  }
+  /** Lo studente ha espanso il codice con ▁: la sua scelta vale per i frammenti seguenti. */
+  let codeExpandedByUser = false;
+  const codeToggle = ui.codePanel.root.querySelector("header button");
+  const onCodeToggle = () => (codeExpandedByUser = !ui.codePanel.root.classList.contains("minimized"));
+  codeToggle?.addEventListener("click", onCodeToggle);
 
   // --- clic e passaggio del mouse -----------------------------------------------------------------
   function visibleMarkers() {
@@ -594,9 +726,13 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
       },
       anatomy: () => anatomy,
       prepare(level, { charts = null } = {}) {
-        if (lod.mode !== "auto") lod.setMode("auto");
+        // La Panoramica si legge solo da vicino, dove lo zoom automatico mostrerebbe già i Blocchi: le
+        // azioni sulla Panoramica la bloccano (il selettore lo mostra; "Auto" o un passo la sbloccano).
+        lod.setMode(level === "macro" ? "macro" : "auto");
+        tab.hideCode(); // il codice lasciato aperto dall'azione di prima non c'entra con questa
+        tab.setCaption(""); // l'azione ha la sua didascalia nella barra del player
         director.hideFrame();
-        if (charts) tab.openCharts(charts);
+        if (charts) openChartsIfRoom(charts);
       },
       rest() {
         blocksScene?.highlight(null);
@@ -621,7 +757,7 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
       setLayer: (n) => selectLayer(n),
       ensurePrimary: () => (model.id === PRIMARY_MODEL_ID ? Promise.resolve() : setModel(PRIMARY_MODEL_ID, { fly: false, stopAction: false })),
       showCode: (key) => (key ? showSnippet(key) : tab.hideCode()),
-      openCharts: (id) => tab.openCharts(id),
+      openCharts: (id) => openChartsIfRoom(id),
       segmentBlocks(id) {
         const s = strip.segments.find((x) => x.id === id);
         if (!s || s.from === undefined) return [];
@@ -674,12 +810,16 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
         silentSelect = true; // il primo passo conta come visto, ma la camera va sull'architettura intera
         menu.select("full-intro", { scroll: false });
         silentSelect = false;
+        // sul telefono la striscia intera è piccola: la prima volta si dice come avvicinarsi
+        if (phoneStage()) tab.setCaption(PHONE_HINT);
       }
     },
     /** Spegne il sottotab: niente LOD né gruppi, pannelli nascosti, camera come prima. */
     deactivate() {
       active = false;
       stopPulse?.();
+      if (hoverFrame) cancelAnimationFrame(hoverFrame);
+      hoverFrame = 0;
       hideTip();
       canvas.style.cursor = "";
       lod.setEnabled(false);
@@ -750,6 +890,8 @@ export function createFullArchitecture({ ui, tab, regions, onMarker, onModelChan
     chartSections: FULL_CHART_SECTIONS,
     dispose() {
       this.deactivate();
+      clearTimeout(chartsHintTimer);
+      codeToggle?.removeEventListener("click", onCodeToggle);
       offClick();
       offResize();
       offInput();

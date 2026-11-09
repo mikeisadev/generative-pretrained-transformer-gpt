@@ -17,7 +17,7 @@ export const DEEPSEEK_V41_FLASH = {
   id: "deepseek-v4.1-flash",
   name: "DeepSeek-V4.1-Flash",
   short: "V4.1-Flash",
-  checkpoint: "1017",
+  version: "checkpoint 1017", // versione dei pesi mostrata accanto al nome (il blocco `checkpoint` più sotto è il file)
   org: "DeepSeek-AI",
   role: "Modello principale",
   released: "lancio 9-10/09/2026 (checkpoint 0909), refresh DeepSeek-V4.1-Flash-1017 del 17/10/2026",

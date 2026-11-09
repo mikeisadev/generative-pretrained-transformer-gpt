@@ -103,6 +103,7 @@ export function buildAnatomy(model, layer, segmentName = "") {
   const railTop = L.rails.y[0];
   const railBottom = L.rails.y.at(-1);
   anchors.set("detail:residual", { x: 0, y: (railTop + railBottom) / 2, w: L.rails.x1 - L.rails.x0, h: railTop - railBottom + 6 });
+  precisionLegend(group, precisionsUsed(model, layer, L), L.rails.x1 - 0.5, railTop + 2.4);
 
   // nodi di ingresso e uscita delle due metà (pre-mix, norm, post-mix)
   const n = L.nodes;
@@ -280,6 +281,38 @@ export function buildAnatomy(model, layer, segmentName = "") {
       title.set([{ text, color: "#f8fafc", bold: true }]);
     },
   };
+}
+
+/**
+ * Precisioni dei pesi che compaiono nell'anatomia di questo layer, nell'ordine di DTYPE_COLORS: le
+ * schede (con le varianti per tipo di layer), i nodi del residuo e della norm, la griglia degli esperti.
+ */
+function precisionsUsed(model, layer, L) {
+  const a = model.anatomy;
+  const used = new Set();
+  const add = (dtype) => dtype && used.add(dtype.split(" ")[0]);
+  for (const spec of anatomyCards(model)) if (L.cards.has(spec.id)) add({ ...spec, ...(spec.alt?.[layer.kind] ?? {}) }.dtype);
+  add(a.norm.dtype);
+  if (L.nodes.preA) add(a.residual.dtype);
+  if (L.grid) add(a.ffn.grid.dtype);
+  return Object.keys(DTYPE_COLORS).filter((d) => used.has(d));
+}
+
+/**
+ * Legenda in alto a destra: l'ultima riga di ogni scheda (il tensore) ha il colore della sua precisione,
+ * gli stessi colori della Panoramica, dei grafici e del pannello «Pesi». Pannelli piccoli affiancati
+ * da destra (un pannello di testo ha un solo colore per riga).
+ */
+function precisionLegend(group, dtypes, xRight, y) {
+  if (!dtypes.length) return;
+  const size = 1.8;
+  const items = [{ text: "colore del tensore = precisione:", color: "#94a3b8" }, ...dtypes.map((d) => ({ text: d, color: DTYPE_COLORS[d], bold: true }))];
+  let x = xRight;
+  for (const item of items.reverse()) {
+    const w = item.text.length * size * 0.6 + 1;
+    textPlate({ w, h: 3.2, size, align: "right", lines: [item] }).place(group, x - w / 2, y, 0.3);
+    x -= w + 0.4;
+  }
 }
 
 /** Firma di un layer per l'anatomia: due layer con la stessa firma si disegnano uguali. */

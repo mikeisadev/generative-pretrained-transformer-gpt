@@ -12,7 +12,7 @@ export const GPT_OSS_120B = {
   id: "gpt-oss-120b",
   name: "gpt-oss-120b",
   short: "gpt-oss-120b",
-  checkpoint: "",
+  version: "", // versione mostrata accanto al nome (il blocco `checkpoint` più sotto è il file)
   org: "OpenAI",
   role: "Alternativo: la scelta classica",
   released: "05/08/2025",
