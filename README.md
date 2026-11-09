@@ -191,17 +191,25 @@ python scripts/export_run.py checkpoints/sei-blocchi/gpt.pt --name "6 blocchi, F
   (norma del gradiente, update ratio, deviazione standard dei pesi) e il confronto tensore per tensore.
 - **L'entropia dell'attention per head** viene da ogni modulo che ha il metodo `attention_weights`, come
   `Head` del corso, ovunque sia nel modello: riceve gli argomenti di `forward` e restituisce le
-  probabilità `(B, T, T)` di una head oppure `(B, H, T, T)` di tutte le head insieme (attention "fusa").
-  Un'attention che non lo espone (per esempio con `F.scaled_dot_product_attention`) salta solo questa
-  metrica: loss train e validation, learning rate, gradienti, update ratio, snapshot dei pesi, testo
-  generato e probabilità sul prompt ci sono sempre.
-- **Le note** spiegano ogni adattamento (gruppi nuovi, attention letta da moduli nuovi o saltata, valori
-  non finiti di un training divergente scritti come `null`): stanno nel campo `notes` di
-  `training/trace.json` e le stampa `record_training.py` alla fine. Il GPT del corso non ne ha: il suo
-  trace è identico a prima.
+  probabilità `(B, T, T)` di una head oppure `(B, H, T, T)` di tutte le head insieme (attention "fusa"),
+  con il batch come prima dimensione (un `(B·H, T, T)` si segnala e si salta: si scrive
+  `weights.view(B, H, T, T)`). Un blocco riusato in più strati (pesi condivisi, come ALBERT) dà una riga
+  per passaggio. Un'attention che non espone il metodo (per esempio con `F.scaled_dot_product_attention`)
+  salta solo questa metrica: loss train e validation, learning rate, gradienti, update ratio, snapshot
+  dei pesi, testo generato e probabilità sul prompt ci sono sempre.
+- **Le note** spiegano ogni adattamento (gruppi nuovi, pesi condivisi come il weight tying tra embedding
+  e `lm_head`, attention letta da moduli nuovi o saltata, valori non finiti di un training divergente
+  scritti come `null`): stanno nel campo `notes` di `training/trace.json` e le stampa
+  `record_training.py` alla fine. Il GPT del corso non ne ha: il suo trace è identico a prima.
 - **I dati del corso sono protetti**: se il modello o il training non sono quelli di riferimento e il
   comando scriverebbe in `webapp/data` o su `checkpoints/gpt.pt`, `record_training.py` si ferma *prima*
-  del training e dice che cosa aggiungere (`--out`, `--checkpoint`, `--no-export`).
+  del training e dice che cosa aggiungere (`--out`, `--checkpoint`, `--no-export`). "Di riferimento"
+  vuol dire stessi tensori registrati (anche un buffer persistente in più conta), nessun peso condiviso,
+  stessa config, stesso training e stesso codice dei moduli: l'impronta di `gpt/model.py`, `gpt/block.py`,
+  `gpt/attention.py` e `gpt/feedforward.py` si confronta con quella di `webapp/data/benchmark/builtin.json`,
+  così si riconosce anche GELU al posto di ReLU, che non cambia nomi e forme dei pesi (chi cambia
+  davvero il GPT del corso usa `--update-webapp`). Prima del training lo script controlla anche che
+  `--out` e `--checkpoint` si possano scrivere, per non perdere i minuti di calcolo.
 - **Una classe tua, fuori da `gpt/`**: usa `gpt.recording.TrainingRecorder` come callback di
   `gpt.training.train`; vale per ogni modello con l'interfaccia `logits, loss = model(idx, targets)`.
 
