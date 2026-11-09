@@ -12,6 +12,7 @@ import { ACTIVATION, AXIS_COLORS, HEAD_COLORS, LINK_COLORS, PATTERNS, ROLES } fr
 
 const NARROW = "(max-width: 640px)";
 const COMPACT_STAGE = 980; // px di stage sotto i quali la scheda parte ridotta
+const NARROW_MAX_VH = 0.52; // altezza massima della scheda sul telefono: la stessa di neuralnet.css (52vh)
 const SPEEDS = [
   { value: 0.5, label: "0,5×" },
   { value: 1, label: "1×" },
@@ -28,6 +29,9 @@ function patternSwatch(pattern) {
   return LINK_COLORS.structural;
 }
 
+/** Area di un rettangolo {x0, y0, x1, y1} (0 se vuoto). */
+const area = (r) => Math.max(0, r.x1 - r.x0) * Math.max(0, r.y1 - r.y0);
+
 const paragraphs = (text, className = "nn-text") => (text ? text.split(/\n{2,}/).map((p) => el("p", { className }, p)) : []);
 
 export class NetworkCard {
@@ -41,7 +45,9 @@ export class NetworkCard {
     this.on = on;
     this.narrow = window.matchMedia(NARROW);
     this.root = el("section", { className: "nn-card", ariaLabel: "Rete neurale: comandi, legenda e dettagli" });
-    layer.append(this.root);
+    // prima di canvas e pad nell'ordine del DOM: con Tab dal selettore si arriva subito ai comandi della
+    // vista (▶ Anima, spessore, fetta…), non ai 13 pulsanti del pad (la posizione la decide il CSS)
+    layer.prepend(this.root);
     this.onNarrow = () => this.setCollapsed(this.narrow.matches);
     this.narrow.addEventListener("change", this.onNarrow);
     if (model) this.build(model);
@@ -284,21 +290,40 @@ export class NetworkCard {
   }
 
   /**
-   * Parte dello stage libera dalla scheda, in pixel dello stage: la camera inquadra lì la rete.
-   * Desktop: a destra della scheda; telefono: sotto la scheda.
+   * Parti dello stage libere dalla scheda, in pixel dello stage: a destra della scheda e sotto. La
+   * camera inquadra la rete in quella dove viene più grande (view.js le prova tutte e due): una rete
+   * lunga e bassa sta meglio sotto una scheda ridotta, larga quanto lo stage, che in una colonna a destra.
    */
-  freeRect(stage) {
+  freeRects(stage) {
     const W = stage.clientWidth;
     const H = stage.clientHeight;
     const s = stage.getBoundingClientRect();
     const c = this.root.getBoundingClientRect();
     const free = { x0: 12, y0: 52, x1: W - 12, y1: H - 52 };
-    if (!c.width || this.root.hidden) return free;
-    // a destra della scheda o sotto: vince la parte più grande (scheda ridotta = bassa = meglio sotto)
-    const right = { ...free, x0: Math.min(W * 0.62, c.right - s.left + 14) };
-    const below = { ...free, y0: Math.min(H * 0.62, c.bottom - s.top + 8) };
-    const area = (r) => Math.max(0, r.x1 - r.x0) * Math.max(0, r.y1 - r.y0);
-    return area(below) >= area(right) ? below : right;
+    if (!c.width || this.root.hidden) return [free];
+    const rightX = c.right - s.left + 14;
+    let belowY = c.bottom - s.top + 8;
+    let belowLimit = 0.62;
+    if (this.narrow.matches) {
+      // telefono: la scheda ridotta cresce fino al suo max-height quando un tocco apre un dettaglio; la
+      // rete (una striscia bassa) si inquadra sotto quel limite, così il dettaglio non la nasconde
+      const top = c.top - s.top;
+      const maxH = Math.min(NARROW_MAX_VH * window.innerHeight, H - top - 12);
+      belowY = Math.max(belowY, top + maxH + 8);
+      belowLimit = 0.72;
+    }
+    const right = { ...free, x0: Math.min(W * 0.62, rightX) };
+    const below = { ...free, y0: Math.min(H * belowLimit, belowY) };
+    // una parte tagliata al 62% dello stage passa sopra la scheda (scheda alta: "sotto" non esiste;
+    // scheda larga quanto lo stage: "a destra" non esiste): vale solo se nessun'altra è libera
+    const clear = [rightX <= W * 0.62 ? right : null, belowY <= H * belowLimit ? below : null].filter(Boolean);
+    if (clear.length) return clear;
+    return [area(below) >= area(right) ? below : right];
+  }
+
+  /** La più grande delle parti libere (per chi non sa la forma di ciò che inquadra). */
+  freeRect(stage) {
+    return this.freeRects(stage).reduce((best, r) => (area(r) >= area(best) ? r : best)); // a pari area, sotto
   }
 
   dispose() {

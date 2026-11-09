@@ -4,7 +4,7 @@
  *   const model = buildNetworkModel(networkSpec);            // model.js (puro)
  *   const net = new NetworkScene(model);
  *   host.scene.add(net.root);
- *   net.update(camera, width, height, pixelRatio);           // SOLO quando la camera è cambiata: LOD ed etichette
+ *   net.update(camera, width, height, pixelRatio, obstacles?); // SOLO quando la camera è cambiata: LOD ed etichette
  *   net.setSlice(3); net.setEmphasis(["attn"]); net.setDensity(0.4); net.setWave(x | null);
  *   const u = net.pick(clientX, clientY, camera, canvasRect); net.describe(u);
  *   net.setSectionValues("attn", float32);                   // valori veri aggiornati (es. un altro prompt)
@@ -32,6 +32,7 @@ const MAX_SLICE_LABELS = 48; // nomi delle posizioni scritti per lato, al più
 const MAX_POINT_PX = 20; // diametro massimo di un neurone sullo schermo (pixel CSS): oltre costa e copre gli archi
 const DIMMED = 70; // enfasi (0…255) delle sezioni non scelte
 const EMPHASIS_LINKS = 0.45; // opacità dei collegamenti dritti mentre una sezione è scelta
+const DIMMED_LABEL = 0.4; // opacità dei titoli delle sezioni non scelte
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -123,26 +124,28 @@ export class NetworkScene {
   buildLabels() {
     const { net, layout } = this.model;
     const labels = new LabelLayer();
+    this.sectionLabels = [];
     for (const s of net.sections) {
       const box = layout.sections[s.index];
       const front = s.depth.count > 1 ? box.z1 + box.dz / 2 : 0;
-      labels.add({
+      this.sectionLabels[s.index] = labels.add({
         text: s.label,
         sub: s.sub || sizeText(s),
         chip: s.color,
         position: [(box.x0 + box.x1) / 2, box.yTop + box.dy / 2 + 0.3, front],
         world: 0.36,
-        px: [11, 16],
+        px: [14, 20],
         priority: 2,
+        nudge: 1,
         ref: { kind: "section", id: s.id },
       });
     }
     for (const r of layout.repeats) {
       const rep = net.repeats[r.index];
       const sub = rep.label.replace(/^×\s*[\d.]+\s*/, "");
-      labels.add({ text: `× ${rep.count.toLocaleString("it-IT")}`, sub, big: true, position: [(r.x0 + r.x1) / 2, r.yTop + 0.45, r.z1 + 0.2], world: 0.62, px: [17, 28], priority: 0, ref: { kind: "repeat", id: r.id } });
+      labels.add({ text: `× ${rep.count.toLocaleString("it-IT")}`, sub, big: true, position: [(r.x0 + r.x1) / 2, r.yTop + 0.45, r.z1 + 0.2], world: 0.62, px: [19, 30], priority: 0, ref: { kind: "repeat", id: r.id } });
     }
-    for (const g of layout.groups) labels.add({ text: g.label, position: [(g.x0 + g.x1) / 2, g.y + 0.12, 0], world: 0.4, px: [12, 17], priority: 1, ref: { kind: "group", index: g.index } });
+    for (const g of layout.groups) labels.add({ text: g.label, position: [(g.x0 + g.x1) / 2, g.y + 0.12, 0], world: 0.4, px: [15, 21], priority: 1, nudge: 2, ref: { kind: "group", index: g.index } });
     // nomi delle posizioni in profondità, ai due lati della rete: dal davanti (vince quando si sovrappongono,
     // di lato); con centinaia di posizioni se ne scrive una ogni `step` (la scheda le elenca tutte)
     const { min, max } = layout.bounds;
@@ -155,15 +158,15 @@ export class NetworkScene {
         continue;
       }
       const z = this.sliceZ(t);
-      const left = labels.add({ text: names[t], position: [min[0] - 0.7, 0, z], anchor: [1, 0.5], world: 0.27, px: [10, 13], priority: 3, ref: { kind: "slice", index: t }, color: "#a5f3fc" });
-      const right = labels.add({ text: names[t], position: [max[0] + 0.7, 0, z], anchor: [0, 0.5], world: 0.27, px: [10, 13], priority: 3, ref: { kind: "slice", index: t }, color: "#a5f3fc" });
+      const left = labels.add({ text: names[t], position: [min[0] - 0.7, 0, z], anchor: [1, 0.5], world: 0.27, px: [12.5, 16], priority: 3, ref: { kind: "slice", index: t }, color: "#a5f3fc" });
+      const right = labels.add({ text: names[t], position: [max[0] + 0.7, 0, z], anchor: [0, 0.5], world: 0.27, px: [12.5, 16], priority: 3, ref: { kind: "slice", index: t }, color: "#a5f3fc" });
       this.sliceLabels[t] = [left, right];
     }
     // assi: etichette corte (il testo intero è nella legenda della scheda)
     const tips = this.axes.tips;
-    labels.add({ text: "x · flusso", position: tips.x.toArray(), anchor: [0, 0.5], world: 0.26, px: [10, 13], priority: 1, color: "#e2e8f0" });
-    labels.add({ text: `y · ${shortAxis(net.axes.y)}`, position: tips.y.toArray(), anchor: [0, 0], world: 0.26, px: [10, 13], priority: 1, color: "#cbd5e1" });
-    if (net.slices.count > 1) labels.add({ text: `z · ${shortAxis(net.axes.z)}`, position: tips.z.toArray(), anchor: [0, 1], world: 0.26, px: [10, 13], priority: 1, color: "#a5f3fc" });
+    labels.add({ text: "x · flusso", position: tips.x.toArray(), anchor: [0, 0.5], world: 0.26, px: [12.5, 16], priority: 1, color: "#e2e8f0" });
+    labels.add({ text: `y · ${shortAxis(net.axes.y)}`, position: tips.y.toArray(), anchor: [0, 0], world: 0.26, px: [12.5, 16], priority: 1, color: "#cbd5e1" });
+    if (net.slices.count > 1) labels.add({ text: `z · ${shortAxis(net.axes.z)}`, position: tips.z.toArray(), anchor: [0, 1], world: 0.26, px: [12.5, 16], priority: 1, color: "#a5f3fc" });
     labels.build();
     return labels;
   }
@@ -264,6 +267,9 @@ export class NetworkScene {
     // (attention, residui) sono il meccanismo da guardare
     this.links.material.uniforms.uOpacity.value = this.linkOpacity * (this.emphasis ? EMPHASIS_LINKS : 1);
     this.selection.visible = Boolean(this.emphasis);
+    // i titoli delle altre sezioni si attenuano (da vicino passerebbero sopra i neuroni della scelta)
+    if (this.labels) for (let s = 0; s < net.sections.length; s++) this.labels.setDim(this.sectionLabels[s], !this.emphasis || this.emphasis.has(s) ? 1 : DIMMED_LABEL);
+    this.needsUpdate = true; // le etichette si ricalcolano al prossimo frame anche a camera ferma
     if (this.emphasis) {
       const min = [Infinity, Infinity, Infinity];
       const max = [-Infinity, -Infinity, -Infinity];
@@ -281,8 +287,10 @@ export class NetworkScene {
   /**
    * Da chiamare quando la camera (o la dimensione dello stage) è cambiata: LOD per sezione, scala dei
    * punti, etichette. Costa ~0,1 ms per 60 sezioni; non va chiamata a ogni frame a riposo.
+   * `obstacles`: rettangoli [x0, y0, x1, y1] dello stage coperti da pannelli DOM (scheda, pad…), che le
+   * etichette lasciano liberi (facoltativo).
    */
-  update(camera, width, height, pixelRatio = 1) {
+  update(camera, width, height, pixelRatio = 1, obstacles = null) {
     const { net, layout } = this.model;
     const { inv, cam } = this.tmp;
     this.root.updateWorldMatrix(true, false);
@@ -317,7 +325,7 @@ export class NetworkScene {
       this.pickRadius[s] = points > 0.5 ? 1.6 * layout.sections[s].radius : 0.55 * this.spacing[s];
     }
     if (changed) this.state.needsUpdate = true;
-    this.labels?.update(camera, width, height, this.root);
+    this.labels?.update(camera, width, height, this.root, obstacles);
     this.pickDirty = true;
   }
 

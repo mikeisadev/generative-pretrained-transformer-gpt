@@ -132,6 +132,12 @@ export function createNetworkView(ctx) {
     nav.setOrbitLimits({ turn: 85, tilt: 82, minDistance: 0.5 });
     frameNetwork("side", { immediate: true });
     disposers.push(host.onFrame(tick));
+    // la scheda che si apre o si riduce (e il pad) cambia lo spazio libero per le etichette anche a camera ferma
+    const relabel = new ResizeObserver(() => scene && (scene.needsUpdate = true));
+    relabel.observe(card.root);
+    const pad = layer.querySelector(":scope > .nav-pad");
+    if (pad) relabel.observe(pad);
+    disposers.push(() => relabel.disconnect());
     bindPointer();
   })();
 
@@ -140,15 +146,13 @@ export function createNetworkView(ctx) {
    * Inquadra un insieme di punti dalla direzione `dir`, dentro la parte dello stage non coperta dalla
    * scheda: i punti si proiettano sulla base della camera (destra, su, profondità); si sceglie la
    * distanza che li fa entrare e si sposta il punto guardato perché il loro centro cada nel centro
-   * della parte libera.
+   * della parte libera. Delle parti libere (a destra della scheda, sotto) si usa quella dove i punti
+   * vengono più grandi: conta la forma, non solo l'area (una rete lunga e bassa sta meglio sotto).
    */
   function framePoints(points, dir, { duration = 1.1, immediate = false, margin = 1.08 } = {}) {
     if (!points.length) return Promise.resolve();
     const W = Math.max(1, host.container.clientWidth);
     const H = Math.max(1, host.container.clientHeight);
-    const free = card?.freeRect(host.container) ?? { x0: 0, y0: 0, x1: W, y1: H };
-    const fw = Math.max(80, free.x1 - free.x0);
-    const fh = Math.max(80, free.y1 - free.y0);
     const d = new THREE.Vector3(...dir).normalize();
     const upWorld = Math.abs(d.y) > 0.98 ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(upWorld, d).normalize();
@@ -169,7 +173,17 @@ export function createNetworkView(ctx) {
     const halfD = (hi[2] - lo[2]) / 2;
     const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
     const tanH = tanV * (W / H);
-    const distance = Math.max(2, Math.max(halfU / (tanV * (fh / H)), halfR / (tanH * (fw / W))) * margin + halfD);
+    let free = null;
+    let distance = Infinity;
+    for (const r of card?.freeRects(host.container) ?? [{ x0: 0, y0: 0, x1: W, y1: H }]) {
+      const fw = Math.max(80, r.x1 - r.x0);
+      const fh = Math.max(80, r.y1 - r.y0);
+      const dr = Math.max(2, Math.max(halfU / (tanV * (fh / H)), halfR / (tanH * (fw / W))) * margin + halfD);
+      if (dr < distance - 1e-6) {
+        distance = dr;
+        free = r;
+      }
+    }
     const cx = ((free.x0 + free.x1) / 2 / W) * 2 - 1;
     const cy = 1 - ((free.y0 + free.y1) / 2 / H) * 2;
     const target = center.clone().addScaledVector(right, -cx * distance * tanH).addScaledVector(up, -cy * distance * tanV);
@@ -218,7 +232,7 @@ export function createNetworkView(ctx) {
     if (state.playing) advanceWave(t0);
     if (cameraChanged()) {
       const t1 = performance.now();
-      scene.update(camera, host.container.clientWidth, host.container.clientHeight, host.renderer.getPixelRatio());
+      scene.update(camera, host.container.clientWidth, host.container.clientHeight, host.renderer.getPixelRatio(), coveredRects());
       stats.updateMs = ema(stats.updateMs, performance.now() - t1);
       stats.updates++;
     }
@@ -251,6 +265,26 @@ export function createNetworkView(ctx) {
     if (lastCamera[i] === value) return false;
     lastCamera[i] = value;
     return true;
+  }
+
+  /**
+   * Rettangoli dello stage coperti da comandi DOM sopra il canvas: la scheda, il pad e i chip della
+   * navigazione del livello, ☰ e il selettore delle rappresentazioni. Le etichette 3D li evitano (un
+   * titolo mezzo nascosto sotto la scheda non si legge e toglie il posto a un altro). Letti solo quando
+   * la camera o lo stage cambiano, non a ogni frame.
+   */
+  function coveredRects() {
+    const box = host.container.getBoundingClientRect();
+    const rects = [];
+    const add = (node) => {
+      if (!node || node.hidden) return;
+      const r = node.getBoundingClientRect();
+      if (r.width >= 1 && r.height >= 1) rects.push([r.left - box.left, r.top - box.top, r.right - box.left, r.bottom - box.top]);
+    };
+    add(card?.root);
+    for (const node of layer.querySelectorAll(":scope > .nav-pad, :scope > .nav-hud > :not([hidden])")) add(node);
+    for (const node of layer.parentElement?.querySelectorAll(":scope > .rep-switch, :scope > .sidebar-toggle") ?? []) add(node);
+    return rects;
   }
 
   // ---------------------------------------------------------------- onda di attivazione

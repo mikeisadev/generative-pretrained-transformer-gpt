@@ -15,6 +15,7 @@ import { ACTIVATION_KINDS, PATTERN_IDS, ROLE_IDS, ROLES } from "./roles.js";
 /** Limiti di sicurezza: oltre, la scena diventerebbe inutilizzabile (o il browser si fermerebbe). */
 export const LIMITS = Object.freeze({
   sections: 400,
+  links: 4096, // l'indice del collegamento di ogni segmento sta in 16 bit (links.js): molto sopra ogni rete vera
   neurons: 4096, // per fetta di profondità (per una griglia: canali)
   slabs: 256,
   depth: 1024, // posizioni in profondità di una sezione
@@ -171,7 +172,8 @@ export function normalizeSpec(raw) {
   // ------------------------------------------------------------ collegamenti
   const links = [];
   if (raw.links !== undefined && !Array.isArray(raw.links)) fail("links", "deve essere un elenco");
-  (Array.isArray(raw.links) ? raw.links : []).forEach((entry, i) => {
+  else if (Array.isArray(raw.links) && raw.links.length > LIMITS.links) fail("links", `al massimo ${LIMITS.links} voci (trovate ${raw.links.length})`);
+  (Array.isArray(raw.links) && raw.links.length <= LIMITS.links ? raw.links : []).forEach((entry, i) => {
     const link = parseLink(entry, `links[${i}]`, problems, byId);
     if (link) {
       link.index = links.length;

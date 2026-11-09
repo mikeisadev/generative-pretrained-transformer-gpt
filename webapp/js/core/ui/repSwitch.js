@@ -358,7 +358,12 @@ export class RepSwitch {
     const schedule = () => this.scheduleLayout();
     const resize = new ResizeObserver(schedule);
     const attrs = new MutationObserver((records) => {
-      for (const r of records) if (r.type === "childList") r.addedNodes.forEach((n) => observe(n));
+      for (const r of records) {
+        if (r.type !== "childList") continue;
+        r.addedNodes.forEach((n) => observe(n));
+        // ResizeObserver tiene vivi i suoi bersagli anche fuori dal DOM: ogni livello chiuso resterebbe in memoria
+        r.removedNodes.forEach((n) => n instanceof Element && !n.isConnected && resize.unobserve(n));
+      }
       schedule();
     });
     const observe = (node) => {

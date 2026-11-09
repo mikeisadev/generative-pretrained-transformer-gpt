@@ -104,8 +104,11 @@
 .nn-tip strong { color: var(--text, #e2e8f0); font-size: 12.5px; }
 .nn-tip-value { color: #fde68a; font-variant-numeric: tabular-nums; }
 
-/* Ridotta: solo titolo e comandi (sul telefono parte così) */
-.nn-card.collapsed .nn-body { display: none; }
+/* Ridotta: solo titolo e comandi (sul telefono parte così). Se si è scelto qualcosa (un tocco sul
+   telefono, dove la scheda non si riapre da sola) resta visibile il suo dettaglio, come nella scheda del
+   cervello: il tocco ha sempre una risposta che resta, non solo l'etichetta di 2,6 s. */
+.nn-card.collapsed .nn-body > :not(.nn-detail) { display: none; }
+.nn-card.collapsed .nn-body:not(:has(.nn-detail:not([hidden]))) { display: none; }
 .nn-card.collapsed .nn-controls { border-bottom: 0; }
 
 /* Telefono: la scheda è una fascia in alto, larga quanto lo stage; aperta scorre dentro di sé */
@@ -115,7 +118,7 @@
     left: 8px;
     right: 8px;
     width: auto;
-    max-height: min(58vh, calc(100% - var(--nn-top-narrow, var(--rep-safe-top, 100px)) - 12px));
+    max-height: min(52vh, calc(100% - var(--nn-top-narrow, var(--rep-safe-top, 100px)) - 12px)); /* metà schermo resta alla rete */
     font-size: 12.5px;
   }
   .nn-head { padding: 8px 10px 4px; }

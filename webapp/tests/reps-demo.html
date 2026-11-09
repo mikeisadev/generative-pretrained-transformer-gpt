@@ -88,12 +88,17 @@
       import { installStepKeys } from "../js/core/stepKeys.js";
       import { Menu } from "../js/core/ui/menu.js";
 
-      // ?viste=vere usa i moduli veri del nucleo (core/neuralNet, core/brain) invece delle viste finte;
-      // ?rete=vera solo la rete vera (cervello e pannello finti);
+      // ?viste=vere usa i moduli veri del nucleo (core/neuralNet, core/brain) con le specifiche di
+      //   riferimento: la rete di demoSpecs.js (&spec=llm predefinita, unet, audio, load = prova di carico,
+      //   prova = la rete piccola di questa pagina) e il cervello di demoSpec.js (&cervello=prova: quello
+      //   piccolo di questa pagina). È la prova d'integrazione completa, come in un tab vero;
+      // ?rete=vera solo la rete vera, con la rete piccola di questa pagina (cervello e pannello finti);
       // ?rete=personalizzata prova la modalità { enter, exit } sulla scena del tab (come il Transformer);
       // ?errore=modulo fa fallire il caricamento del modulo della rete (avviso e ritorno all'Architettura).
       const params = new URLSearchParams(location.search);
       const REAL_VIEWS = params.get("viste") === "vere";
+      const NET_SPEC_NAME = REAL_VIEWS ? params.get("spec") ?? "llm" : "prova";
+      const REAL_BRAIN_SPEC = REAL_VIEWS && params.get("cervello") !== "prova";
       const REAL_NETWORK = params.get("rete") === "vera";
       const CUSTOM_NETWORK = params.get("rete") === "personalizzata";
       const flags = { failModule: params.get("errore") === "modulo", failCreate: false };
@@ -512,6 +517,20 @@
         tabNeurons.visible = on;
         return director.focus(on ? tabNeurons : detail, { showFrame: false, margin: 1.12, direction: FRONT });
       }
+      /**
+       * Le specifiche arrivano come nei tab veri, con un import dinamico di un modulo di soli dati
+       * (tabs/<id>/network.js, brain.js): qui le specifiche di riferimento del nucleo.
+       */
+      async function loadNetworkSpec() {
+        await sleep(120); // un modulo che arriva dalla rete: il livello mostra "Preparo la scena…"
+        if (NET_SPEC_NAME === "prova") return NETWORK_SPEC;
+        const { DEMO_SPECS, loadTestSpec } = await import("../js/core/neuralNet/demoSpecs.js");
+        return NET_SPEC_NAME === "load" ? loadTestSpec() : DEMO_SPECS[NET_SPEC_NAME] ?? DEMO_SPECS.llm;
+      }
+      const loadBrainSpec = () => (REAL_BRAIN_SPEC ? import("../js/core/brain/demoSpec.js").then((m) => m.demoBrainSpec) : Promise.resolve(BRAIN_SPEC));
+      /** Regioni per la prova "Cervello → …": quelle della specifica in uso. */
+      const BRAIN_FOCUS = REAL_BRAIN_SPEC ? { ids: ["a1", "stg"], label: "Cervello → corteccia uditiva" } : { ids: ["hippocampus"], label: "Cervello → ippocampo" };
+
       const reps = installRepresentations(ui, {
         tabId: "prova",
         network: CUSTOM_NETWORK
@@ -520,8 +539,8 @@
               exit: () => (counts.customExit++, showTabNeurons(false)),
               description: "Modalità personalizzata: la vista è sulla scena del tab (come la Rete neurale del Transformer).",
             }
-          : { load: () => sleep(120).then(() => NETWORK_SPEC) },
-        brain: { load: () => Promise.resolve(BRAIN_SPEC) },
+          : { load: loadNetworkSpec },
+        brain: { load: loadBrainSpec },
         loaders: REAL_VIEWS
           ? undefined
           : {
@@ -573,7 +592,7 @@
             button("Architettura", () => reps.show("main"), "main"),
             button("Rete neurale", () => reps.show("network"), "network"),
             button("Cervello", () => reps.show("brain"), "brain"),
-            button("Cervello → ippocampo", () => reps.show("brain", { focus: ["hippocampus"] }), "brain-focus"),
+            button(BRAIN_FOCUS.label, () => reps.show("brain", { focus: BRAIN_FOCUS.ids }), "brain-focus"),
           ),
           status,
         ),
@@ -630,7 +649,7 @@
       host.start();
       host.resize();
       updateStatus();
-      window.demo = { ui, reps, tab, menu, lod, registry, counts, flags, logLines, hideTab, contexts: () => window.__webglContexts(), tabNeurons };
+      window.demo = { ui, reps, tab, menu, lod, registry, counts, flags, logLines, hideTab, contexts: () => window.__webglContexts(), tabNeurons, specs: { network: NET_SPEC_NAME, brain: REAL_BRAIN_SPEC ? "demo" : "prova" } };
     </script>
   </body>
 </html>

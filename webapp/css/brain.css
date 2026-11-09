@@ -233,7 +233,7 @@
     left: 8px;
     right: 8px;
     width: auto;
-    max-height: min(56vh, calc(100% - var(--rep-safe-top, 100px) - 12px));
+    max-height: min(52vh, calc(100% - var(--rep-safe-top, 100px) - 12px)); /* metà schermo resta al cervello */
     font-size: 12.5px;
   }
   .br-head { padding: 7px 10px 3px; }

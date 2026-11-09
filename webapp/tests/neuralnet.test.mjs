@@ -220,6 +220,11 @@ test("spec: i numeri veri si controllano prima della copia in array tipizzati (n
   });
   assert.ok(normalizeSpec(attention([1, 0, 0.5, 0.5])).links[0].weights instanceof Float32Array);
   assert.match(errorsOf(attention([1, null, 0.5, 0.5])).join(), /probabilità: numeri finiti ≥ 0/);
+  // l'indice del collegamento di ogni segmento sta in 16 bit: troppi collegamenti sono un errore, non un overflow
+  const many = { ...attention(undefined), links: Array.from({ length: LIMITS.links + 1 }, () => ({ within: "q", pattern: "attention" })) };
+  const errors = errorsOf(many);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], new RegExp(`links: al massimo ${LIMITS.links} voci`));
 });
 
 // ------------------------------------------------------------------------------------------ layout

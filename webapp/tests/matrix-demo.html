@@ -290,6 +290,19 @@
         requestAnimationFrame(measure);
       })(last);
       const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+      /**
+       * Costo di update() a camera ferma. Una chiamata sola dura ~1-2 µs, sotto la risoluzione del timer
+       * del browser (100 µs con il rendering software): misurata frame per frame darebbe 0 o 100 µs a caso.
+       * Si misurano quindi 2.000 chiamate di fila, solo a camera ferma (l'ultima non ha ricalcolato niente).
+       */
+      function idleText() {
+        const cam = ui.host.camera;
+        const h = ui.host.container.clientHeight;
+        if (numbers.update(cam, h)) return "misura alla prossima pausa della camera";
+        const t0 = performance.now();
+        for (let i = 0; i < 2000; i++) numbers.update(cam, h);
+        return `${fmt(((performance.now() - t0) * 1000) / 2000, 2)} µs/frame`;
+      }
       setInterval(() => {
         const shown = numbers.shown();
         numbersInfo.textContent = shown.length
@@ -297,7 +310,7 @@
           : "Numeri nascosti: le celle sono ancora piccole sullo schermo. Avvicinati.";
         const s = numbers.stats;
         costsBox.textContent = [
-          `a riposo ${fmt(avg(costs.idle) * 1000, 1)} µs/frame (${fmt(s.idle)} frame)`,
+          `a riposo ${idleText()} (${fmt(s.idle)} frame senza lavoro)`,
           `in movimento ${fmt(avg(costs.busy), 3)} ms/frame (${fmt(s.recomputes)} ricalcoli)`,
           `ridisegno dei numeri: ultimo ${fmt(s.lastRedrawMs, 2)} ms, massimo ${fmt(s.maxRedrawMs, 2)} ms (${fmt(s.redraws)} in tutto, ${fmt(s.lastRedrawCells)} celle)`,
           `cella sotto il mouse ${fmt(costs.pickMs ?? 0, 2)} ms`,

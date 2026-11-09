@@ -75,9 +75,11 @@ export class LabelOverlay {
   /**
    * Ricalcola le posizioni. `state(item, anchor)` dice se l'etichetta va mostrata ("on"), attenuata
    * perché il punto è nascosto dietro qualcosa ("dim") o tolta ("off"); `pick(item, anchors)` sceglie
-   * quale dei punti usare (es. l'emisfero più vicino alla camera).
+   * quale dei punti usare (es. l'emisfero più vicino alla camera). `obstacles`: rettangoli
+   * [x0, y0, x1, y1] dello stage coperti da comandi DOM (scheda, pad, selettore) dove nessuna etichetta
+   * va a finire: sotto la scheda o il pad sarebbe tagliata e terrebbe il posto a un'altra.
    */
-  update(camera, width, height, { center = null, state = () => "on", pick = null } = {}) {
+  update(camera, width, height, { center = null, state = () => "on", pick = null, obstacles = [] } = {}) {
     if (!this.visible || !this.items.length) return;
     const project = (p) => {
       const v = [p[0], p[1], p[2], 1];
@@ -95,7 +97,7 @@ export class LabelOverlay {
     const c = center ? project(center) : [width / 2, height / 2];
     const centerScreen = c ?? [width / 2, height / 2];
     const order = [...this.items].sort((a, b) => a.priority - b.priority);
-    const rects = [];
+    const rects = obstacles.filter((o) => o[2] > o[0] && o[3] > o[1]);
     for (const item of order) {
       const anchor = pick ? pick(item) : item.anchors[0];
       const mode = anchor ? state(item, anchor) : "off";

@@ -36,7 +36,9 @@ export class BrainCard {
     this.id = `br${++uid}`;
     this.narrow = window.matchMedia(NARROW);
     this.root = el("section", { className: "br-card", ariaLabel: "Cervello 3D: comandi, legenda e dettagli" });
-    layer.append(this.root);
+    // prima di canvas e pad nell'ordine del DOM: con Tab dal selettore si arriva subito ai comandi della
+    // vista (scala, impulsi, taglio…), non ai 13 pulsanti del pad (la posizione la decide il CSS)
+    layer.prepend(this.root);
     this.build(state);
     this.onNarrow = () => this.setCollapsed(this.narrow.matches);
     this.narrow.addEventListener("change", this.onNarrow);

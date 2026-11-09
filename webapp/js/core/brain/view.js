@@ -44,6 +44,7 @@ export const VIEW_DIRECTIONS = Object.freeze({
 export const DEFAULT_OPACITY = 1;
 const DEEP_OPACITY = 0.32; // quando si vola su una struttura profonda la corteccia si fa più trasparente
 const PULSE_SECONDS = 4.5;
+const FOCUS_MIN_SIZE = 12; // cm di finestra inquadrata attorno alle regioni: si vedono i lobi attorno (il cervello è lungo ~17)
 const TRANSITION_SECONDS = 1.25;
 const MINI_SCALE = 0.34; // cervello in miniatura nella scala Neuroni
 const CLICK_PX = 5;
@@ -155,6 +156,12 @@ export function createBrainView(ctx) {
     host.controls.minDistance = 1.2;
     stats.buildMs = performance.now() - t0;
     disposers.push(host.onFrame(tick));
+    // la scheda che si apre o si riduce (e il pad) cambia lo spazio libero per le etichette anche a camera ferma
+    const relabel = new ResizeObserver(() => (labelsDirty = true));
+    relabel.observe(card.root);
+    const pad = layer.querySelector(":scope > .nav-pad");
+    if (pad) relabel.observe(pad);
+    disposers.push(() => relabel.disconnect());
     bindPointer();
     if (state.scale === "neurons") setScale("neurons", { immediate: true, force: true });
     else frameHome({ immediate: true });
@@ -387,8 +394,8 @@ export function createBrainView(ctx) {
     selected = { kind: "region", id: ids[0] };
     card.showRegion({ id: ids[0], kind: atlasKind(ids[0]) });
     rebuildLabels();
-    // mai troppo vicino: la regione si deve vedere dentro il cervello (minSize ≈ due terzi del cervello)
-    if (!box.isEmpty()) frameBox(box, facingDirection(regionIds), { margin: 1.25, minSize: 11 });
+    // mai troppo vicino: la regione si deve vedere dentro il cervello, con i lobi attorno per orientarsi
+    if (!box.isEmpty()) frameBox(box, facingDirection(regionIds), { margin: 1.15, minSize: FOCUS_MIN_SIZE });
   }
 
   /** Da che parte guardare delle regioni: dalla parte in cui si affacciano (normali), altrimenti di tre quarti. */
@@ -506,14 +513,12 @@ export function createBrainView(ctx) {
    * Inquadra un box dalla direzione `dir`, dentro la parte dello stage non coperta dalla scheda: si
    * proiettano gli 8 angoli sulla base della camera, si sceglie la distanza che li fa entrare e si
    * sposta il punto guardato perché il loro centro cada nel centro della parte libera.
+   * `minSize` (cm) è la finestra minima inquadrata sul piano dello schermo, in larghezza e in altezza:
+   * si misura dopo la proiezione perché una regione presente nei due emisferi ha il box lungo proprio
+   * nella direzione della camera (vista di lato), e allargare il box 3D non allontanerebbe la camera.
    */
   function frameBox(box, dir, { duration = 1.1, immediate = false, margin = 1.08, minSize = 0 } = {}) {
     if (!box || box.isEmpty()) return Promise.resolve();
-    if (minSize > 0) {
-      const size = box.getSize(new THREE.Vector3());
-      const grow = Math.max(0, minSize - Math.max(size.x, size.y, size.z)) / 2;
-      box = box.clone().expandByScalar(grow);
-    }
     const W = Math.max(1, host.container.clientWidth);
     const H = Math.max(1, host.container.clientHeight);
     const free = card?.freeRect(host.container) ?? { x0: 0, y0: 0, x1: W, y1: H };
@@ -533,6 +538,11 @@ export function createBrainView(ctx) {
         lo[k] = Math.min(lo[k], a[k]);
         hi[k] = Math.max(hi[k], a[k]);
       }
+    }
+    for (let k = 0; k < 2 && minSize > 0; k++) {
+      const grow = Math.max(0, minSize - (hi[k] - lo[k])) / 2;
+      lo[k] -= grow;
+      hi[k] += grow;
     }
     const center = new THREE.Vector3().addScaledVector(right, (lo[0] + hi[0]) / 2).addScaledVector(up, (lo[1] + hi[1]) / 2).addScaledVector(d, (lo[2] + hi[2]) / 2);
     const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
@@ -588,6 +598,7 @@ export function createBrainView(ctx) {
     const center = neurons ? null : brainGroup.position.toArray();
     labels.update(camera, W, H, {
       center,
+      obstacles: coveredRects(),
       // dell'emisfero si etichetta il lato più vicino alla camera
       pick: (item) => {
         if (item.anchors.length < 2) return item.anchors[0];
@@ -617,6 +628,25 @@ export function createBrainView(ctx) {
     });
     stats.labelsMs = performance.now() - t0;
     stats.labelUpdates++;
+  }
+
+  /**
+   * Rettangoli dello stage coperti da comandi DOM sopra la scena (scheda, pad e chip della navigazione,
+   * ☰ e selettore delle rappresentazioni): le etichette ci girano attorno. Letti solo quando le etichette
+   * si ricalcolano (camera mossa, scheda ridimensionata), mai a riposo.
+   */
+  function coveredRects() {
+    const box = host.container.getBoundingClientRect();
+    const rects = [];
+    const add = (node) => {
+      if (!node || node.hidden) return;
+      const r = node.getBoundingClientRect();
+      if (r.width >= 1 && r.height >= 1) rects.push([r.left - box.left, r.top - box.top, r.right - box.left, r.bottom - box.top]);
+    };
+    add(card?.root);
+    for (const node of layer.querySelectorAll(":scope > .nav-pad, :scope > .nav-hud > :not([hidden])")) add(node);
+    for (const node of layer.parentElement?.querySelectorAll(":scope > .rep-switch, :scope > .sidebar-toggle") ?? []) add(node);
+    return rects;
   }
 
   // ---------------------------------------------------------------- ciclo per frame
