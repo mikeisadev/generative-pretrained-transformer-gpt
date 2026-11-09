@@ -275,7 +275,8 @@ def test_save_replaces_links_instead_of_writing_through_them(tokenizer, splits, 
     train(new_model(tokenizer), splits, BLOCK, TRAIN_CFG, CPU, log=lambda _msg: None, callbacks=[recorder])
     recorder.save(out)
     assert outside.read_text(encoding="utf-8") == "da non toccare"  # niente scritto fuori dalla cartella
-    assert not (out / "trace.json").is_symlink() and json.loads((out / "trace.json").read_text(encoding="utf-8"))
+    assert not (out / "trace.json").is_symlink()
+    assert json.loads((out / "trace.json").read_text(encoding="utf-8"))["snapshots"]
     assert not (out / "snap_00000.f16.bin").is_symlink()
     assert (out / "snap_00007.f16.bin").is_dir()
     assert not list(out.glob(".*.tmp"))  # nessun file temporaneo rimasto

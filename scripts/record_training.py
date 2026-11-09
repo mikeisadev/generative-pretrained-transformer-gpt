@@ -415,8 +415,8 @@ def main(argv: list[str] | None = None) -> int:
 
     model = GPTLanguageModel(config).to(device)
     course = _read_course_manifest()
-    code = _read_course_code()
-    architecture, training = reference_differences(model, train_cfg, recorder_cfg, course, code)
+    course_code = _read_course_code()
+    architecture, training = reference_differences(model, train_cfg, recorder_cfg, course, course_code)
     problems = webapp_problems(args, architecture, training)
     if problems:
         print_refusal(architecture + training, problems)
@@ -472,7 +472,9 @@ def print_refusal(differences: list[str], problems: list[tuple[str, str]]) -> No
 
 def next_steps(checkpoint: Path, out: Path, *, same_layout: bool) -> list[str]:
     """Il comando per portare il run nel Laboratorio pesi, con i percorsi di questo training."""
-    name = checkpoint.parent.name if checkpoint.parent.name not in {"", "."} else checkpoint.stem
+    # La cartella dell'esperimento (checkpoints/sei-blocchi/gpt.pt → sei-blocchi), se c'è.
+    folder = checkpoint.parent.name
+    name = folder if folder not in {"", ".", "checkpoints"} else checkpoint.stem
     command = (f"python scripts/export_run.py {shlex.quote(str(checkpoint))} --name {shlex.quote(name)} "
                f"--trace {shlex.quote(str(out))} --benchmark")
     lines = ["Per confrontarlo nel tab «Laboratorio pesi» della web app (poi carica la cartella del run):",
