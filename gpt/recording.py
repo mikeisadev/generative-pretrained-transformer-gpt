@@ -67,17 +67,19 @@ Schema di ``trace.json`` (float arrotondati; entropie in nat, cioè con ln)::
         "top1": 0.38, "top5": 0.74,    # accuracy del prossimo carattere sul batch fisso
         "entropy": 2.0,                # entropia media della distribuzione predetta
         "attention_entropy": [[...head] ...strato]   # entropia media di ogni head; SOLO se il
-      }],                                            # modello espone attention_weights
+      }],                                            # modello espone attention_weights. Una riga per
+                                                     # strato (per un blocco riusato: per passaggio)
       "notes": ["..."]                 # SOLO se c'è qualcosa da dire (mai per il GPT del corso):
-    }                                  # nomi nuovi, attention saltata, valori non finiti, ...
+    }                                  # nomi nuovi, pesi condivisi, attention saltata, valori non finiti, ...
 
 I file ``snap_XXXXX.f16.bin`` contengono i tensori in virgola mobile dello
 ``state_dict`` in float16 little-endian, concatenati nel suo ordine: i parametri
 e gli eventuali buffer persistenti, cioè gli stessi tensori che ``scripts/export_run.py``
-esporta dal checkpoint. Per il GPT del corso sono esattamente ``model.named_parameters()``
-(la maschera ``tril`` non è persistente), lo stesso layout di ``weights.f32.bin``
-(vedi ``gpt.export``). Un valore non finito (NaN, infinito: training divergente)
-diventa ``null`` nel JSON, che resta così leggibile dal browser.
+esporta dal checkpoint (un tensore condiviso, come nel weight tying, c'è con ogni suo nome).
+Per il GPT del corso sono esattamente ``model.named_parameters()`` (la maschera ``tril``
+non è persistente), lo stesso layout di ``weights.f32.bin`` (vedi ``gpt.export``). Un valore
+non finito (NaN, infinito: training divergente) diventa ``null`` nel JSON, che resta così
+leggibile dal browser.
 """
 
 from __future__ import annotations
@@ -85,7 +87,9 @@ from __future__ import annotations
 import dataclasses
 import json
 import math
+import os
 import re
+import secrets
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
@@ -251,18 +255,57 @@ def attention_notes(
         notes.append("attention: i moduli con attention_weights non hanno dato probabilità valide nel "
                      "forward (errori qui sopra, o moduli mai chiamati): l'entropia dell'attention non c'è")
         return notes
-    if _course_attention(sites):
+    layers = list(dict.fromkeys(layer for _, layer in sites))  # gli strati del codice
+    repeated = len(rows) > len(layers)  # più righe che strati: moduli che lavorano più volte per forward
+    if _course_attention(sites) and not repeated:
         return notes
-    layers = list(dict.fromkeys(layer or "il modello intero" for _, layer in sites))
     patterns = list(dict.fromkeys(_pattern(path) for path, _ in sites))
     heads = sorted({len(row) for row in rows})
     per_layer = str(heads[0]) if len(heads) == 1 else f"da {heads[0]} a {heads[-1]}"
-    notes.append(
-        f"attention: attention_entropy[strato][head] viene dai moduli con attention_weights "
-        f"{_few(patterns)}: {_count(len(rows), 'strato', 'strati')} ({_span(layers)}) con {per_layer} head "
-        "ciascuno, numerate nell'ordine del forward"
-    )
+    rows_text = _count(len(rows), "strato", "strati")
+    if not repeated:
+        rows_text += f" ({_span([layer or 'il modello intero' for layer in layers])})"
+    note = (f"attention: attention_entropy[strato][head] viene dai moduli con attention_weights "
+            f"{_few(patterns)}: {rows_text} con {per_layer} head ciascuno, numerate nell'ordine del forward")
+    if repeated:
+        code_layers = ", ".join(layer or "il modello intero" for layer in layers)
+        note += (f". Nel codice gli strati di attention sono {len(layers)} ({code_layers}), ma lavorano "
+                 "più volte in ogni forward (un blocco riusato: pesi condivisi tra gli strati), quindi ogni "
+                 "riga è un passaggio, nell'ordine in cui avviene")
+    notes.append(note)
     return notes
+
+
+def shared_parameters(model: nn.Module) -> dict[str, str]:
+    """I nomi che sono lo STESSO tensore di un parametro con un altro nome (pesi condivisi).
+
+    Esempio, il weight tying: ``{"lm_head.weight": "token_embedding_table.weight"}``. ``named_parameters``
+    conta il tensore una volta sola (con il primo nome), lo ``state_dict`` con tutti i nomi: per questo
+    gli snapshot e il run esportato lo contengono più volte, i gruppi e le metriche una volta sola.
+    """
+    first: dict[int, str] = {}
+    shared: dict[str, str] = {}
+    for name, param in model.named_parameters(remove_duplicate=False):
+        original = first.setdefault(id(param), name)
+        if original != name:
+            shared[name] = original
+    return shared
+
+
+def sharing_note(shared: Mapping[str, str], groups: Mapping[str, list[str]]) -> str | None:
+    """La nota del trace sui pesi condivisi (None se non ce ne sono, come nel GPT del corso)."""
+    if not shared:
+        return None
+    group_of_name = {name: group for group, names in groups.items() for name in names}
+    pairs = [f"{alias} = {original}" for alias, original in shared.items()]
+    where = list(dict.fromkeys(group_of_name.get(name, group_of(name)) for name in shared.values()))
+    return (
+        f"pesi condivisi: {_count(len(shared), 'nome è', 'nomi sono')} lo stesso tensore di un altro "
+        f"parametro ({_few(pairs)}; per esempio il weight tying tra embedding e lm_head). Negli snapshot, "
+        "come nello state_dict e nel run esportato, il tensore compare con ogni nome; nei gruppi, nelle "
+        "norme dei gradienti e negli update ratio conta una volta sola, nel gruppo del primo nome "
+        f"({_few(where)})."
+    )
 
 
 def _course_attention(sites: list[tuple[str, str]]) -> bool:
@@ -448,6 +491,7 @@ class TrainingRecorder(TrainingCallback):
         self._train_config: TrainConfig | None = None
         self._snapshot_steps: set[int] = set()
         self._groups: dict[str, list[str]] = {}
+        self._shared: dict[str, str] = {}  # nome → parametro di cui è lo stesso tensore (weight tying)
         self._layout: list[dict] = []
         self._attention_sites: list[tuple[str, str]] = []  # (modulo, strato) con attention_weights
         self._attention_problems: list[str] = []  # moduli di attention saltati, con il motivo
@@ -461,6 +505,7 @@ class TrainingRecorder(TrainingCallback):
         self._train_config = train_cfg
         self._model_config, self._config_notes = _model_config(model)
         self._groups = parameter_groups(model)
+        self._shared = shared_parameters(model)
         self._layout = parameter_layout(_Tensors(snapshot_state(model)))
         self._attention_sites = [(site.path, site.layer_path) for site in attention_sites(model)]
         self._device = next(model.parameters()).device
@@ -599,9 +644,11 @@ class TrainingRecorder(TrainingCallback):
         with_attention = [s["attention_entropy"] for s in self.snapshots if "attention_entropy" in s]
         rows = with_attention[-1] if with_attention else None
         group_note = grouping_note(name for names in self._groups.values() for name in names)
+        shared_note = sharing_note(self._shared, self._groups)
         return [
             *self._config_notes,
             *([group_note] if group_note else []),
+            *([shared_note] if shared_note else []),
             *attention_notes(self._attention_sites, rows, self._attention_problems),
         ]
 
@@ -644,18 +691,40 @@ class TrainingRecorder(TrainingCallback):
     def save(self, out_dir: Path) -> Path:
         """Scrive ``trace.json`` e gli snapshot in ``out_dir``; restituisce il percorso di trace.json.
 
-        Gli snapshot di registrazioni precedenti vengono rimossi: nella cartella
-        restano solo i file citati da questo ``trace.json``.
+        Ogni file si scrive accanto con un nome temporaneo e poi prende il posto di quello vecchio
+        (``os.replace``): un'interruzione non lascia file a metà, e un collegamento simbolico con lo
+        stesso nome viene sostituito, non seguito, così niente finisce fuori dalla cartella scelta.
+        Prima gli snapshot, poi ``trace.json`` che li cita, infine si tolgono gli snapshot di
+        registrazioni precedenti: nella cartella restano solo i file citati da questo ``trace.json``.
         """
         trace = self.to_dict()
         # allow_nan=False: un JSON con NaN non si aprirebbe nel browser (to_dict li ha già tolti).
         text = json.dumps(trace, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        for stale in out_dir.glob(SNAPSHOT_PATTERN):
-            if stale.name not in self._blobs:
-                stale.unlink()
         for name, blob in self._blobs.items():
-            (out_dir / name).write_bytes(blob)
+            _replace_file(out_dir / name, blob)
         path = out_dir / TRACE_FILE
-        path.write_text(text, encoding="utf-8")
+        _replace_file(path, text.encode("utf-8"))
+        for stale in out_dir.glob(SNAPSHOT_PATTERN):
+            # Solo file (o collegamenti): una cartella con quel nome non è uno snapshot e resta dov'è.
+            if stale.name not in self._blobs and (stale.is_symlink() or stale.is_file()):
+                stale.unlink()
         return path
+
+
+def _replace_file(path: Path, data: bytes) -> None:
+    """Scrive ``data`` in ``path`` passando da un file nuovo nella stessa cartella e ``os.replace``.
+
+    Il file temporaneo si crea con ``"xb"`` (O_EXCL: mai un file o un collegamento già esistente) e con i
+    permessi normali; ``os.replace`` sostituisce la voce della cartella in un colpo solo.
+    """
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+    handle = open(temporary, "xb")  # se fallisce non è stato creato niente: niente da togliere
+    try:
+        with handle:
+            handle.write(data)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise

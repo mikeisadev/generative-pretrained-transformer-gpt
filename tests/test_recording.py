@@ -260,6 +260,27 @@ def test_save_removes_stale_snapshots(recorded, tokenizer, splits):
     assert len(list(recorded["dir"].glob("snap_*.f16.bin"))) == len(recorder.snapshots)
 
 
+def test_save_replaces_links_instead_of_writing_through_them(tokenizer, splits, tmp_path):
+    outside = tmp_path / "fuori.txt"
+    outside.write_text("da non toccare", encoding="utf-8")
+    out = tmp_path / "training"
+    out.mkdir()
+    try:
+        (out / "trace.json").symlink_to(outside)
+        (out / "snap_00000.f16.bin").symlink_to(outside)
+    except OSError:  # Windows senza i permessi per i collegamenti simbolici
+        pytest.skip("il file system non permette collegamenti simbolici")
+    (out / "snap_00007.f16.bin").mkdir()  # una cartella con il nome di uno snapshot non si tocca
+    recorder = TrainingRecorder(tokenizer, splits.val, BLOCK, REC_CFG)
+    train(new_model(tokenizer), splits, BLOCK, TRAIN_CFG, CPU, log=lambda _msg: None, callbacks=[recorder])
+    recorder.save(out)
+    assert outside.read_text(encoding="utf-8") == "da non toccare"  # niente scritto fuori dalla cartella
+    assert not (out / "trace.json").is_symlink() and json.loads((out / "trace.json").read_text(encoding="utf-8"))
+    assert not (out / "snap_00000.f16.bin").is_symlink()
+    assert (out / "snap_00007.f16.bin").is_dir()
+    assert not list(out.glob(".*.tmp"))  # nessun file temporaneo rimasto
+
+
 def test_recorder_without_training_cannot_be_saved(tokenizer, splits, tmp_path):
     with pytest.raises(RuntimeError):
         TrainingRecorder(tokenizer, splits.val, BLOCK).save(tmp_path)

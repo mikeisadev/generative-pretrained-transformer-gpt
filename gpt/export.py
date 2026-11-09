@@ -47,7 +47,7 @@ import textwrap
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -121,13 +121,13 @@ def _quantize_signed(t: torch.Tensor) -> dict[str, Any]:
 
 # --- attention di un'architettura qualsiasi ------------------------------------------------------
 #
-# Interfaccia (la stessa di Head in gpt/attention.py): un modulo è un'attention se ha il METODO
-# ``attention_weights``, che riceve gli stessi argomenti di ``forward`` e restituisce le probabilità
-# di attention dopo maschera e softmax (prima del dropout): ``(B, T, T)`` per una head, come Head,
-# oppure ``(B, H, T, T)`` per H head calcolate insieme (un'attention "fusa", con una sola Linear per
-# Q, K e V). Ogni riga somma a 1. Un'attention che non lo espone (per esempio con
-# ``F.scaled_dot_product_attention``, che non restituisce le probabilità) semplicemente non c'è:
-# chi usa capture_attention salta le metriche dell'attention invece di fermarsi.
+# Interfaccia (la stessa di Head in gpt/attention.py): un modulo è un'attention se la sua classe ha il
+# METODO ``attention_weights``, che riceve gli stessi argomenti di ``forward`` e restituisce le
+# probabilità di attention dopo maschera e softmax (prima del dropout): ``(B, T, T)`` per una head, come
+# Head, oppure ``(B, H, T, T)`` per H head calcolate insieme (un'attention "fusa", con una sola Linear
+# per Q, K e V). La prima dimensione è il batch dell'ingresso e ogni riga somma a 1. Un'attention che non
+# lo espone (per esempio con ``F.scaled_dot_product_attention``, che non restituisce le probabilità)
+# semplicemente non c'è: chi usa capture_attention salta le metriche dell'attention invece di fermarsi.
 
 ATTENTION_METHOD = "attention_weights"
 # Un indice di nn.Sequential o nn.ModuleList ("blocks.3"): solo cifre ASCII, come /^\d+$/ nel browser.
@@ -170,12 +170,13 @@ def attention_sites(net: nn.Module) -> list[AttentionSite]:
     Gli strati si numerano nell'ordine in cui compaiono (per il GPT del corso ``blocks.<i>`` → i).
     Se un modulo con il metodo ne contiene altri che lo hanno, conta solo il più esterno: le sue
     probabilità comprendono già quelle dei figli, che altrimenti verrebbero contate due volte.
+    Un modulo riusato (lo stesso oggetto in più punti) compare una volta sola, come in ``named_modules``:
+    le sue chiamate ripetute in un forward le separa ``capture_attention``.
     """
     sites: list[AttentionSite] = []
     layers: dict[str, int] = {}
     for path, module in net.named_modules():
-        # Un METODO: un sotto-modulo o un tensore che si chiamano così non sono l'interfaccia.
-        if not isinstance(getattr(module, ATTENTION_METHOD, None), types.MethodType):
+        if not _has_attention_method(module):
             continue
         if any(site.path == "" or path.startswith(site.path + ".") for site in sites):
             continue
@@ -183,6 +184,38 @@ def attention_sites(net: nn.Module) -> list[AttentionSite]:
         layer = layers.setdefault(layer_path, len(layers))
         sites.append(AttentionSite(path, layer, layer_path, module))
     return sites
+
+
+def _has_attention_method(module: nn.Module) -> bool:
+    """La CLASSE del modulo definisce il metodo ``attention_weights``?
+
+    ``getattr_static`` guarda la classe senza eseguire niente: un sotto-modulo, un tensore o una property
+    che si chiamano così non sono l'interfaccia, e una property non viene calcolata solo per cercarla.
+    """
+    return isinstance(inspect.getattr_static(type(module), ATTENTION_METHOD, None), types.FunctionType)
+
+
+@dataclass
+class _ForwardCounters:
+    """I contatori di UN forward del modello (si azzerano all'inizio di ogni forward)."""
+
+    layers: int  # strati di attention_sites: le righe oltre questo numero sono passaggi ripetuti
+    heads: dict[int, int] = field(default_factory=dict)  # riga → prossima head libera
+    calls: dict[str, int] = field(default_factory=dict)  # modulo → chiamate già viste in questo forward
+
+    def reset(self, *_hook_args: Any) -> None:
+        self.heads.clear()
+        self.calls.clear()
+
+    def row(self, site: AttentionSite) -> int:
+        """La riga di questa chiamata: lo strato del modulo e, se lo stesso modulo lavora di nuovo nello
+        stesso forward (un blocco riusato: pesi condivisi tra gli strati), una riga nuova per ogni passaggio.
+
+        Per il GPT del corso ogni head lavora una volta sola: la riga è lo strato, come prima.
+        """
+        repeat = self.calls.get(site.path, 0)
+        self.calls[site.path] = repeat + 1
+        return site.layer + repeat * self.layers
 
 
 @contextmanager
@@ -195,7 +228,9 @@ def capture_attention(
     che espongono ``attention_weights``, ovunque siano nel modello). Le chiavi sono ``(layer, head)``:
     ``layer`` è lo strato di ``attention_sites``, le head di uno strato si numerano nell'ordine del
     forward (un modulo ``(B, H, T, T)`` ne dà H). Per il GPT del corso la chiave di
-    ``blocks.<l>.sa.heads.<h>`` è ``(l, h)``. Senza moduli che lo espongono il dizionario resta vuoto.
+    ``blocks.<l>.sa.heads.<h>`` è ``(l, h)``. Un modulo che lavora più volte nello stesso forward (un
+    blocco riusato in più strati) dà una riga in più per ogni passaggio: ``layer + passaggio × strati``.
+    Senza moduli che espongono il metodo il dizionario resta vuoto.
 
     Args:
         problems: se è una lista, un modulo il cui ``attention_weights`` fallisce o restituisce
@@ -206,14 +241,14 @@ def capture_attention(
     Gli hook vengono rimossi all'uscita anche in caso di errore, così il modello torna esattamente com'era.
     """
     attention: dict[tuple[int, int], torch.Tensor] = {}
-    next_head: dict[int, int] = {}  # strato → prossima head libera nel forward in corso
     sites = attention_sites(net)
+    counters = _ForwardCounters(layers=1 + max((site.layer for site in sites), default=-1))
     hooks = []
     if sites:
         # Ogni forward del modello ricomincia da head 0: un secondo forward sovrascrive il primo.
-        hooks.append(net.register_forward_pre_hook(lambda _module, _args: next_head.clear()))
+        hooks.append(net.register_forward_pre_hook(counters.reset))
     for site in sites:
-        capture = functools.partial(_capture_site, site, attention, next_head, problems)
+        capture = functools.partial(_capture_site, site, attention, counters, problems)
         hooks.append(site.module.register_forward_hook(capture, with_kwargs=True))
     try:
         yield attention
@@ -222,11 +257,13 @@ def capture_attention(
             hk.remove()
 
 
-def _capture_site(site, attention, next_head, problems, module, args, kwargs, _output) -> None:
+def _capture_site(site, attention, counters, problems, module, args, kwargs, _output) -> None:
     """Hook di un modulo di attention: chiede le probabilità con gli stessi argomenti del forward."""
+    row = counters.row(site)  # anche se la misura fallisce: i passaggi dopo restano nelle loro righe
     where = f"{site.path}.{ATTENTION_METHOD}()"
     try:
-        weights = _attention_probabilities(getattr(module, ATTENTION_METHOD)(*args, **kwargs))
+        value = getattr(module, ATTENTION_METHOD)(*args, **kwargs)
+        weights = _attention_probabilities(value, args[0] if args else None)
     except AttentionWeightsError as error:
         _report(f"{where}: {error}", problems)
         return
@@ -235,14 +272,14 @@ def _capture_site(site, attention, next_head, problems, module, args, kwargs, _o
             raise
         _report(f"{where} ha dato un errore ({type(error).__name__}: {error})", problems)
         return
-    first = next_head.get(site.layer, 0)
+    first = counters.heads.get(row, 0)
     if weights.dim() == 3:  # una head, come Head del corso: il tensore così com'è
-        attention[(site.layer, first)] = weights
-        next_head[site.layer] = first + 1
+        attention[(row, first)] = weights
+        counters.heads[row] = first + 1
         return
     for h in range(weights.shape[1]):
-        attention[(site.layer, first + h)] = weights[:, h]
-    next_head[site.layer] = first + weights.shape[1]
+        attention[(row, first + h)] = weights[:, h]
+    counters.heads[row] = first + weights.shape[1]
 
 
 def _report(message: str, problems: list[str] | None) -> None:
@@ -253,12 +290,25 @@ def _report(message: str, problems: list[str] | None) -> None:
 
 
 @torch.no_grad()
-def _attention_probabilities(value: Any) -> torch.Tensor:
-    """Il risultato di ``attention_weights``, staccato dal grafo, se sono davvero probabilità leggibili."""
+def _attention_probabilities(value: Any, first_input: Any = None) -> torch.Tensor:
+    """Il risultato di ``attention_weights``, staccato dal grafo, se sono davvero probabilità leggibili.
+
+    ``first_input`` è il primo argomento del forward: se è un ``(B, T, C)`` con lo stesso T, la prima
+    dimensione delle probabilità deve essere il suo B. Un ``(B·H, T, T)`` (head e batch fusi, come con
+    ``.view(B * H, T, hs)``) passerebbe tutti gli altri controlli e diventerebbe UNA head con la media
+    di tutte: meglio dirlo e saltarlo.
+    """
     if not isinstance(value, torch.Tensor) or not value.is_floating_point():
         raise AttentionWeightsError(f"atteso un tensore float, ottenuto {type(value).__name__}")
     if value.dim() not in (3, 4) or value.shape[-1] != value.shape[-2]:
         raise AttentionWeightsError(f"forma {tuple(value.shape)}, attese (B, T, T) o (B, H, T, T)")
+    batch = _batch_of(first_input, value.shape[-1])
+    if batch is not None and value.shape[0] != batch:
+        raise AttentionWeightsError(
+            f"forma {tuple(value.shape)} con un ingresso di forma {tuple(first_input.shape)}: la prima "
+            f"dimensione deve essere il batch ({batch}). Con head e batch insieme, (B·H, T, T), restituisci "
+            "weights.view(B, H, T, T)"
+        )
     value = value.detach()
     if not bool(torch.isfinite(value).all()):
         raise AttentionWeightsError("probabilità non finite (NaN o infinito): il training è divergente?")
@@ -266,6 +316,17 @@ def _attention_probabilities(value: Any) -> torch.Tensor:
     if bool((value < 0).any()) or not torch.allclose(rows, torch.ones_like(rows), atol=_ROW_SUM_ATOL):
         raise AttentionWeightsError("non sono probabilità: ogni riga deve sommare a 1 (softmax e maschera)")
     return value
+
+
+def _batch_of(first_input: Any, seq_len: int) -> int | None:
+    """Il batch B di un ingresso ``(B, T, C)`` con lo stesso T delle probabilità, altrimenti None.
+
+    Solo in quel caso si sa con certezza dov'è il batch (un ingresso ``(T, B, C)``, per esempio, non si
+    controlla): il controllo non deve mai scartare un'attention giusta.
+    """
+    if isinstance(first_input, torch.Tensor) and first_input.dim() == 3 and first_input.shape[1] == seq_len:
+        return int(first_input.shape[0])
+    return None
 
 
 @torch.no_grad()

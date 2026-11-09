@@ -28,8 +28,9 @@ Una classe tua fuori da gpt/? Usa gpt.recording.TrainingRecorder come callback d
 
 Iperparametri e seme predefiniti sono quelli di train.py, e il recorder non tocca il generatore
 casuale globale: i batch, e quindi le loss, sono gli stessi del training di riferimento. Una storia
-che NON è quella di riferimento (architettura, config o training diversi) non può finire in
-webapp/data per sbaglio: lo script chiede --out, --checkpoint e --no-export prima di cominciare.
+che NON è quella di riferimento (pesi, pesi condivisi, config, codice dei moduli o training diversi)
+non può finire in webapp/data per sbaglio: lo script chiede --out, --checkpoint e --no-export prima
+di cominciare, e controlla prima del training anche che le uscite si possano scrivere.
 """
 
 from __future__ import annotations
@@ -37,22 +38,27 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
+import os
 import shlex
 import sys
 import time
 from collections.abc import Collection, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import torch
 import torch.nn as nn
 
+# _code_files e _code_sha256 sono l'impronta del codice dei moduli che gpt/benchmark.py scrive in
+# benchmark.json: usare le stesse funzioni garantisce che il confronto con builtin.json sia alla pari.
+from gpt.benchmark import BENCHMARK_DATA_DIR, BUILTIN_FILE, _code_files, _code_sha256
 from gpt.config import GPTConfig, TrainConfig
 from gpt.data import CharTokenizer, load_text, train_val_split
 from gpt.device import resolve_device
-from gpt.export import PROJECT_ROOT, TRAINING_DIR, WEBAPP_DATA_DIR, WEIGHTS_MANIFEST, export, parameter_layout
+from gpt.export import PROJECT_ROOT, TRAINING_DIR, WEBAPP_DATA_DIR, WEIGHTS_MANIFEST, export
 from gpt.model import GPTLanguageModel
-from gpt.recording import RecorderConfig, TrainingRecorder
+from gpt.recording import TRACE_FILE, RecorderConfig, TrainingRecorder, shared_parameters, snapshot_state
 from gpt.training import save_checkpoint, train
 
 DEFAULT_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "gpt.pt"
@@ -61,16 +67,42 @@ DEFAULT_OUT = WEBAPP_DATA_DIR / TRAINING_DIR
 MODEL, TRAIN = "model__", "train__"
 _OPTION_TYPES = (bool, int, float, str)  # i campi con un default di questi tipi diventano opzioni
 _TYPE_NAMES = {int: "un numero intero", float: "un numero", str: "un testo"}
+# I messaggi di argparse che si vedono più spesso, in italiano (gli altri restano com'erano).
+_ARGPARSE_ITALIAN = (
+    ("unrecognized arguments: ", "opzioni sconosciute: "),
+    ("the following arguments are required: ", "mancano le opzioni: "),
+    ("expected one argument", "serve un valore"),
+    ("ambiguous option: ", "opzione ambigua: "),
+    (" could match ", " potrebbe essere "),
+    ("ignored explicit argument ", "valore non previsto "),
+    ("argument ", "opzione "),
+)
 
 
 # --------------------------------------------------------------------------- opzioni
+
+
+class _ItalianHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    def add_usage(self, usage, actions, groups, prefix=None):
+        super().add_usage(usage, actions, groups, "uso: " if prefix is None else prefix)
+
+
+class _ItalianParser(argparse.ArgumentParser):
+    """argparse con gli errori in italiano: lo studente legge "Errore: …", non "error: argument …"."""
+
+    def error(self, message: str) -> NoReturn:
+        for english, italian in _ARGPARSE_ITALIAN:
+            message = message.replace(english, italian)
+        self.print_usage(sys.stderr)
+        self.exit(2, f"Errore: {message} (l'elenco delle opzioni: --help)\n")
 
 
 def add_dataclass_options(group: Any, cls: type, prefix: str, skip: Collection[str] = ()) -> None:
     """Un'opzione per ogni campo semplice della dataclass: ``n_layer`` → ``--n-layer``.
 
     Il default resta quello della dataclass (qui ``None`` vuol dire "non cambiato"); i campi di altri
-    tipi (tuple, oggetti) si cambiano nel codice.
+    tipi (tuple, oggetti) si cambiano nel codice. Va chiamata DOPO le opzioni fisse dello script: così un
+    campo che si chiama come una di loro dà l'errore qui sotto, in italiano.
     """
     for field in dataclasses.fields(cls):
         default = field.default
@@ -93,9 +125,13 @@ def add_dataclass_options(group: Any, cls: type, prefix: str, skip: Collection[s
 def _parser_for(kind: type):
     def parse(text: str):
         try:
-            return kind(text)
+            value = kind(text)
         except ValueError:
             raise argparse.ArgumentTypeError(f"serve {_TYPE_NAMES[kind]}, non {text!r}") from None
+        # float("nan") e float("inf") si leggono, ma un learning rate NaN rovinerebbe il training in silenzio.
+        if kind is float and not math.isfinite(value):
+            raise argparse.ArgumentTypeError(f"serve un numero finito, non {text!r}")
+        return value
 
     return parse
 
@@ -123,27 +159,33 @@ def _step_list(text: str) -> tuple[int, ...]:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = _ItalianParser(description=__doc__, formatter_class=_ItalianHelpFormatter, add_help=False)
+    # I gruppi si mostrano nell'ordine in cui nascono, ma si riempiono dopo le opzioni fisse (vedi sotto).
+    general = parser.add_argument_group("uscite e dispositivo")
     model = parser.add_argument_group("modello: i campi di GPTConfig (gpt/config.py)")
-    add_dataclass_options(model, GPTConfig, MODEL, skip={"vocab_size"})  # vocab_size viene dal testo
     training = parser.add_argument_group("training: i campi di TrainConfig (gpt/config.py)")
-    add_dataclass_options(training, TrainConfig, TRAIN)
     recording = parser.add_argument_group("registrazione (gpt/recording.py)")
-    recording.add_argument("--log-every", type=_parser_for(int), help="ogni quanti step misurare gradienti, "
+    general.add_argument("-h", "--help", action="help", help="mostra questo aiuto ed esce")
+    general.add_argument("--device", default="auto", help="auto | cpu | cuda | mps")
+    general.add_argument("--threads", type=_positive_int,
+                         help="thread di PyTorch (su una macchina già carica: 1; i risultati non cambiano)")
+    general.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT,
+                         help="dove salvare il modello")
+    general.add_argument("--out", type=Path, default=DEFAULT_OUT,
+                         help="cartella di trace.json e degli snapshot (predefinita: webapp/data/training)")
+    general.add_argument("--no-export", action="store_true", help="non rigenerare model.json e weights.*")
+    general.add_argument("--update-webapp", action="store_true",
+                         help="scrive in webapp/data anche un training che non è quello di riferimento: "
+                         "serve solo a chi cambia il GPT del corso")
+    recording.add_argument("--log-every", type=_positive_int, help="ogni quanti step misurare gradienti, "
                            f"update e pesi (predefinito: {RecorderConfig.log_every})")
     recording.add_argument("--snapshot-steps", type=_step_list, metavar="0,50,100",
                            help="step degli snapshot dei pesi (quello finale c'è sempre; predefiniti: "
                            f"{','.join(map(str, RecorderConfig.snapshot_steps))})")
-    parser.add_argument("--device", default="auto", help="auto | cpu | cuda | mps")
-    parser.add_argument("--threads", type=_positive_int,
-                        help="thread di PyTorch (su una macchina già carica: 1; i risultati non cambiano)")
-    parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT, help="dove salvare il modello")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT,
-                        help="cartella di trace.json e degli snapshot (predefinita: webapp/data/training)")
-    parser.add_argument("--no-export", action="store_true", help="non rigenerare model.json e weights.*")
-    parser.add_argument("--update-webapp", action="store_true",
-                        help="scrive in webapp/data anche un training che non è quello di riferimento: serve "
-                        "solo a chi cambia il GPT del corso")
+    # Per ultime le opzioni generate: un campo nuovo che si chiama come un'opzione fissa (es. log_every in
+    # TrainConfig) incontra qui il conflitto e add_dataclass_options lo spiega, invece di un traceback.
+    add_dataclass_options(model, GPTConfig, MODEL, skip={"vocab_size"})  # vocab_size viene dal testo
+    add_dataclass_options(training, TrainConfig, TRAIN)
     return parser.parse_args(argv)
 
 
@@ -156,29 +198,58 @@ def recorder_config(args: argparse.Namespace) -> RecorderConfig:
 
 
 def reference_differences(
-    model: nn.Module, train_cfg: TrainConfig, recorder_cfg: RecorderConfig, course: Mapping[str, Any] | None
+    model: nn.Module,
+    train_cfg: TrainConfig,
+    recorder_cfg: RecorderConfig,
+    course: Mapping[str, Any] | None,
+    course_code: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Che cosa distingue questo training da quello di riferimento del GPT del corso.
 
     Args:
         course: il manifest committato ``webapp/data/weights.json`` (nomi e forme dei pesi, config).
+        course_code: l'impronta del codice dei moduli del GPT del corso (``model.code_sha256`` di
+            ``webapp/data/benchmark/builtin.json``); None = non si controlla.
 
     Returns:
-        ``(architettura, training)``: le differenze del modello (nomi, forme, config) e quelle del
-        training o della registrazione. Due liste vuote = è il training di webapp/data.
+        ``(architettura, training)``: le differenze del modello (pesi, pesi condivisi, config, codice) e
+        quelle del training o della registrazione. Due liste vuote = è il training di webapp/data.
     """
     architecture = []
     if course is not None:
-        ours = [(p["name"], p["shape"]) for p in parameter_layout(model)]
+        # I tensori che si REGISTRANO e si esportano (lo state_dict in virgola mobile), non solo i
+        # parametri: un buffer persistente aggiunto cambia gli snapshot anche senza parametri nuovi.
+        ours = [(name, list(t.shape)) for name, t in snapshot_state(model).items()]
         theirs = [(p.get("name"), p.get("shape")) for p in course.get("params") or []]
         if ours != theirs:
             architecture.append(f"pesi diversi da quelli del GPT del corso: {_layout_change(ours, theirs)}")
+        shared = [f"{alias} è lo stesso tensore di {original}"
+                  for alias, original in shared_parameters(model).items()]
+        if shared:
+            architecture.append(f"pesi condivisi: {_few(shared)}")
         to_dict = getattr(getattr(model, "config", None), "to_dict", None)
         architecture += _changes("config", to_dict() if callable(to_dict) else {}, course.get("config") or {})
+    if course_code is not None:
+        files = _code_files(model)
+        if _code_sha256(files) != course_code:
+            names = ", ".join(f.relative_to(PROJECT_ROOT).as_posix() for f in files) or "nessun file"
+            architecture.append(
+                f"codice dei moduli del modello ({names}) diverso da quello del GPT del corso misurato in "
+                "webapp/data/benchmark/builtin.json: un calcolo nuovo anche con gli stessi pesi (es. GELU), "
+                "o anche solo un commento"
+            )
     training = _changes("training", dataclasses.asdict(train_cfg), dataclasses.asdict(TrainConfig()))
     recording = dataclasses.asdict(recorder_cfg)
     training += _changes("registrazione", recording, dataclasses.asdict(RecorderConfig()))
     return architecture, training
+
+
+def same_layout_as_course(model: nn.Module, course: Mapping[str, Any] | None) -> bool:
+    """Nomi e forme dei tensori registrati sono quelli del GPT del corso (anche se il calcolo è cambiato)?"""
+    if course is None:  # senza i dati del corso non si sa: il promemoria che ne segue è solo una domanda
+        return True
+    ours = [(name, list(t.shape)) for name, t in snapshot_state(model).items()]
+    return ours == [(p.get("name"), p.get("shape")) for p in course.get("params") or []]
 
 
 def _layout_change(ours: list[tuple[str, list[int]]], theirs: list[tuple[str, list[int]]]) -> str:
@@ -220,6 +291,17 @@ def _read_course_manifest() -> dict[str, Any] | None:
     return manifest if isinstance(manifest, dict) else None
 
 
+def _read_course_code() -> str | None:
+    """L'impronta del codice dei moduli del GPT del corso, da ``builtin.json`` (None se non c'è)."""
+    try:
+        bench = json.loads((BENCHMARK_DATA_DIR / BUILTIN_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    model = bench.get("model") if isinstance(bench, dict) else None
+    code = model.get("code_sha256") if isinstance(model, dict) else None
+    return code if isinstance(code, str) else None
+
+
 def webapp_problems(
     args: argparse.Namespace, architecture: list[str], training: list[str]
 ) -> list[tuple[str, str]]:
@@ -232,11 +314,16 @@ def webapp_problems(
     if args.update_webapp:
         return []
     if not (architecture or training):
-        if args.no_export or _inside(args.out, WEBAPP_DATA_DIR):
-            return []
-        # Il training di riferimento con la storia altrove: i pesi della web app e la storia divergerebbero.
-        why = "l'export aggiornerebbe i pesi di webapp/data, ma la loro storia resterebbe quella di prima"
-        return [(why, "--no-export")]
+        # Il training di riferimento: pesi della web app e storia si rigenerano INSIEME, o nessuno dei due.
+        inside = _inside(args.out, WEBAPP_DATA_DIR)
+        if inside and args.no_export:
+            why = ("con --no-export la storia nuova finirebbe in webapp/data accanto ai pesi di prima, che "
+                   "non sono quelli del training registrato (per rigenerare tutto, togli --no-export)")
+            return [(why, "--out checkpoints/esperimento/training")]
+        if not inside and not args.no_export:
+            why = "l'export aggiornerebbe i pesi di webapp/data, ma la loro storia resterebbe quella di prima"
+            return [(why, "--no-export")]
+        return []
     problems = []
     if _inside(args.out, WEBAPP_DATA_DIR):
         why = "--out è in webapp/data, dove c'è la storia del GPT del corso (la usano la web app e i test)"
@@ -251,11 +338,58 @@ def webapp_problems(
 
 
 def _inside(path: Path, folder: Path) -> bool:
-    return path.resolve().is_relative_to(folder.resolve())
+    """``path`` è ``folder`` o sta dentro? Anche con un'altra grafia della stessa cartella.
+
+    ``resolve()`` toglie ``..`` e collegamenti simbolici; il confronto per identità (``samestat``) delle
+    cartelle che esistono copre anche i file system che non distinguono maiuscole e minuscole (macOS):
+    ``WebApp/Data/training`` è comunque la cartella del corso.
+    """
+    resolved = path.resolve()
+    if resolved.is_relative_to(folder.resolve()):
+        return True
+    try:
+        target = folder.stat()
+    except OSError:
+        return False
+    return any(os.path.samestat(p.stat(), target) for p in (resolved, *resolved.parents) if p.exists())
 
 
 def _same_file(a: Path, b: Path) -> bool:
-    return a.resolve() == b.resolve()
+    if a.resolve() == b.resolve():
+        return True
+    return a.exists() and b.exists() and os.path.samefile(a, b)
+
+
+def output_problems(checkpoint: Path, out: Path) -> list[str]:
+    """Le uscite che fallirebbero solo DOPO il training (minuti persi): si controllano prima di cominciare."""
+    problems = []
+    blocked = _blocking_file(out)
+    if blocked is not None:
+        problems.append(f"--out {out}: non si può usare come cartella, {blocked} è un file")
+    elif (out / TRACE_FILE).is_dir():
+        problems.append(f"--out {out}: contiene una cartella {TRACE_FILE}, al posto del file della storia")
+    elif not _writable(out):
+        problems.append(f"--out {out}: non hai i permessi per scriverci")
+    if checkpoint.is_dir():
+        problems.append(f"--checkpoint {checkpoint}: è una cartella, serve un file (es. prova/gpt.pt)")
+    elif (blocked := _blocking_file(checkpoint.parent)) is not None:
+        problems.append(f"--checkpoint {checkpoint}: {blocked} è un file, non una cartella")
+    elif not _writable(checkpoint.parent):
+        problems.append(f"--checkpoint {checkpoint}: non hai i permessi per scrivere in {checkpoint.parent}")
+    return problems
+
+
+def _blocking_file(folder: Path) -> Path | None:
+    """Il primo antenato esistente di ``folder`` (o ``folder`` stessa), se è un file e non una cartella."""
+    for candidate in (folder, *folder.parents):
+        if candidate.exists():
+            return None if candidate.is_dir() else candidate
+    return None
+
+
+def _writable(folder: Path) -> bool:
+    existing = next(p for p in (folder, *folder.resolve().parents) if p.exists())
+    return os.access(existing, os.W_OK)
 
 
 # --------------------------------------------------------------------------- main
@@ -280,10 +414,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     model = GPTLanguageModel(config).to(device)
-    architecture, training = reference_differences(model, train_cfg, recorder_cfg, _read_course_manifest())
+    course = _read_course_manifest()
+    code = _read_course_code()
+    architecture, training = reference_differences(model, train_cfg, recorder_cfg, course, code)
     problems = webapp_problems(args, architecture, training)
     if problems:
         print_refusal(architecture + training, problems)
+        return 1
+    unusable = output_problems(args.checkpoint, args.out)
+    if unusable:  # prima del training: dopo, i minuti di calcolo andrebbero persi
+        print("\n".join(["Errore: le uscite non si possono scrivere:", *(f"  - {p}" for p in unusable)]),
+              file=sys.stderr)
         return 1
 
     recorder = TrainingRecorder(tokenizer, splits.val, config.block_size, recorder_cfg)
@@ -310,7 +451,8 @@ def main(argv: list[str] | None = None) -> int:
         spec = export(args.checkpoint)
         print(f"web app aggiornata da: {spec['source']}")
     if architecture or training or not _inside(args.out, WEBAPP_DATA_DIR):
-        print("\n".join(next_steps(args.checkpoint, args.out, same_layout=not architecture)))
+        same_layout = same_layout_as_course(model, course)
+        print("\n".join(next_steps(args.checkpoint, args.out, same_layout=same_layout)))
     return 0
 
 

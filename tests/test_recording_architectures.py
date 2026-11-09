@@ -174,6 +174,35 @@ class ModernGPT(nn.Module):
         return logits, next_token_loss(logits, targets)
 
 
+class SharedBlockGPT(nn.Module):
+    """UN Block del corso riusato n_layer volte: pesi condivisi tra gli strati, come ALBERT."""
+
+    def __init__(self, config: GPTConfig) -> None:
+        super().__init__()
+        self.config = config
+        self.token_embedding_table = nn.Embedding(config.vocab_size, config.n_embd)
+        self.position_embedding_table = nn.Embedding(config.block_size, config.n_embd)
+        self.block = Block(config)
+        self.ln_f = nn.LayerNorm(config.n_embd)
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size)
+
+    def forward(self, idx, targets=None):
+        pos = torch.arange(idx.shape[1], device=idx.device)
+        x = self.token_embedding_table(idx) + self.position_embedding_table(pos)
+        for _ in range(self.config.n_layer):
+            x = self.block(x)
+        logits = self.lm_head(self.ln_f(x))
+        return logits, next_token_loss(logits, targets)
+
+
+class TiedGPT(GPTLanguageModel):
+    """Il GPT del corso con il weight tying: lm_head usa la matrice (V, C) dell'embedding dei token."""
+
+    def __init__(self, config: GPTConfig) -> None:
+        super().__init__(config)
+        self.lm_head.weight = self.token_embedding_table.weight
+
+
 def record(model, tokenizer, splits, out_dir):
     recorder = TrainingRecorder(tokenizer, splits.val, BLOCK, REC_CFG)
     train(model, splits, BLOCK, TRAIN_CFG, CPU, log=lambda _msg: None, callbacks=[recorder])
@@ -388,17 +417,70 @@ def test_bad_attention_weights_are_reported_instead_of_raised(tokenizer):
         def forward(self, x):
             return x
 
-    net = nn.Sequential(WrongShape(), Scores(), OtherSignature())
+    class FoldedHeads(nn.Module):
+        def attention_weights(self, x):  # head e batch fusi: (B·H, T, T) sembra UNA head con B·H esempi
+            B, T, C = x.shape
+            q = x.view(B, T, 2, C // 2).transpose(1, 2).reshape(B * 2, T, C // 2)
+            future = torch.ones(T, T, dtype=torch.bool).triu(1)
+            return F.softmax((q @ q.transpose(-2, -1)).masked_fill(future, float("-inf")), dim=-1)
+
+        def forward(self, x):
+            return x
+
+    net = nn.Sequential(WrongShape(), Scores(), OtherSignature(), FoldedHeads())
     x = torch.randn(2, BLOCK, 16)
     problems = []
     with capture_attention(net, problems=problems) as attention:
         net(x)
         net(x)  # una volta sola per modulo, anche con più forward
-    assert attention == {} and len(problems) == 3
+    assert attention == {} and len(problems) == 4
     assert "forma" in problems[0] and "non sono probabilità" in problems[1] and "TypeError" in problems[2]
+    assert "batch (2)" in problems[3] and "view(B, H, T, T)" in problems[3]
     with pytest.raises(AttentionWeightsError, match="forma"), capture_attention(net):
         net(x)
     assert not net[0]._forward_hooks  # gli hook se ne vanno anche dopo un errore
+
+
+def test_the_attention_method_is_looked_up_without_running_anything():
+    class Lazy(nn.Module):  # una property con quel nome non è il metodo, e cercarla non deve calcolarla
+        @property
+        def attention_weights(self):
+            raise AssertionError("la property non doveva essere calcolata")
+
+    assert attention_sites(nn.Sequential(Lazy())) == []
+
+
+def test_a_block_reused_in_every_layer_gives_one_row_per_pass(tokenizer, splits, tmp_path):
+    config = tiny_config(tokenizer, n_layer=3)
+    model = SharedBlockGPT(config)
+    sites = attention_sites(model)
+    assert [(s.path, s.layer, s.layer_path) for s in sites] == [("block.sa.heads.0", 0, ""),
+                                                               ("block.sa.heads.1", 0, "")]
+    with capture_attention(model) as attention:
+        model(torch.randint(config.vocab_size, (2, BLOCK)))
+    # 3 passaggi dello stesso blocco: una riga ciascuno (prima: un solo strato con 6 head)
+    assert list(attention) == [(row, h) for row in range(3) for h in range(2)]
+    assert not torch.equal(attention[(0, 0)], attention[(1, 0)])  # la stessa head su ingressi diversi
+
+    trace, _ = record(model, tokenizer, splits, tmp_path)
+    assert all([len(row) for row in s["attention_entropy"]] == [2, 2, 2] for s in trace["snapshots"])
+    note = next(n for n in trace["notes"] if n.startswith("attention:"))
+    assert "3 strati con 2 head" in note and "1 (il modello intero)" in note and "passaggio" in note
+
+
+def test_shared_weights_are_recorded_once_per_name_with_a_note(tokenizer, splits, tmp_path):
+    model = TiedGPT(tiny_config(tokenizer))
+    trace, _ = record(model, tokenizer, splits, tmp_path / "training")
+    names = [p["name"] for p in trace["params"]]
+    # Negli snapshot ci sono i due nomi (come nello state_dict e nel run), nei gruppi solo il primo.
+    assert "lm_head.weight" in names and "token_embedding_table.weight" in names
+    grouped = [n for group in trace["group_params"].values() for n in group]
+    assert "lm_head.weight" not in grouped and trace["group_params"]["lm_head"] == ["lm_head.bias"]
+    note = next(n for n in trace["notes"] if n.startswith("pesi condivisi:"))
+    assert "lm_head.weight = token_embedding_table.weight" in note and "token_embedding" in note
+    info = export_run(weights_from_model(model, vocab=tokenizer.chars), tmp_path / "run", name="Legati",
+                      training_dir=tmp_path / "training")
+    assert not any("tensori diversi" in n or "non coincide" in n for n in info["notes"])
 
 
 # --------------------------------------------------------------------------- registrazione completa

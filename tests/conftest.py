@@ -18,7 +18,10 @@ from gpt.model import GPTLanguageModel
 
 def _test_threads() -> int:
     raw = os.environ.get("GPT_TEST_THREADS", "1")
-    value = int(raw) if raw.strip().isdigit() else 0
+    try:
+        value = int(raw)
+    except ValueError:  # anche "²", che per str.isdigit è una cifra ma int() non legge
+        value = 0
     if value <= 0:
         raise pytest.UsageError(f"GPT_TEST_THREADS deve essere un intero positivo, trovato {raw!r}")
     return value
@@ -26,9 +29,10 @@ def _test_threads() -> int:
 
 TEST_THREADS = _test_threads()
 torch.set_num_threads(TEST_THREADS)
-# Anche gli script che i test lanciano in un processo a parte: torch legge queste variabili all'avvio.
+# Anche gli script che i test lanciano in un processo a parte (torch legge queste variabili all'avvio):
+# gli stessi thread del processo dei test, anche se nella shell c'era già un altro OMP_NUM_THREADS.
 for _variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS"):
-    os.environ.setdefault(_variable, str(TEST_THREADS))
+    os.environ[_variable] = str(TEST_THREADS)
 
 
 @pytest.fixture(autouse=True)

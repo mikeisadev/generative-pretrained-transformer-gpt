@@ -92,13 +92,26 @@ def test_a_field_added_to_the_config_becomes_an_option(script):
         script.add_dataclass_options(parser, Clash, "y__")
 
 
+def test_a_new_field_named_like_a_fixed_option_is_explained(script, monkeypatch):
+    @dataclasses.dataclass(frozen=True)
+    class MyTrainConfig:  # TrainConfig con un campo aggiunto che lo script ha già come opzione sua
+        max_iters: int = 5000
+        log_every: int = 50
+
+    monkeypatch.setattr(script, "TrainConfig", MyTrainConfig)
+    with pytest.raises(SystemExit, match="log_every di MyTrainConfig ha lo stesso nome"):
+        script.parse_args([])  # prima: argparse.ArgumentError, un traceback in inglese
+
+
 def test_bad_options_are_explained_in_italian(script, capsys):
     cases = ((["--n-layer", "sei"], "serve un numero intero"), (["--threads", "0"], "intero positivo"),
-             (["--snapshot-steps", "a,b"], "step interi"))
+             (["--snapshot-steps", "a,b"], "step interi"), (["--learning-rate", "nan"], "numero finito"),
+             (["--n-leyer", "3"], "opzioni sconosciute: --n-leyer"), (["--n-layer"], "serve un valore"))
     for argv, message in cases:
         with pytest.raises(SystemExit):
             script.parse_args(argv)
-        assert message in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert message in err and "Errore:" in err and "error:" not in err and err.startswith("uso: ")
 
 
 def test_the_reference_training_is_recognized(script):
@@ -111,6 +124,33 @@ def test_the_reference_training_is_recognized(script):
     assert any("nuovi blocks.4" in d for d in architecture)
     assert any("n_layer=5 invece di 4" in d for d in architecture)
     assert training == ["training: max_iters=10 invece di 5000", "registrazione: log_every=5 invece di 25"]
+
+
+def test_the_protection_sees_buffers_shared_weights_and_model_code(script):
+    course = course_manifest()
+    config = GPTConfig(vocab_size=len(course["vocab"]))
+    defaults = (TrainConfig(), RecorderConfig())
+
+    with_buffer = GPTLanguageModel(config)  # nessun parametro nuovo, ma un tensore in più negli snapshot
+    with_buffer.register_buffer("temperature", torch.ones(1))
+    architecture, _ = script.reference_differences(with_buffer, *defaults, course)
+    assert any("nuovi temperature" in d for d in architecture)
+
+    tied = GPTLanguageModel(config)  # nomi e forme del corso, ma un tensore condiviso (non "mancante")
+    tied.lm_head.weight = tied.token_embedding_table.weight
+    assert script.reference_differences(tied, *defaults, course)[0] == [
+        "pesi condivisi: lm_head.weight è lo stesso tensore di token_embedding_table.weight"]
+
+    # Il codice dei moduli: un calcolo nuovo con gli stessi pesi (es. GELU) cambia l'impronta.
+    course_model = GPTLanguageModel(config)
+    other_code = script.reference_differences(course_model, *defaults, course, "0" * 64)[0]
+    assert len(other_code) == 1 and "codice dei moduli" in other_code[0]
+    assert "gpt/feedforward.py" in other_code[0]
+    code = script._read_course_code()
+    if code is None:
+        pytest.skip("webapp/data/benchmark/builtin.json non ancora generato")
+    # Il codice attuale è quello misurato in builtin.json: il comando del README resta permesso.
+    assert script.reference_differences(course_model, *defaults, course, code) == ([], [])
 
 
 def test_experiments_never_write_into_the_course_files(script):
@@ -128,7 +168,27 @@ def test_experiments_never_write_into_the_course_files(script):
     assert problems("--out", "x", "--no-export", architecture=(), training=("training: max_iters=6",)) == []
     assert problems(architecture=()) == []  # il training di riferimento scrive dove ha sempre scritto
     assert problems("--out", "x", architecture=()) == ["--no-export"]  # pesi nuovi con la storia vecchia
+    # ... e il contrario: storia nuova in webapp/data accanto ai pesi vecchi
+    assert problems("--no-export", architecture=()) == ["--out checkpoints/esperimento/training"]
     assert problems("--update-webapp") == []  # chi cambia il GPT del corso lo dice esplicitamente
+
+
+def test_unusable_outputs_are_refused_before_training(script, tiny_text, tmp_path, monkeypatch, capsys):
+    def no_training(*_args, **_kwargs):
+        raise AssertionError("il training non doveva cominciare")
+
+    monkeypatch.setattr(script, "train", no_training)
+    a_file = tmp_path / "un-file"
+    a_file.write_text("x", encoding="utf-8")
+    checkpoint = str(tmp_path / "c.pt")
+    cases = ((["--out", str(a_file), "--checkpoint", checkpoint], "non si può usare come cartella"),
+             (["--out", str(a_file / "sotto"), "--checkpoint", checkpoint], "è un file"),
+             (["--out", str(tmp_path / "out"), "--checkpoint", str(tmp_path)], "è una cartella"))
+    for argv, message in cases:
+        assert script.main([*TINY, "--no-export", *argv]) == 1  # prima: un traceback DOPO il training
+        err = capsys.readouterr().err
+        assert "le uscite non si possono scrivere" in err and message in err
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["un-file"]  # niente scritto
 
 
 def test_the_script_refuses_before_training(script, tiny_text, monkeypatch, capsys):
