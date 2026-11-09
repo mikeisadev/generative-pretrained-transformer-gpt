@@ -2,8 +2,11 @@
  * Link diretti e ricerca globale del Laboratorio pesi (app.goto → instance.goto): tensor:, run:, view:,
  * action: (links.js li riconosce) più i tipi registrati dalla fase 2 con tab.links.register.
  */
+import { showToast } from "../../core/ui/share.js";
 import { resolveTarget } from "./links.js";
 import { COURSE_RUN_ID } from "./state.js";
+
+const INT = new Intl.NumberFormat("it-IT", { useGrouping: "always", maximumFractionDigits: 0 });
 
 const narrow = window.matchMedia("(max-width: 900px)");
 
@@ -85,6 +88,12 @@ async function gotoTensor(tab, name, step) {
   }
   if (id !== state.runA) await state.setRunA(id, { step });
   else if (step !== state.step) await state.setStep(step);
+  // uno step che non è uno snapshot salvato (es. il 750 interpolato della vista "Pesi numerici" del
+  // Transformer) si aggancia al più vicino: lo si dice, invece di mostrare in silenzio altri pesi
+  if (step !== null && state.step !== step) {
+    const where = state.step === null ? "i pesi finali (il run non ha la storia del training)" : `lo snapshot più vicino, step ${INT.format(state.step)}`;
+    showToast(`Lo step ${INT.format(step)} non è uno snapshot salvato: mostro ${where}. Gli step intermedi: interpolazione nel pannello Modello.`, { duration: 5200 });
+  }
   if (narrow.matches) tab.ui.sidebar.toggleCollapsed(true);
   return tab.inspect(path, { focus: true, code: true, source: "link" });
 }

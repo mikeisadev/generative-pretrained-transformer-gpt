@@ -132,7 +132,8 @@ export function createRunsPane(pane, tab) {
     if (first || tab.ui.player?.action) return; // all'avvio la didascalia è di index.js; un'azione ha la sua
     const entry = state.entry(runId);
     const run = state.run(runId);
-    tab.setCaption(`Nella scena: «${entry?.name ?? ""}»${run ? `, ${fmtInt(run.totalParams)} parametri` : ""}. Avvicinati per le celle colorate e poi i numeri veri.`);
+    const short = window.matchMedia("(max-width: 900px)").matches; // sul telefono una riga sola
+    tab.setCaption(short ? `Nella scena: «${entry?.name ?? ""}».` : `Nella scena: «${entry?.name ?? ""}»${run ? `, ${fmtInt(run.totalParams)} parametri` : ""}. Avvicinati per le celle colorate e poi i numeri veri.`);
   });
 
   async function save(id) {
@@ -210,7 +211,9 @@ export function createRunsPane(pane, tab) {
 
   /** La riga di stato del caricamento; `replace: false` (un caricamento superato) aggiunge invece di sostituire. */
   function showStatus(ok, bad, busy = null, replace = true) {
-    const lines = [...ok.map((t) => el("p", { className: "lab-ok-line" }, t)), ...bad.map((t) => el("p", { className: "lab-error" }, t)), ...(busy ? [el("p", { className: "lab-busy" }, busy)] : [])];
+    // i messaggi della libreria cominciano in minuscolo ("i file selezionati pesano…"): qui sono frasi intere
+    const sentence = (t) => (t ? t[0].toLocaleUpperCase("it-IT") + t.slice(1) : t);
+    const lines = [...ok.map((t) => el("p", { className: "lab-ok-line" }, sentence(t))), ...bad.map((t) => el("p", { className: "lab-error" }, sentence(t))), ...(busy ? [el("p", { className: "lab-busy" }, busy)] : [])];
     if (replace) status.replaceChildren(...lines);
     else status.append(...lines);
   }

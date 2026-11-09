@@ -101,6 +101,9 @@ code.lab-act-seg { font-family: "JetBrains Mono", ui-monospace, monospace; font-
 .lab-act-table td { color: #e0f2fe; }
 
 /* ---------------------------------------------------------------- durante un'azione */
+/* la didascalia della scena tace durante un'azione: c'è quella del player, e la sua riga finiva sotto la
+   barra (a 1100 px e sul telefono va a capo e una parola usciva sotto il player) */
+.lab-tab.lab-act-playing .caption { visibility: hidden; }
 @media (min-width: 901px) {
   /* il codice più stretto lascia la scena alle matrici; più basso per non finire sotto la lavagna */
   .lab-tab.lab-act-playing .code-panel { width: min(440px, 32vw); }

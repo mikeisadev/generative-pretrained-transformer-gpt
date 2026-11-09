@@ -84,7 +84,7 @@ export function trueSpec({ run, engine, label, prompt = NETWORK_PROMPT, fraction
   return {
     ...spec,
     title: `Rete neurale vera di «${run.name}»`,
-    intro: `I neuroni VERI del run, con i pesi di ${label}: ogni sfera ha il valore calcolato dal motore JS per il prompt d'esempio «${shown}» (${ids.length} token, uno dietro l'altro in profondità). Di lato leggi il flusso da sinistra a destra; girando la camera vedi l'attention che collega i token.`,
+    intro: `I neuroni VERI del run (pesi: ${label}): ogni sfera ha il valore calcolato dal motore JS per il prompt d'esempio «${shown}» (${ids.length} token, uno dietro l'altro in profondità). Di lato leggi il flusso da sinistra a destra; girando la camera vedi l'attention che collega i token.`,
   };
 }
 

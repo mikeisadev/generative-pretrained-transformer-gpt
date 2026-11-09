@@ -68,7 +68,8 @@ export async function createTab(root, app) {
   // larghezza; compare al primo clic su una matrice o su un modulo (tab.inspect → tab.showCode)
   ui.codePanel.hide();
   await state.init(); // GPT del corso come run A: la scena si costruisce (evento runA), i pannelli si riempiono
-  tab.setCaption(narrow.matches ? "Pizzica per avvicinarti: celle e poi numeri. Tocca una matrice." : "Avvicinati con la rotellina: prima le celle colorate, poi i numeri veri. Clic su una matrice per la sua tabella.");
+  // sul telefono una riga sola: due righe finivano sotto il codice ridotto (in basso, core.css)
+  tab.setCaption(narrow.matches ? "Pizzica per i numeri. Tocca una matrice." : "Avvicinati con la rotellina: prima le celle colorate, poi i numeri veri. Clic su una matrice per la sua tabella.");
 
   // fase 2 (animazioni; confronto, grafici, benchmark): dopo scena e pannelli, prima di Cervello e Fonti
   for (const install of [installLabActions, installLabAnalysis]) {

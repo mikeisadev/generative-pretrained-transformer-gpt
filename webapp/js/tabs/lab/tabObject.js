@@ -48,8 +48,11 @@ function createTabObject({ app, ui, spec, state }) {
       if (!node) return false;
       state.select(path);
       // dalla scena (e sempre sul telefono) il codice si apre ridotto: aprirlo intero sposterebbe la scena
-      // sotto il puntatore (il pannello copre la destra); la riga di codice è comunque nel pannello Tensore
-      if (code) tab.showCode(path, { expand: source !== "scene" && !narrow.matches });
+      // sotto il puntatore (il pannello copre la destra); la riga di codice è comunque nel pannello Tensore.
+      // Sul telefono un tocco sulla scena non lo apre nemmeno ridotto: in basso coprirebbe scena e didascalia
+      // («Mostra il codice» del pannello Tensore lo apre); se è già aperto si aggiorna.
+      const keepClosed = narrow.matches && source === "scene" && ui.codePanel.root.hidden;
+      if (code && !keepClosed) tab.showCode(path, { expand: source !== "scene" && !narrow.matches });
       const isTensor = node.kind === "param" || node.kind === "buffer";
       // dalla scena (o per un tensore) i numeri sono nel pannello Tensore; sul telefono il cassetto resta chiuso
       if (!narrow.matches && (source === "scene" || source === "link" || isTensor)) ui.sidebar.select("tensore");

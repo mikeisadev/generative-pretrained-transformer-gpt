@@ -780,6 +780,19 @@ test("modalità differenza: A − B nella scena, resta accesa durante i ricalcol
   assert.equal(scene.customValues.size, 0);
   assert.equal(state.mode, "pesi");
   action = false;
+  // un altro run A: il motivo ("è partita un'azione") riguardava il run di prima e non si dice più
+  const told = [];
+  const offTold = diff.on((x) => told.push(x.reason));
+  await state.setRunA(COURSE_RUN_ID, { step: 500 });
+  await state.setRunA(COURSE_RUN_ID);
+  assert.equal(diff.state.reason, "action", "stesso run A (solo lo step): il motivo resta");
+  const other = { ...builtin, id: "upload:altro", name: "altro", tensors: builtin.tensors, params: builtin.params, snapshots: [], steps: [], summary: () => ({}), compatibleWithEngine: false, engine: { issues: [] } };
+  state.addRuns([other]);
+  await state.setRunA("upload:altro");
+  assert.equal(diff.state.reason, "", "run A cambiato: niente motivo vecchio");
+  assert.deepEqual(told.at(-1), "");
+  offTold();
+  await state.setRunA(COURSE_RUN_ID);
   // senza B si spegne da sola
   diff.setEnabled(true);
   await state.setRunB(null);

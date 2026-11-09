@@ -35,6 +35,30 @@ export function installScene(tab) {
   let tipTimer = 0;
 
   // --- LOD: Dettaglio (matrici e numeri) / Moduli / Panoramica
+  // Su uno stage più stretto (telefono, codice aperto) per vedere lo stesso modulo la camera sta più lontana:
+  // le soglie si moltiplicano per un fattore. Il LOD lo chiede a ogni frame e visibleAspect() legge il layout
+  // (misurato: 40-75 µs per frame a riposo): si ricalcola solo dopo un ridimensionamento, e vale dal primo
+  // movimento della camera che cambia la distanza (rotellina, volo). Ridurre il codice o chiudere i grafici
+  // allarga la parte visibile ma lascia le celle grandi uguali sullo schermo: cambiare subito il fattore
+  // faceva sparire le celle (Dettaglio → Moduli) con la camera ferma.
+  const scaleNow = () => Math.min(3, Math.max(1, REFERENCE_ASPECT / Math.max(0.2, host.visibleAspect())));
+  let distanceScale = scaleNow();
+  let pendingScale = false;
+  let distanceAtResize = 0;
+  host.onResize(() => {
+    pendingScale = true;
+    distanceAtResize = host.zoomDistance();
+  });
+  const currentScale = () => {
+    if (pendingScale) {
+      const d = host.zoomDistance();
+      if (Math.abs(d - distanceAtResize) > 1e-3 * Math.max(1, d)) {
+        distanceScale = scaleNow();
+        pendingScale = false;
+      }
+    }
+    return distanceScale;
+  };
   const lod = new LODController(host, {
     levels: [
       { id: "detail", label: "Dettaglio", maxDistance: LOD_DISTANCES.detail, group: scene.levels.detail },
@@ -47,12 +71,14 @@ export function installScene(tab) {
       hideTip();
     },
     onPick: (mode) => pickLevel(mode),
-    // su uno stage più stretto (telefono) per vedere lo stesso modulo la camera sta più lontana
-    distanceScale: () => Math.min(3, Math.max(1, REFERENCE_ASPECT / Math.max(0.2, host.visibleAspect()))),
+    distanceScale: currentScale,
   });
 
-  // --- numeri nelle celle: una chiamata per frame, che a camera ferma esce subito
-  host.onFrame(() => scene.numbers.update(host.camera, host.container.clientHeight));
+  // --- numeri nelle celle: una chiamata per frame, che a camera ferma esce subito; solo nel Dettaglio (negli
+  // altri livelli le matrici sono nascoste e setLevel invalida il gruppo: tornando giù i numeri si rifanno)
+  host.onFrame(() => {
+    if (scene.level === "detail") scene.numbers.update(host.camera, host.container.clientHeight);
+  });
 
   // --- navigazione: una parete da guardare di fronte (niente testo a specchio, niente vista dall'alto),
   // e abbastanza vicino da leggere i numeri (doc di matrixNumbers: minDistance 0,15-0,25)

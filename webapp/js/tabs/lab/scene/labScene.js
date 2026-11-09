@@ -270,7 +270,9 @@ export class LabScene {
       const title = small ? it.title.split(" · ")[0] : it.title;
       const sub = small ? fmtInt(it.params) : `${fmtInt(it.params)} parametri · ${fmtPct(it.share)}`;
       const key = atlas.add({ key: `M|${title}|${sub}`, align: "center", lines: [[{ text: title, font: "big", px: PX.big, color: lighten(colorOf(it.role)) }], [{ text: sub, font: "sub", px: PX.bigSub, color: "#e2e8f0" }]] });
-      if (small) return { key, x: (it.x0 + it.x1) / 2, y: it.y1 + 0.5, anchor: "bottom-center", scale: 1.7 / (PX.big * 1.28), maxW: w + 1.2, z: it.z + 0.05 };
+      // titolo alto 2,4 unità (era 1,7: ~7 px sullo schermo nella Panoramica, "Embedding" quasi illeggibile);
+      // la larghezza resta quella dell'isola più poco, così le etichette vicine (ln_f, lm_head) non si toccano
+      if (small) return { key, x: (it.x0 + it.x1) / 2, y: it.y1 + 0.5, anchor: "bottom-center", scale: 2.4 / (PX.big * 1.28), maxW: w + 1.2, z: it.z + 0.05 };
       const titleH = Math.min((it.y1 - it.y0) * 0.16, 3.4);
       return { key, x: (it.x0 + it.x1) / 2, y: (it.y0 + it.y1) / 2, anchor: "center", scale: titleH / (PX.big * 1.28), maxW: w * 0.9, z: it.z + 0.05 };
     });
