@@ -71,3 +71,195 @@
 @media (min-width: 901px) {
   .tab-root[data-tab="transformer"]:has(.charts-panel.open) .stage-toolbar { top: 56px; left: 10px; right: auto; }
 }
+
+/* ---------------------------------------------------------------- Rete neurale: disposizione "A righe" / "Orizzontale con profondità" */
+/* Interruttore (radiogroup): due voci con icona; nel riquadro della vista etichette intere, nello stage compatte */
+.tf-arrange { display: inline-flex; gap: 2px; padding: 3px; background: #0b1220; border: 1px solid #334155; border-radius: 10px; }
+.tf-arrange-option { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; font-size: 12.5px; line-height: 1.2; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 7px; white-space: nowrap; }
+.tf-arrange-option:hover { color: var(--text); border-color: #334155; }
+.tf-arrange-option.active { color: #e0f2fe; background: rgba(56, 189, 248, 0.16); border-color: var(--accent); }
+.tf-arrange-option:focus-visible, .tf-bar-btn:focus-visible { outline: 2px solid #e0f2fe; outline-offset: 1px; }
+.tf-arrange-icon { width: 16px; height: 13px; flex: none; fill: currentColor; opacity: 0.85; }
+.tf-arrange-short { display: none; }
+.tf-arrange-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 2px 0 10px; }
+.tf-arrange-caption { font-size: 12px; color: var(--muted); letter-spacing: 0.03em; text-transform: uppercase; }
+
+/* Barra dello stage, in alto a sinistra sotto ☰ e il selettore dello zoom (seconda fila): niente la copre */
+.tf-neuron-bar { position: absolute; top: 56px; left: 10px; z-index: 11; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: calc(100% - 20px); }
+.tf-neuron-bar[hidden], .tf-bar-tools[hidden] { display: none; }
+.tf-neuron-bar .tf-arrange { background: var(--panel); }
+.tf-bar-tools { display: flex; gap: 4px; padding: 3px; background: var(--panel); border: 1px solid #334155; border-radius: 10px; }
+.tf-bar-btn { padding: 4px 9px; font-size: 12.5px; line-height: 1.2; white-space: nowrap; background: #1e293b; }
+.tf-bar-primary { border-color: rgba(56, 189, 248, 0.6); }
+/* i chip della navigazione (in alto al centro) scendono sotto la barra */
+.tab-root[data-tab="transformer"].tf-neurons-on .nav-hud { top: 100px; }
+/* in profondità il livello di dettaglio è della rete stessa (lastre da lontano, sfere da vicino): lo zoom del tab non serve */
+.tab-root[data-tab="transformer"].tf-depth-on .lod-switch { visibility: hidden; }
+@media (min-width: 901px) {
+  /* Grafici aperti: la barra "Vista d'insieme · Flusso" scende nella seconda fila (regola sopra): la nostra va nella terza */
+  .tab-root[data-tab="transformer"]:has(.charts-panel.open) .tf-neuron-bar { top: 100px; max-width: calc(100% - 490px); }
+  .tab-root[data-tab="transformer"].tf-neurons-on:has(.charts-panel.open) .nav-hud { top: 144px; }
+}
+@media (min-width: 901px) and (max-width: 1280px) {
+  .tf-neuron-bar .tf-arrange-label { display: none; }
+  .tf-neuron-bar .tf-arrange-short { display: inline; }
+  /* con i grafici aperti la barra va a capo su due file: i chip della navigazione scendono sotto entrambe */
+  .tab-root[data-tab="transformer"].tf-neurons-on:has(.charts-panel.open) .nav-hud { top: 182px; }
+}
+/* Telefono: prima fila ☰ e barra del tab, seconda il selettore dello zoom, terza questa barra (etichette brevi);
+   in profondità il selettore dello zoom non serve e la barra prende la sua fila */
+@media (max-width: 900px) {
+  .tf-neuron-bar { top: 96px; }
+  .tf-neuron-bar .tf-arrange-label { display: none; }
+  .tf-neuron-bar .tf-arrange-short { display: inline; }
+  .tf-neuron-bar .tf-arrange-option, .tf-bar-btn { padding: 4px 7px; font-size: 12px; }
+  .tab:not(.sidebar-collapsed) .tf-neuron-bar { display: none; }
+  .tab-root[data-tab="transformer"].tf-neurons-on .nav-hud { top: 140px; }
+  /* in profondità il selettore dello zoom non c'è: la barra sale nella sua fila e lascia più scena alla rete */
+  .tab-root[data-tab="transformer"].tf-depth-on .tf-neuron-bar { top: 54px; }
+  .tab-root[data-tab="transformer"].tf-neurons-on.tf-depth-on .nav-hud { top: 98px; }
+}
+@media (max-width: 420px) {
+  .tf-neuron-bar .tf-arrange-icon { display: none; }
+}
+
+/* Etichetta del neurone sotto il puntatore (rete orizzontale) */
+.tf-depth-tip { position: absolute; z-index: 18; pointer-events: none; display: flex; flex-direction: column; gap: 1px; max-width: min(300px, calc(100% - 12px)); padding: 6px 9px; font-size: 12px; color: var(--muted); background: var(--panel-solid); border: 1px solid #334155; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45); }
+.tf-depth-tip[hidden] { display: none; }
+.tf-depth-tip strong { color: var(--text); font-size: 12.5px; }
+.tf-depth-value { color: #fde68a; font-variant-numeric: tabular-nums; }
+.tf-depth-head { display: inline-flex; align-items: center; gap: 5px; }
+.tf-depth-head i { width: 10px; height: 3px; border-radius: 2px; }
+.tf-depth-hint { margin-top: 3px; padding-top: 3px; border-top: 1px solid #334155; color: #a5f3fc; }
+/* scheda del neurone in profondità: dove sta nella rete orizzontale */
+.tf-card .tf-depth-where { margin: 4px 0 2px; padding: 3px 8px; font-size: 12px; color: var(--muted); background: rgba(103, 232, 249, 0.07); border-left: 2px solid #67e8f9; border-radius: 0 6px 6px 0; }
+.tf-card .tf-depth-where b { color: var(--text); font-weight: 600; }
+
+/* Riquadro della vista in profondità: assi, analogia, onestà, comandi, legenda */
+/* pezzi di una sola disposizione: [hidden] deve vincere sui display di .tf-row (flex) e .tf-legend (grid) */
+.tf-depth-intro[hidden], .tf-depth-controls[hidden], .tf-depth-legend[hidden], .tf-rows-intro[hidden], .tf-row[hidden], .tf-legend[hidden], .tf-start[hidden] { display: none; }
+.tf-axes { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; color: var(--muted); }
+.tf-axes b { display: inline-block; min-width: 1.2em; font-family: "JetBrains Mono", ui-monospace, monospace; }
+.tf-analogy { padding: 6px 10px; border-left: 3px solid #a3e635; background: rgba(163, 230, 53, 0.06); border-radius: 0 8px 8px 0; font-size: 13px; }
+.tf-honesty p { font-size: 12.5px; color: var(--muted); }
+.tf-depth-controls { display: grid; gap: 8px; }
+.tf-depth-controls .tf-row button { padding: 5px 9px; font-size: 12.5px; }
+.tf-depth-legend h4 { margin: 12px 0 4px; }
+.tf-positions button.tf-all { font-family: inherit; padding: 3px 8px; }
+
+/* ---------------------------------------------------------------- vista "Pesi numerici" (views/numbers*.js) */
+/* Barra dello stage: stessa fila e stesse regole della barra della Rete neurale (sotto ☰ e il selettore dello zoom) */
+.tab-root[data-tab="transformer"] { --tf-numbers-top: 56px; }
+.tf-numbers-bar { position: absolute; top: var(--tf-numbers-top, 56px); left: 10px; z-index: 11; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: calc(100% - 20px); }
+.tf-numbers-bar[hidden], .tf-numbers-step[hidden], .tf-training-controls[hidden] { display: none; }
+.tf-numbers-bar .tf-arrange { background: var(--panel); }
+/* il gruppo dello step (cursore, cartellino dello step, ▶) si restringe fino a un cursore di 90 px invece di
+   finire sotto il codice; una larghezza vera e non solo flex-basis: la barra (posizionata, larga quanto il
+   contenuto) la conta */
+.tf-numbers-step { flex: 0 1 auto; width: 330px; max-width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; }
+.tf-numbers-step .tf-step { flex: 1 1 auto; min-width: 90px; }
+.tf-numbers-step .tf-bar-btn { flex: none; }
+/* cartellino dello step accanto al cursore: vero (azzurro) o stima (giallo, come l'etichetta del pannello) */
+.tf-bar-step { flex: none; min-width: 66px; padding: 2px 6px; font-size: 12px; line-height: 1.3; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; color: #e0f2fe; border: 1px solid transparent; border-radius: 6px; }
+.tf-bar-step:empty { display: none; }
+.tf-bar-step.estimate { color: #fef08a; background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.45); }
+/* I suggerimenti della navigazione (nav-hud) scendono sotto la barra, alla sua altezza vera (--tf-numbers-h,
+   misurata da numbersView.js: la barra va a capo quando il codice o i grafici stringono la scena), e sotto il
+   selettore delle rappresentazioni quando questo trova posto solo più in basso (--rep-safe-top del nucleo). */
+.tab-root[data-tab="transformer"].tf-numbers-on .nav-hud { top: max(calc(var(--tf-numbers-top, 56px) + var(--tf-numbers-h, 34px) + 10px), var(--rep-safe-top, 0px)); }
+@media (min-width: 901px) {
+  /* il codice sta a destra nella stessa fila: la barra si ferma prima e, se serve, va a capo */
+  .tab-root[data-tab="transformer"]:has(.code-panel:not([hidden])) .tf-numbers-bar { max-width: calc(100% - min(560px, 42vw) - 44px); }
+  .tab-root[data-tab="transformer"]:has(.charts-panel.open) { --tf-numbers-top: 100px; }
+  .tab-root[data-tab="transformer"]:has(.charts-panel.open) .tf-numbers-bar { max-width: calc(100% - 490px); }
+  /* grafici aperti e codice visibile: il codice si aggancia in fondo alla colonna dei grafici (core.css,
+     CodePanel.followCharts) e a destra della barra resta solo quella colonna: vale il limite dei grafici */
+  .tab-root[data-tab="transformer"]:has(.code-panel:not([hidden])):has(.charts-panel.open) .tf-numbers-bar { max-width: calc(100% - 490px); }
+  /* i suggerimenti della navigazione restano sotto la barra anche con i grafici aperti: la regola del nucleo
+     per i grafici aperti (nav.css, più specifica di quella sopra) li metteva alla sua altezza, sopra la barra */
+  .tab-root[data-tab="transformer"].tf-numbers-on:has(.charts-panel.open) .nav-hud { top: max(calc(var(--tf-numbers-top, 56px) + var(--tf-numbers-h, 34px) + 10px), var(--rep-safe-top, 0px)); }
+}
+@media (min-width: 901px) and (max-width: 1280px) {
+  .tf-numbers-bar .tf-arrange-label { display: none; }
+  .tf-numbers-bar .tf-arrange-short { display: inline; }
+  /* Grafici aperti: la scena visibile è stretta (260-560 px). La seconda fila è della barra strumenti, la
+     terza del selettore delle rappresentazioni (non trova altro posto: senza, finirebbe sopra la barra
+     strumenti); le barre delle viste scendono nella quarta. */
+  .tab-root[data-tab="transformer"]:has(.charts-panel.open) { --tf-numbers-top: 144px; }
+  .tab-root[data-tab="transformer"]:has(.charts-panel.open) .tf-neuron-bar { top: 144px; }
+  .tab-root[data-tab="transformer"].tf-neurons-on:has(.charts-panel.open) .nav-hud { top: 226px; }
+}
+@media (max-width: 900px) {
+  .tab-root[data-tab="transformer"] { --tf-numbers-top: 96px; }
+  .tf-numbers-bar .tf-arrange-label { display: none; }
+  .tf-numbers-bar .tf-arrange-short { display: inline; }
+  .tf-numbers-bar .tf-arrange-option, .tf-numbers-bar .tf-bar-btn { padding: 4px 7px; font-size: 12px; }
+  .tab:not(.sidebar-collapsed) .tf-numbers-bar { display: none; }
+}
+
+/* Cursore degli step: il binario con le tacche degli snapshot veri (le grandi ogni 1000 step) */
+.tf-step { position: relative; min-width: 0; }
+.tf-step-track { position: relative; height: 22px; }
+.tf-step-range { position: absolute; inset: 0; width: 100%; margin: 0; accent-color: var(--accent); background: transparent; cursor: pointer; }
+.tf-step-range:focus-visible { outline: 2px solid #e0f2fe; outline-offset: 2px; border-radius: 4px; }
+.tf-step-ticks { position: absolute; left: 8px; right: 8px; bottom: 0; height: 6px; pointer-events: none; }
+.tf-step-tick { position: absolute; bottom: 0; width: 1px; height: 4px; margin-left: -0.5px; background: #64748b; }
+.tf-step-tick.major { height: 6px; background: #94a3b8; }
+.tf-step-labels { position: relative; height: 14px; margin: 1px 8px 0; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tf-step-labels span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.tf-step-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.tf-step-value { color: #e0f2fe; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.tf-step-chips { display: flex; flex-wrap: wrap; gap: 3px; margin: 6px 0 2px; }
+.tf-step-chip { min-width: 34px; padding: 2px 6px; font-size: 11.5px; font-variant-numeric: tabular-nums; border-radius: 6px; }
+.tf-step-chip[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.18); color: #e0f2fe; }
+.tf-step-chip:focus-visible, .tf-tensor-item:focus-visible { outline: 2px solid #e0f2fe; outline-offset: 1px; }
+.tf-training-controls { display: grid; gap: 4px; margin: 8px 0 4px; }
+.tf-check { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; font-size: 12.5px; color: var(--text); cursor: pointer; }
+.tf-check input { margin-top: 2px; accent-color: var(--accent); }
+.tf-check small { color: var(--muted); }
+/* pulsante dentro una frase (porta a un'azione): sembra un link, ma è un pulsante vero (tastiera, lettori di schermo) */
+.tf-text-link { display: inline; padding: 0; font: inherit; color: #7dd3fc; background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.tf-text-link:hover { color: #bae6fd; }
+.tf-text-link:focus-visible { outline: 2px solid #e0f2fe; outline-offset: 2px; border-radius: 3px; }
+
+/* Etichetta onesta della sorgente: vero (azzurro) o stima (giallo) */
+.tf-source-note { margin: 8px 0 4px; padding: 6px 10px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: rgba(56, 189, 248, 0.06); }
+.tf-source-note strong { display: block; font-size: 13px; color: #e0f2fe; }
+.tf-source-note p { margin: 3px 0 0; }
+.tf-source-note.estimate { border-left-color: #facc15; background: rgba(250, 204, 21, 0.07); }
+.tf-source-note.estimate strong { color: #fef08a; }
+
+/* Elenco dei tensori raggruppati come il codice */
+.tf-tensor-groups { display: grid; gap: 4px; margin: 6px 0 8px; }
+.tf-tensor-section { border: 1px solid var(--border); border-radius: 8px; background: rgba(15, 23, 42, 0.5); }
+.tf-tensor-section > summary { padding: 5px 9px; cursor: pointer; font-size: 12.5px; color: var(--text); }
+.tf-tensor-section > summary small { color: var(--muted); }
+.tf-tensor-group { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; color: #93c5fd; }
+.tf-tensor-list { list-style: none; margin: 0; padding: 0 4px 5px; display: grid; gap: 1px; }
+.tf-tensor-item { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 3px 6px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 6px; }
+.tf-tensor-item:hover { border-color: #334155; background: rgba(56, 189, 248, 0.06); }
+.tf-tensor-item.active { border-color: var(--accent); background: rgba(56, 189, 248, 0.14); }
+.tf-tensor-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text); }
+.tf-tensor-shape { flex: none; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Scheda del tensore scelto */
+.tf-num-card { --tt-max-height: 300px; }
+.tf-num-card h4 { margin-top: 0; }
+.tf-pyline { margin: 4px 0; padding: 4px 7px; background: #0b1220; border: 1px solid #1e293b; border-radius: 6px; overflow-x: auto; white-space: nowrap; }
+.tf-pyline code { font: 12px "JetBrains Mono", ui-monospace, monospace; color: #a5f3fc; }
+.tf-pyline small { color: var(--muted); }
+.tf-num-actions button { font-size: 12.5px; padding: 5px 9px; }
+.tf-num-actions button:disabled { opacity: 0.5; cursor: default; }
+
+/* Cella sotto il puntatore, nella scena */
+.tf-num-tip { position: absolute; z-index: 18; pointer-events: none; display: flex; flex-direction: column; gap: 1px; max-width: min(320px, calc(100% - 12px)); padding: 6px 9px; font-size: 12px; color: var(--muted); background: var(--panel-solid); border: 1px solid #334155; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45); }
+.tf-num-tip[hidden] { display: none; }
+.tf-num-tip strong { font: 600 12px "JetBrains Mono", ui-monospace, monospace; color: #fbbf24; word-break: break-all; }
+.tf-num-value { color: #fde68a; font-variant-numeric: tabular-nums; font-size: 13px; }
+.tf-num-hint { margin-top: 3px; padding-top: 3px; border-top: 1px solid #334155; color: #a5f3fc; }
+
+/* la didascalia scorre sopra matrici piene di numeri: una fascia scura la tiene leggibile */
+.tab-root[data-tab="transformer"].tf-numbers-on .caption { padding: 3px 10px; border-radius: 8px; background: rgba(13, 17, 23, 0.82); }
+
+/* "Flusso" disattivato dove il flusso non si vede o lo muove un'azione */
+.tab-root[data-tab="transformer"] .flow-toggle:disabled { opacity: 0.45; cursor: default; border-color: #334155; }

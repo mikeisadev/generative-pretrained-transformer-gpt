@@ -10,13 +10,16 @@
  *   actionIndex.js    azione "Indicizzazione"; actionSearch.js azione "Ricerca"
  *   plots.js          grafici; content.js percorso e fonti; snippets.js / codeSource.js codice
  *   board.js, scene3d.js mattoni grafici comuni
+ *   network.js        rappresentazione "Rete neurale" (specifica ricalcolata con la domanda attuale)
+ *   brain.js          rappresentazione e pannello "Cervello" (soli dati, dalla ricerca verificata)
  *
  * Eventi tra tab (app.bus):
  *   ascolta  "rag:query"  {detail: {question}}  → imposta la domanda e avvia la ricerca
  *   invia    "transformer:view" {view: "contesto", question} → il tab Transformer mostra la vista Contesto
  * In alternativa all'evento, l'indirizzo #rag/q=<domanda> avvia la ricerca (all'apertura del tab o
  * quando l'indirizzo cambia). I link diretti #rag/go=<kind>:<id> (ricerca globale) arrivano a goto():
- *   step:<id del Percorso>, action:indicizzazione|ricerca, view:detail|blocks|macro (livelli dello zoom).
+ *   step:<id del Percorso>, action:indicizzazione|ricerca, view:detail|blocks|macro (livelli dello zoom),
+ *   view:rete|cervello (rappresentazioni del nucleo).
  * L'indice della ricerca globale sta in search.js (solo dati, senza la scena).
  */
 import * as THREE from "three";
@@ -25,6 +28,7 @@ import { meshBounds } from "../../core/director.js";
 import { createTabLayout } from "../../core/layout.js";
 import { installStepKeys } from "../../core/stepKeys.js";
 import { LODController } from "../../core/lod.js";
+import { installRepresentations } from "../../core/representations.js";
 import { parseHash } from "../../core/search.js";
 import { Menu } from "../../core/ui/menu.js";
 import { indexAction } from "./actionIndex.js";
@@ -312,7 +316,37 @@ export async function createTab(root, app) {
   // --- sidebar
   const panePath = sidebar.addPane({ id: "percorso", title: "Percorso", hint: HINT });
   const paneActions = sidebar.addPane({ id: "azioni", title: "Azioni", hint: "Animazioni passo per passo: controlli in basso per pausa, passo avanti/indietro e velocità." });
+
+  // --- rappresentazioni del nucleo: "Rete neurale" e "Cervello" (il pannello Cervello va prima di Fonti).
+  // Azioni, passi del Percorso e link riportano da soli all'Architettura (ritorno automatico del nucleo).
+  const reps = installRepresentations(ui, {
+    tabId: "rag",
+    app,
+    network: {
+      // cache: false = load() a ogni apertura del livello (anche quando il tab torna visibile con la rete
+      // aperta): la rete si apre sempre con la domanda e la configurazione di adesso (~0,6 ms). Una rete
+      // già aperta resta quella della domanda scritta nella sua introduzione: "Cerca" fa partire un'azione
+      // e il nucleo torna da solo all'Architettura.
+      load: () => import("./network.js").then((m) => m.buildRagNetworkSpec({ kb: tab.kb, ...networkSearch() })),
+      cache: false,
+      description: "La pipeline come rete: il nostro embedder e la ricerca nel database con i numeri veri della tua domanda, poi l'encoder e l'LLM di un RAG vero (illustrativi). Girando la camera vedi i chunk in profondità.",
+    },
+    brain: {
+      load: () => import("./brain.js").then((m) => m.brainSpec),
+      description: "L'ippocampo e la memoria: le analogie tra il RAG e il cervello, con i loro limiti e le fonti, e il circuito dell'ippocampo in 3D.",
+    },
+  });
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Documentazione e sorgenti da cui vengono codice, numeri e parametri." });
+
+  /**
+   * La ricerca da disegnare e da dove viene (l'introduzione della rete lo dice): la domanda del pannello
+   * Azioni o, se il campo è vuoto, l'ultima ricerca mostrata, altrimenti la domanda d'esempio iniziale.
+   */
+  function networkSearch() {
+    if (settings.question.trim()) return { run: tab.currentSearch(), origin: "panel" };
+    if (world.search?.run) return { run: world.search.run, origin: "last" };
+    return { run: runSearch(tab.kb, EXAMPLE_QUESTIONS[2].question, { topK: settings.topK, similarityThreshold: settings.threshold }), origin: "example" };
+  }
 
   function menuVars() {
     const kb = tab.kb;
@@ -440,6 +474,8 @@ export async function createTab(root, app) {
         onchange: (e) => {
           settings[key] = e.target.value;
           note.textContent = presets[settings[key]].note;
+          // il database torna vuoto: si guarda nell'Architettura (una rete aperta sarebbe quella di prima)
+          void reps.show("main");
           rebuild();
           tab.setCaption("Nuova configurazione: database vuoto. Avvia l'Indicizzazione.");
         },
@@ -528,8 +564,12 @@ export async function createTab(root, app) {
 
   window.__ragTab = tab; // per il debug dalla console e per gli screenshot automatici
 
-  /** Link diretto o risultato della ricerca globale: porta il tab su un passo, un'azione o un livello. */
+  /** Link diretto o risultato della ricerca globale: porta il tab su un passo, un'azione, un livello o una rappresentazione. */
   async function goto({ kind, id }) {
+    // view:rete | view:cervello aprono la rappresentazione; per tutto il resto il nucleo chiude prima il
+    // livello alternativo (null) e si prosegue nella scena del tab
+    const shown = reps.goto({ kind, id });
+    if (shown) return shown;
     if (kind === "step") return tab.menu.reveal(id, { sidebar }); // apre il Percorso sul passo
     // Azioni e livelli si guardano nella scena: sul telefono il cassetto della sidebar la coprirebbe.
     const showScene = () => phone.matches && sidebar.toggleCollapsed(true);
@@ -560,6 +600,7 @@ export async function createTab(root, app) {
     tab,
     goto,
     activate() {
+      // con la rete aperta il nucleo la ricrea qui (host.start) con una specifica nuova (cache: false)
       host.start();
       host.resize();
     },

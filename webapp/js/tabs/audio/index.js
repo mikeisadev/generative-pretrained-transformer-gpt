@@ -13,10 +13,13 @@
  *   snippets.js / upstream.js    codice vero nel pannello di destra
  *   audioOut.js                  riproduzione con Web Audio
  *   catalog.js / search.js       nomi di azioni e viste; indice della ricerca globale (solo dati)
+ *   network.js / brain.js        rappresentazioni "Rete neurale" (con i numeri veri del laboratorio) e
+ *                                "Cervello" (soli dati, viste del nucleo: core/representations.js)
  *
  * Navigazione libera (ui.nav, dal nucleo): "Centra" = "Vista d'insieme", confini = tutta la pipeline.
  * Link diretti #audio/go=<kind>:<id> (ricerca globale) arrivano a goto():
- *   step:<id del Percorso>, action:audio-sound|audio-rvq|audio-generate|audio-whisper,
+ *   view:rete|cervello (rappresentazioni del nucleo), step:<id del Percorso>,
+ *   action:audio-sound|audio-rvq|audio-generate|audio-whisper,
  *   view:overview|delayCore|rvq|whisperAll (pannello Viste) oppure detail|blocks|macro (livelli dello zoom).
  */
 import * as THREE from "three";
@@ -25,6 +28,7 @@ import { el, fmt } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
 import { installStepKeys } from "../../core/stepKeys.js";
 import { LODController } from "../../core/lod.js";
+import { installRepresentations } from "../../core/representations.js";
 import { Menu } from "../../core/ui/menu.js";
 import { installActions } from "./actions.js";
 import { AudioOut } from "./audioOut.js";
@@ -274,6 +278,10 @@ export async function createTab(root, app) {
       labPane.selectStyle(id);
       plots?.setStyle(id);
       labPane.setStatus(`Brano scelto: "${lab.songs[id].style.prompt}".`);
+      // La "Rete neurale" mostra i numeri veri del brano: se è aperta si rifà subito con quelli del brano
+      // nuovo, sulla stessa scena e con la stessa camera (reps.refresh); chiusa, la si costruisce
+      // all'apertura (cache: false).
+      if (reps.current === "network") void reps.refresh("network");
     },
   };
 
@@ -282,6 +290,24 @@ export async function createTab(root, app) {
   const paneActions = sidebar.addPane({ id: "azioni", title: "Azioni", hint: "Animazioni passo per passo: usa play/pausa, avanti/indietro e la velocità nella barra in basso." });
   const paneLab = sidebar.addPane({ id: "lab", title: "Laboratorio", hint: "Tutto calcolato qui nel browser: ascolta, cambia i codebook, genera." });
   const paneViews = sidebar.addPane({ id: "viste", title: "Viste" });
+  // Rappresentazioni del nucleo: selettore "Architettura · Rete neurale · Cervello" e pannello "Cervello",
+  // che deve stare prima di "Fonti". Le due viste vivono in un livello sopra lo stage; il nucleo torna da
+  // solo all'Architettura quando lo studente chiede qualcosa della scena (un passo, una vista, un'azione,
+  // "Genera subito", un link diretto): il tab non ha richieste che arrivino da altre strade (eventi del bus).
+  const reps = installRepresentations(ui, {
+    tabId: "audio",
+    app,
+    network: {
+      // i numeri dipendono dal brano scelto nel Laboratorio: la specifica si rifà a ogni apertura (~5 ms)
+      load: () => import("./network.js").then((m) => m.buildAudioNetworkSpec(lab, { style: state.style })),
+      cache: false,
+      description: "Quattro reti dell'audio neurone per neurone, da sinistra a destra: EnCodec, il codec del tab con i numeri veri, MusicGen e Whisper. Girando la camera vedi il tempo in profondità: convoluzioni tra frame vicini, voci dei codebook, delay pattern, attention tra i frame.",
+    },
+    brain: {
+      load: () => import("./brain.js").then((m) => m.brainSpec),
+      description: "La via uditiva del cervello (coclea, tronco encefalico, talamo, corteccia uditiva) e le analogie con l'audio, ognuna con i suoi limiti e le fonti.",
+    },
+  });
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Paper originali e codice ufficiale da cui vengono i numeri dei modelli reali." });
 
   const err = lab.relativeError();
@@ -493,7 +519,12 @@ export async function createTab(root, app) {
    * Link diretto o risultato della ricerca globale: porta il tab su un passo, un'azione, una vista o
    * un livello dello zoom. Restituisce false per un id sconosciuto (il guscio avvisa lo studente).
    */
-  async function goto({ kind, id }) {
+  async function goto(target) {
+    // view:rete e view:cervello mostrano la rappresentazione; per tutto il resto un livello aperto si chiude
+    // (si torna all'Architettura) e si prosegue come sempre
+    const shown = reps.goto(target);
+    if (shown) return shown;
+    const { kind, id } = target;
     if (kind === "step") return tab.menu.reveal(id, { sidebar }); // apre il Percorso sul passo
     // Azioni e viste si guardano nella scena: sul telefono il cassetto della sidebar la coprirebbe.
     const showScene = () => phone.matches && sidebar.toggleCollapsed(true);

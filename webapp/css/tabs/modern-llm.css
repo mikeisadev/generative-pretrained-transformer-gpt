@@ -72,7 +72,7 @@
    zoom, così resta raggiungibile e si espande con il suo pulsante. */
 @media (max-width: 899px) {
   .tab-root[data-tab="modern-llm"]:has(.player-bar:not([hidden])) .code-panel {
-    top: 112px;
+    top: calc(112px + var(--mllm-subtabs-h, 0px));
     bottom: auto;
   }
 }
@@ -116,3 +116,236 @@
   .mllm-where-actions button { padding: 7px 12px; font-size: 13px; }
   .mllm-where-row { display: none; } /* la riga della griglia: sul telefono basta il nome del meccanismo */
 }
+
+/* ------------------------------------------------------------------------------------------------
+   Sottotab (subtabs.js): "Vista d'insieme" / "Architettura completa". La barra sta nel flusso, sopra
+   lo stage e allineata a lui: lo stage parte sotto (top = altezza della barra), quindi ☰, zoom, pad,
+   player e didascalia restano dove sono rispetto allo stage. Grafici, codice e il loro pulsante sono
+   figli della radice del tab (non dello stage): li spostiamo della stessa altezza.
+   ------------------------------------------------------------------------------------------------ */
+.tab-root[data-tab="modern-llm"] { --mllm-subtabs-h: 42px; }
+.mllm-subtabs {
+  position: absolute;
+  top: 0;
+  left: var(--menu-w);
+  right: 0;
+  height: var(--mllm-subtabs-h);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 12px;
+  background: var(--panel-solid);
+  border-bottom: 1px solid var(--border);
+  transition: left 0.25s ease;
+  container: mllm-subtabs / inline-size;
+}
+.sidebar-collapsed .mllm-subtabs { left: 0; }
+.mllm-has-subtabs .tab-stage { top: var(--mllm-subtabs-h); }
+.mllm-has-subtabs > .charts-fab { top: calc(10px + var(--mllm-subtabs-h)); }
+.mllm-has-subtabs > .charts-panel { top: var(--mllm-subtabs-h); }
+@media (min-width: 901px) {
+  .mllm-has-subtabs > .code-panel {
+    top: calc(56px + var(--mllm-subtabs-h));
+    max-height: calc(100% - 120px - var(--mllm-subtabs-h));
+  }
+}
+@media (max-width: 900px) {
+  .tab-root[data-tab="modern-llm"] { --mllm-subtabs-h: 40px; }
+  .mllm-subtabs { left: 0; gap: 6px; padding: 0 8px; }
+  .tab.mllm-has-subtabs:not(.code-stays-bottom):has(.player-bar:not([hidden])) > .code-panel { top: calc(112px + var(--mllm-subtabs-h)); }
+}
+
+.mllm-subtabs-list {
+  display: flex;
+  gap: 3px;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0b1324;
+}
+.mllm-subtab {
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mllm-subtab:hover { color: var(--text); border-color: #334155; }
+.mllm-subtab.active { color: #e0f2fe; background: rgba(56, 189, 248, 0.14); border-color: var(--accent); }
+.mllm-subtabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mllm-subtab-short { display: none; }
+.mllm-subtabs-context { display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: auto; }
+.mllm-subtabs-context button { padding: 5px 12px; font-size: 13px; white-space: nowrap; }
+/* "← Torna …": ben visibile (ambra, come i pesi appresi del corso) */
+.mllm-subtabs-back { border-color: #f59e0b; background: rgba(245, 158, 11, 0.16); color: #fde68a; font-weight: 600; }
+.mllm-subtabs-back:hover { background: rgba(245, 158, 11, 0.26); border-color: #fbbf24; }
+.mllm-subtabs-link { min-width: 0; overflow: hidden; text-overflow: ellipsis; border-color: #0e7490; background: rgba(14, 116, 144, 0.18); color: #bae6fd; }
+.mllm-subtabs-link:hover { background: rgba(14, 116, 144, 0.3); }
+/* barra stretta (telefono, sidebar aperta a 1100 px): etichette brevi, titolo intero nel tooltip */
+@container mllm-subtabs (max-width: 780px) {
+  .mllm-subtabs-list .mllm-subtab-long { display: none; }
+  .mllm-subtabs-list .mllm-subtab-short { display: inline; }
+  .mllm-subtab { padding: 5px 10px; }
+  .mllm-subtabs-context button { padding: 5px 9px; font-size: 12.5px; }
+}
+/* il ritorno resta scritto per intero finché c'è posto: deve vedersi bene */
+@container mllm-subtabs (max-width: 600px) {
+  .mllm-subtabs-context .mllm-subtab-long { display: none; }
+  .mllm-subtabs-context .mllm-subtab-short { display: inline; }
+}
+@container mllm-subtabs (max-width: 430px) {
+  .mllm-subtabs-link { display: none; } /* sul telefono il collegamento sta nel Percorso */
+  .mllm-subtab { padding: 5px 8px; font-size: 12.5px; }
+}
+
+/* Rappresentazioni del nucleo (core/representations.js): con "Rete neurale" o "Cervello" aperti, reps.css
+   nasconde i comandi del tab che sono figli della radice (.rep-alt-active, visibility: hidden). La barra dei
+   sottotab invece resta visibile e usabile: sceglierne uno chiude prima il livello (index.js). Specificità
+   (0,5,0) contro (0,4,0) della regola del nucleo: non dipende dall'ordine dei fogli di stile. */
+.tab.tab-root[data-tab="modern-llm"].rep-alt-active > .mllm-subtabs { visibility: visible; }
+
+/* Il pannello "Cervello" del nucleo aggiunge una scheda alla sidebar: 6 nella vista d'insieme, 7 nella
+   completa (index.js la tiene subito prima di "Fonti"). Restano su una riga sola, come le 6 della vista
+   completa prima di lei: con "Cervello" e "Fonti" a capo la barra sembrava rotta. Misure a 1600, 1280, 1100
+   e 390 px: 358 e 364 px di schede nei 379 della barra. */
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) { gap: 2px; padding-left: 6px; padding-right: 6px; }
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) > button { padding: 6px 7px; font-size: 12.5px; }
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]):has(> button[data-pane="full-pesi"]:not([hidden])) > button { padding: 6px 5px; font-size: 12px; }
+/* Telefono (cassetto di 342 px): le schede chiedevano 346 px (6, vista d'insieme) e 350 px (7, vista completa) e
+   "Fonti" finiva da sola sulla seconda riga. Meno aria ai lati e tra le schede: 305 e 316 px, bersagli alti
+   32 px e larghi almeno 32. */
+@media (max-width: 900px) {
+  .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) { gap: 1px; padding-left: 4px; padding-right: 4px; }
+  .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) > button { padding: 6px 4px; }
+  .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]):has(> button[data-pane="full-pesi"]:not([hidden])) { gap: 1px; padding-left: 4px; padding-right: 4px; }
+  .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]):has(> button[data-pane="full-pesi"]:not([hidden])) > button { padding: 6px 3px; }
+}
+
+/* Pulsanti in fondo a un passo del Percorso: animazione e collegamento all'architettura completa */
+.mllm-step-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.mllm-step-buttons .mllm-run { margin: 0; }
+.mllm-where-full { font-size: 13px; border-color: #0e7490; background: rgba(14, 116, 144, 0.16); color: #bae6fd; }
+.mllm-where-full:hover { background: rgba(14, 116, 144, 0.3); }
+
+/* ------------------------------------------------------------------------------------------------
+   Architettura completa (full/*.js)
+   ------------------------------------------------------------------------------------------------ */
+/* Sei pannelli nella sidebar (uno in più della vista d'insieme): schede un po' più compatte, così stanno
+   su una riga sola (con "Fonti" da sola sulla seconda riga la barra sembrava rotta). */
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(button[data-pane="full-pesi"]:not([hidden])) { gap: 2px; padding-left: 8px; padding-right: 8px; }
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(button[data-pane="full-pesi"]:not([hidden])) button { padding: 6px 8px; font-size: 13px; }
+
+/* 901-1280 px: core.css toglie l'etichetta "Zoom: …" quando lo stage ha una barra strumenti (qui il
+   selettore del modello), ma con "Auto" è l'unico posto che dice il livello attivo. Torna quando lo
+   stage è abbastanza largo da tenerla accanto al selettore del modello (sidebar chiusa, o da 1240 px). */
+@media (min-width: 901px) and (max-width: 1280px) {
+  .tab-root[data-tab="modern-llm"].sidebar-collapsed .lod-switch .lod-title { display: inline; }
+}
+@media (min-width: 1240px) and (max-width: 1280px) {
+  .tab-root.tab[data-tab="modern-llm"] .lod-switch .lod-title { display: inline; }
+}
+
+/* Con i grafici aperti (460 px a destra, sopra lo stage) il selettore del modello finirebbe sotto il
+   pannello: scende nella seconda fila, sotto il pulsante ☰ (come la barra del Transformer). */
+@media (min-width: 901px) {
+  .tab-root[data-tab="modern-llm"]:has(.charts-panel.open) .mllm-toolbar { top: 56px; left: 10px; right: auto; }
+}
+
+/* «Grafici» si illumina quando un passo o un'azione ha dei grafici ma accanto alla scena non c'era
+   posto per aprirli da soli (full/index.js, openChartsIfRoom). */
+.charts-fab.mllm-charts-hint { border-color: var(--accent); color: #e0f2fe; box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.35); animation: mllm-charts-hint 0.9s ease-in-out 3; }
+@keyframes mllm-charts-hint { 50% { box-shadow: 0 0 0 7px rgba(56, 189, 248, 0.1); } }
+@media (prefers-reduced-motion: reduce) {
+  .charts-fab.mllm-charts-hint { animation: none; }
+}
+
+/* Selettore del modello nella barra strumenti dello stage (posizione: core.css, .stage-toolbar) */
+.mllm-toolbar-label { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid #334155; border-radius: 10px; background: var(--panel); font-size: 12px; color: var(--muted); }
+.mllm-select { font: inherit; font-size: 13px; color: var(--text); background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 4px 6px; max-width: 100%; }
+.mllm-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 900px) {
+  .mllm-toolbar-label > span { display: none; } /* sul telefono basta il nome del modello */
+  .mllm-toolbar-label { padding: 2px; }
+  .mllm-select { font-size: 12px; max-width: 168px; }
+}
+
+/* Suggerimento sui segnaposto dei 16 meccanismi (segue il puntatore, mai per frame) */
+.mllm-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 17;
+  max-width: 320px;
+  padding: 8px 10px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: var(--panel-solid);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  font-size: 12.5px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+.mllm-tip[hidden] { display: none; }
+.mllm-tip strong { display: block; color: #e0f2fe; }
+.mllm-tip small { display: block; margin-top: 4px; color: var(--muted); }
+
+/* Pannelli della vista completa */
+.mllm-full-pane .view-switch { margin-bottom: 6px; }
+.mllm-full-pane .view-switch button[disabled] { opacity: 0.45; cursor: default; }
+.mllm-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.mllm-field select { flex: 1; min-width: 0; }
+.mllm-full-pane .mllm-run[aria-pressed="true"] { border-color: #f59e0b; background: rgba(245, 158, 11, 0.12); color: #fde68a; }
+
+/* I 16 meccanismi: numero colorato, testo, due azioni */
+.mllm-mechs { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mllm-mech { display: grid; grid-template-columns: 26px 1fr; gap: 4px 8px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: #0b1324; }
+.mllm-mech.absent { border-style: dashed; }
+.mllm-mech-num { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; color: #0b1220; font-weight: 800; font-size: 12px; }
+.mllm-mech.absent .mllm-mech-num { color: #cbd5e1; }
+.mllm-mech strong { display: block; font-size: 13px; }
+.mllm-mech small { display: block; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.mllm-mech-actions { grid-column: 2; display: flex; gap: 6px; flex-wrap: wrap; }
+.mllm-mech-actions button { padding: 3px 9px; font-size: 12px; }
+
+/* Schede dei modelli della vista completa */
+.mllm-model.active { border-color: var(--accent); }
+.mllm-why { margin: 0 0 6px; font-size: 12.5px; color: #cbd5e1; }
+.mllm-active { margin: 6px 0 0; font-size: 12.5px; color: #7dd3fc; font-weight: 600; }
+.mllm-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mllm-checks li { display: grid; grid-template-columns: 30px 1fr; gap: 0 8px; font-size: 12.5px; }
+.mllm-checks li > span { grid-row: span 2; align-self: start; text-align: center; border-radius: 6px; font-weight: 700; padding: 1px 0; }
+.mllm-checks .ok { background: rgba(74, 222, 128, 0.16); color: #86efac; }
+.mllm-checks .no { background: rgba(248, 113, 113, 0.16); color: #fca5a5; }
+.mllm-checks small { color: var(--muted); }
+.mllm-landscape { display: grid; gap: 6px; }
+.mllm-landscape article { padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; }
+.mllm-landscape article.unverified { border-style: dashed; }
+.mllm-landscape p { margin: 2px 0 0; }
+
+/* "da verificare": pillola ambra, la spiegazione sta nel tooltip e nel testo accessibile */
+.mllm-doubt { display: inline-block; margin-left: 6px; padding: 0 7px; border: 1px dashed #f59e0b; border-radius: 999px; color: #fde68a; background: rgba(120, 53, 15, 0.35); font-size: 11.5px; font-weight: 600; cursor: help; }
+.mllm-doubt:focus-visible { outline: 2px solid #f59e0b; outline-offset: 1px; }
+
+/* Pannello Pesi: barre della ripartizione, precisioni, tensori */
+.mllm-bars { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 5px; }
+.mllm-bars li { display: grid; grid-template-columns: 1fr; gap: 2px; font-size: 12.5px; }
+.mllm-bar-label { color: var(--text); }
+.mllm-bar { height: 8px; border-radius: 4px; background: #1e293b; overflow: hidden; }
+.mllm-bar > span { display: block; height: 100%; background: linear-gradient(90deg, #a78bfa, #7c3aed); border-radius: 4px; }
+.mllm-bar-value { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.mllm-precision { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 12.5px; }
+.mllm-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.mllm-tensors, .mllm-recon { margin: 4px 0; border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; }
+.mllm-tensors summary, .mllm-recon summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.mllm-tensors ul { margin: 6px 0; padding-left: 16px; font-size: 12px; }
+.mllm-tensors code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11.5px; color: #e0f2fe; word-break: break-all; }
+.mllm-dtype { font-weight: 600; }
+.mllm-recon table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 4px 0; }
+.mllm-recon th { text-align: left; font-weight: 500; color: var(--muted); padding: 2px 6px 2px 0; }
+.mllm-recon td { font-variant-numeric: tabular-nums; }
+.mllm-caution { color: #fde68a; }

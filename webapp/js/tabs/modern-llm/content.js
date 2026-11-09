@@ -8,9 +8,14 @@
  * Campi extra dei sottopunti del percorso (letti da index.js):
  *   focus   id della regione da inquadrare        code    chiave dello snippet (snippets.js)
  *   action  id dell'azione animata suggerita      charts  id della sezione di grafici da aprire
+ *
+ * Il tab ha due sottotab con due Percorsi: OVERVIEW_PATH (la "Vista d'insieme", qui sotto) e
+ * FULL_PATH (l'"Architettura completa", in full/content.js). PATH li unisce: è l'elenco di TUTTI i
+ * passi del tab, con id univoci, quello che leggono la ricerca globale e i test.
  */
+import { FULL_PATH } from "./full/content.js";
 
-export const PATH = [
+export const OVERVIEW_PATH = [
   {
     id: "idea",
     title: "1. Dal nostro GPT ai modelli di oggi",
@@ -277,6 +282,9 @@ export const PATH = [
     ],
   },
 ];
+
+/** Tutti i passi del tab: vista d'insieme e architettura completa (vedi l'intestazione). */
+export const PATH = [...OVERVIEW_PATH, ...FULL_PATH];
 
 /** Schede dei modelli: solo numeri con fonte (il nostro GPT viene da data/model.json). */
 export const MODEL_CARDS = [

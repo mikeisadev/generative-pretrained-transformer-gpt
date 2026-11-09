@@ -6,14 +6,17 @@
  *   lod.js           zoom semantico Dettaglio / Blocchi / Panoramica
  *   views/weights.js vista "Pesi" (sovrapposizione: dove sono i parametri)
  *   views/neurons.js vista "Rete neurale" (tutti i neuroni e le connessioni)
+ *   views/numbers.js vista "Pesi numerici" (i numeri veri nelle matrici, anche durante il training)
  *   actions/index.js azioni animate: prompt → token → … → output, training (+ grafici)
  *   context/index.js vista "Contesto": RAG + system prompt + tool → richiesta all'LLM
  * Ogni modulo esporta `install(tab)`; l'oggetto `tab` è descritto in webapp/ARCHITECTURE.md.
+ * Rappresentazioni del nucleo (selettore "Architettura · Rete neurale · Cervello"): installReps qui sotto.
  */
 import * as THREE from "three";
 import { meshBounds } from "../../core/director.js";
 import { el } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
+import { installRepresentations } from "../../core/representations.js";
 import { installStepKeys } from "../../core/stepKeys.js";
 import { Menu } from "../../core/ui/menu.js";
 import { installActions } from "./actions/index.js";
@@ -24,7 +27,8 @@ import { installContext } from "./context/index.js";
 import { loadModelSpec } from "./data.js";
 import { DataFlow } from "./flow.js";
 import { installLod } from "./lod.js";
-import { installNeuronsView } from "./views/neurons.js";
+import { NEURON_LINKS, installNeuronsView } from "./views/neurons.js";
+import { BIRTH_VIEW_ID, installNumbersView } from "./views/numbers.js";
 import { installWeightsView } from "./views/weights.js";
 import { modelSummaryTable, weightsTable } from "./weightsTables.js";
 
@@ -46,7 +50,10 @@ class ViewManager {
     pane.append(this.list);
   }
 
-  /** view = { id, label, description, order?, enter(tab), exit(tab), home?(tab) → Promise } */
+  /**
+   * view = { id, label, description, order?, enter(tab), exit(tab), home?(tab) → Promise, flow? }
+   * flow: true se nella vista il flusso dei dati gira da solo sul binario (il pulsante "Flusso" ha senso)
+   */
   register(view) {
     this.views.push(view);
     this.views.sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
@@ -79,6 +86,11 @@ class ViewManager {
 
   has(id) {
     return this.views.some((v) => v.id === id);
+  }
+
+  /** La vista attiva (oggetto registrato) o null. */
+  get currentView() {
+    return this.views.find((v) => v.id === this.current) ?? null;
   }
 
   /** Vola sull'inquadratura iniziale della vista attiva (predefinita: la pila intera). */
@@ -198,6 +210,7 @@ export async function createTab(root, app) {
     label: "Architettura",
     description: "Il modello come lo descrive il codice: matrici, head, blocchi e flusso dei dati.",
     order: 0,
+    flow: true,
     enter: (t) => {
       arch.root.visible = true;
       arch.rail.visible = true;
@@ -219,12 +232,15 @@ export async function createTab(root, app) {
   installLod(tab);
   installWeightsView(tab);
   installNeuronsView(tab);
+  installNumbersView(tab);
   installActions(tab);
   installContext(tab);
+  // dopo i pannelli e PRIMA di "Fonti": il pannello "Cervello" del nucleo sta prima delle fonti
+  installReps(tab);
   sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Da dove vengono codice, architettura e scelte di training." }).append(renderSources(SOURCES));
 
   // --- controlli generali
-  const playFlow = el("button", { type: "button", className: "flow-toggle", onclick: () => (playFlow.textContent = flow.toggle() ? "⏸ Flusso" : "▶ Flusso") }, "⏸ Flusso");
+  const playFlow = installFlowButton(tab);
   // "Vista d'insieme" fa la stessa cosa di "Centra" (tasto C): l'inquadratura iniziale della vista attiva.
   const overview = el("button", { type: "button", className: "overview-button", title: "Torna alla vista d'insieme (tasto C)", onclick: () => ui.nav.home() }, "Vista d'insieme");
   stage.append(el("div", { className: "stage-toolbar" }, overview, playFlow));
@@ -239,7 +255,10 @@ export async function createTab(root, app) {
     const { view, question } = typeof e.detail === "string" ? { view: e.detail } : e.detail ?? {};
     app.open("transformer");
     if (question) app.bus.dispatchEvent(new CustomEvent("context:question", { detail: { question } }));
-    if (view) tab.views.activate(view);
+    if (!view) return;
+    // una richiesta che non passa da un gesto nel tab: prima la scena del tab (si chiude un Cervello aperto)
+    tab.reps?.sync(view === "neuroni" ? "network" : "main");
+    tab.views.activate(view);
   });
 
   tab.menu.select("data.dataset");
@@ -260,6 +279,76 @@ export async function createTab(root, app) {
     deactivate: () => host.stop(), // la navigazione si ferma da sola (niente scivolate al ritorno)
     goto: (target) => gotoTarget(tab, target),
   };
+}
+
+/**
+ * Pulsante "Flusso" della barra dello stage: ferma o fa ripartire il pacchetto che scorre sul binario.
+ * L'etichetta segue SEMPRE lo stato vero (anche quando una vista o un'azione fermano il flusso da sole,
+ * evento onChange di DataFlow) e il pulsante si disattiva dove il flusso non si vede o non è suo: nelle
+ * viste senza `flow: true` (Rete neurale, Pesi numerici, Contesto) e durante un'azione, che muove il
+ * pacchetto da sé. Prima, nella Rete neurale, faceva partire un flusso invisibile che sostituiva la
+ * didascalia e restava "⏸ Flusso" anche a flusso fermo.
+ */
+function installFlowButton(tab) {
+  const { ui, flow } = tab;
+  const available = () => tab.views.currentView?.flow === true && !ui.player?.action;
+  const button = el("button", { type: "button", className: "flow-toggle", onclick: () => available() && flow.toggle() });
+  const sync = () => {
+    const can = available();
+    button.textContent = flow.playing ? "⏸ Flusso" : "▶ Flusso";
+    button.disabled = !can;
+    button.setAttribute("aria-label", flow.playing ? "Ferma il flusso dei dati" : "Fai scorrere il flusso dei dati");
+    button.title = can
+      ? flow.playing
+        ? "Ferma il pacchetto dei dati che scorre sul binario."
+        : "Fai ripartire il pacchetto dei dati che scorre sul binario."
+      : ui.player?.action
+        ? "Durante un'azione il flusso dei dati lo gestisce l'azione (alcune lo fermano, altre muovono il pacchetto da sé)."
+        : "Il flusso dei dati scorre nelle viste Architettura e Pesi.";
+  };
+  flow.onChange(sync);
+  tab.events.addEventListener("view", sync);
+  ui.player?.on("state", sync);
+  sync();
+  return button;
+}
+
+/**
+ * Rappresentazioni del nucleo (core/representations.js): "Architettura" è la scena del tab con le sue
+ * viste; "Rete neurale" è la vista `neuroni` del tab (modalità personalizzata { enter, exit }: stessa
+ * scena, la disposizione che lo studente aveva scelto, "A righe" se non ne ha scelta una, con
+ * l'interruttore visibile); "Cervello" è il livello del nucleo con brain.js. Lasciando la Rete neurale
+ * dal selettore si torna alla vista di prima (o all'Architettura). Quando il tab cambia vista da solo
+ * (pannello Viste, passo del Percorso, azione, link) il selettore si risincronizza (reps.sync).
+ */
+function installReps(tab) {
+  const { ui, app } = tab;
+  let back = "architettura"; // la vista prima della Rete neurale
+  let leaving = false; // exit() in corso: l'evento "view" che ne segue è nostro, non va risincronizzato
+  const reps = installRepresentations(ui, {
+    tabId: "transformer",
+    app,
+    network: {
+      description: "Tutti i neuroni del GPT del corso e i pesi che li collegano: a righe, un blocco per riga, oppure da sinistra a destra con i token del prompt in profondità (interruttore in alto a sinistra).",
+      enter: () => tab.views.activate("neuroni"),
+      exit: async () => {
+        if (tab.views.current !== "neuroni") return;
+        leaving = true;
+        try {
+          await tab.views.activate(tab.views.has(back) ? back : "architettura");
+        } finally {
+          leaving = false;
+        }
+      },
+    },
+    brain: { load: () => import("./brain.js").then((m) => m.brainSpec) },
+  });
+  tab.events.addEventListener("view", (e) => {
+    if (e.detail !== "neuroni") back = e.detail;
+    if (!leaving) reps.sync(e.detail === "neuroni" ? "network" : "main");
+  });
+  tab.reps = reps;
+  return reps;
 }
 
 /**
@@ -299,10 +388,16 @@ function installNavigation(tab) {
  * un'azione, una vista, un livello dello zoom o un passo della vista Contesto. Gli id sono quelli
  * di search.js. Restituisce false se l'id non esiste (il guscio avvisa lo studente).
  */
-async function gotoTarget(tab, { kind, id } = {}) {
+async function gotoTarget(tab, target = {}) {
   const { ui } = tab;
+  const { kind, id } = target;
   // un salto chiesto dallo studente: i voli che seguono partono anche con la camera libera
   ui.director.noteUserIntent(1500);
+  // view:rete e view:cervello mostrano la rappresentazione; per tutto il resto un Cervello aperto si chiude
+  const shown = tab.reps?.goto(target);
+  if (shown) return shown;
+  // tensor:<nome>[@<step>]: la vista "Pesi numerici" su quel tensore (lo stesso formato del Laboratorio pesi)
+  if (kind === "tensor") return gotoTensor(tab, id);
   if (kind === "step") {
     if (!tab.menu.items.has(id)) return false;
     stopOtherAction(tab, null);
@@ -317,6 +412,22 @@ async function gotoTarget(tab, { kind, id } = {}) {
     return true;
   }
   if (kind !== "view") return false;
+  // vista Rete neurale in una disposizione: view:neuroni (a righe, come sempre) e view:neuroni-profondita
+  if (Object.hasOwn(NEURON_LINKS, id)) {
+    stopOtherAction(tab, null);
+    await tab.neuronsView.open(NEURON_LINKS[id]);
+    ui.sidebar.select("viste");
+    showSceneOnPhone(tab);
+    return true;
+  }
+  // "i pesi che nascono": la vista Pesi numerici sul training, dallo step 0 (▶ per farli nascere)
+  if (id === BIRTH_VIEW_ID) {
+    stopOtherAction(tab, null);
+    await tab.numbersView.open({ birth: true });
+    ui.sidebar.select("viste");
+    showSceneOnPhone(tab);
+    return true;
+  }
   if (tab.views.has(id)) {
     stopOtherAction(tab, null);
     await tab.views.activate(id);
@@ -340,6 +451,20 @@ async function gotoTarget(tab, { kind, id } = {}) {
     return tab.contextView.reveal(id);
   }
   return false;
+}
+
+/** tensor:<nome>[@<step>] → vista Pesi numerici su quel tensore, ai pesi finali o allo step chiesto. */
+async function gotoTensor(tab, id) {
+  // moduli caricati solo qui (e dalla vista): l'avvio del tab non li scarica
+  const [run, { parseTensorTarget }] = await Promise.all([import("../../shared/weights/run.js").then((m) => m.loadBuiltinRun()), import("./views/numbersModel.js")]);
+  const target = parseTensorTarget(id, { names: new Set(run.tensors.keys()), steps: run.steps });
+  if (!target) return false;
+  stopOtherAction(tab, null);
+  const ok = await tab.numbersView.open({ tensor: target.name, step: target.step, interpolate: target.interpolate });
+  if (!ok) return false;
+  tab.ui.sidebar.select("viste");
+  showSceneOnPhone(tab);
+  return true;
 }
 
 /**

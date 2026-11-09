@@ -7,8 +7,9 @@
  *
  *   step    i passi del Percorso (stessi id del Menu, aperti con menu.reveal)
  *   action  le azioni animate (stessi id di player.register)
- *   view    le viste (Architettura, Pesi, Rete neurale, Contesto), i livelli dello zoom semantico
- *           (zoom.detail | zoom.blocks | zoom.macro) e i passi del percorso della vista Contesto
+ *   view    le viste (Architettura, Pesi, Pesi numerici e la nascita dei pesi nel training, Rete neurale e la sua
+ *           disposizione orizzontale, Contesto), le rappresentazioni del nucleo (rete, cervello), i livelli dello
+ *           zoom semantico (zoom.detail | zoom.blocks | zoom.macro) e i passi del percorso della vista Contesto
  *           (ctx.*, aperti nel loro menu dentro la vista)
  *
  * I titoli con un segnaposto ({{n_head}} …) hanno qui un titolo leggibile senza numeri: i numeri
@@ -126,10 +127,40 @@ const views = [
     keywords: ["pesi", "parametri", "tensori", "weights", "parameters", "istogramma", "forma", "shape"],
   },
   {
+    id: "numeri",
+    title: "Vista Pesi numerici",
+    text: "I numeri veri dentro le matrici: avvicinati a una matrice e i colori diventano i float32 che usa il motore. Tabella dei numeri di ogni tensore, statistiche, istogramma e il passaggio al Laboratorio pesi.",
+    keywords: ["pesi numerici", "numeri dei pesi", "valori dei pesi", "tabella dei pesi", "matrice di numeri", "float32", "weights values", "tensore", "statistiche dei pesi"],
+  },
+  {
+    id: "numeri.training",
+    title: "I pesi che nascono durante il training",
+    text: "Gli 11 snapshot veri del training su Tiny Shakespeare, dallo step 0 (numeri casuali) allo step 5000: heatmap e numeri cambiano davanti a te. Anche con la stima lineare tra due snapshot, dichiarata come tale.",
+    keywords: ["snapshot", "pesi durante il training", "evoluzione dei pesi", "inizializzazione", "pesi casuali", "float16", "interpolazione", "Tiny Shakespeare", "nascita dei pesi", "guarda i pesi nascere"],
+  },
+  {
+    id: "rete",
+    title: "Rappresentazione Rete neurale",
+    text: "Lo stesso GPT come rete di neuroni e pesi: a righe, un blocco per riga, oppure da sinistra a destra con i token del prompt in profondità.",
+    keywords: ["rete neurale", "neural network", "neuroni", "rappresentazione", "selettore"],
+  },
+  {
+    id: "cervello",
+    title: "Cervello: da dove vengono le idee del GPT",
+    text: "Analogie tra il GPT del corso e il cervello (neurone e ReLU, plasticità, attention, normalizzazione, predizione, gerarchia, cervelletto, ippocampo), ognuna con dove l'analogia non regge e le fonti; modello 3D del cervello e del microcircuito della corteccia.",
+    keywords: ["cervello", "brain", "neuroscienze", "analogie", "neurone biologico", "corteccia", "microcircuito", "sinapsi", "plasticità"],
+  },
+  {
     id: "neuroni",
     title: "Vista Rete neurale",
     text: "Tutti i neuroni e le connessioni del modello; clic su un neurone per vedere il suo calcolo.",
-    keywords: ["neuroni", "rete neurale", "neural network", "connessioni", "attivazioni", "MLP"],
+    keywords: ["neuroni", "rete neurale", "a righe", "neural network", "connessioni", "attivazioni", "MLP"],
+  },
+  {
+    id: "neuroni-profondita",
+    title: "Rete neurale orizzontale con profondità",
+    text: "La rete vera e completa del GPT da sinistra a destra, con tutti i token del prompt in profondità: archi di attention tra i token con la maschera causale, connessioni residue, LayerNorm token per token e i pesi veri della fetta scelta. Gira la camera per vedere lo spessore.",
+    keywords: ["rete neurale orizzontale", "profondità", "spessore", "disposizione orizzontale", "token in profondità", "attention tra token", "maschera causale", "neural network 3D", "layer", "strati"],
   },
   {
     id: "contesto",

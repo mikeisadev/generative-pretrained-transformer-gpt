@@ -1,0 +1,126 @@
+/* Tab "Laboratorio pesi", fase 2: azioni animate (js/tabs/lab/actions/). Classi con prefisso .lab-act- (vedi lab.md).
+   Niente backdrop-filter (costa 18-30 ms per frame con il rendering software, core.css). */
+
+/* ---------------------------------------------------------------- pannello Azioni */
+.lab-act-analogy { margin: 0 0 10px; }
+.lab-act-status { margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: #0b1324; font-size: 12.5px; }
+.lab-act-status p { margin: 3px 0; }
+.lab-act-status .lab-primary { margin-top: 6px; }
+.lab-act-where strong { color: #e0f2fe; overflow-wrap: anywhere; }
+.lab-act-form { display: grid; gap: 6px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #0b1324; }
+.lab-act-field { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+.lab-act-prompt { width: 100%; box-sizing: border-box; resize: vertical; min-height: 44px; font: 13px/1.45 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 6px 8px; }
+.lab-act-prompt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lab-act-prompt[aria-invalid="true"] { border-color: #f87171; }
+.lab-act-message { margin: 0; font-size: 12px; color: var(--muted); }
+.lab-act-label { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+.lab-act-tokens { display: flex; flex-wrap: wrap; gap: 3px; }
+.lab-act-token { min-width: 24px; height: 26px; padding: 0 6px; font: 13px "JetBrains Mono", ui-monospace, monospace; border-radius: 6px; background: #111c30; border: 1px solid #1e293b; color: #cbd5e1; }
+.lab-act-token:hover { border-color: #475569; }
+.lab-act-token.on { background: rgba(56, 189, 248, 0.18); border-color: var(--accent); color: #e0f2fe; }
+.lab-act-token:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lab-act-row { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.lab-act-row label, .lab-act-wide { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.lab-act-wide { flex-wrap: wrap; }
+.lab-act-select { font-family: inherit; font-size: 12.5px; color: var(--text); background: #1e293b; border: 1px solid #334155; border-radius: 7px; padding: 3px 6px; }
+.lab-act-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lab-act-linear { max-width: 100%; }
+.lab-act-pending { margin: 2px 0 0; }
+.lab-act-pending[hidden] { display: none; }
+.lab-act-overview .action-group h3 { font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
+.lab-act-honest ul { margin: 4px 0 0; padding-left: 18px; font-size: 12.5px; color: #cbd5e1; }
+.lab-act-honest li { margin: 4px 0; }
+
+/* ---------------------------------------------------------------- lavagna (sopra la barra del player) */
+.lab-act-board {
+  /* allineata a sinistra con la barra del player (centrata, larga al più 720 px) e larga al più fin dove
+     comincia il pad della navigazione: posizione e larghezza le misura la regia (--lab-act-left-px,
+     --lab-act-max-w; deskLayout in actions/plan.js); --lab-act-left vale fino alla prima misura */
+  --lab-act-left: max(16px, calc((100% - min(720px, 100% - 32px)) / 2));
+  position: absolute;
+  left: var(--lab-act-left-px, var(--lab-act-left));
+  bottom: calc(44px + var(--lab-act-player-h, 150px) + 8px);
+  width: min(720px, calc(100% - 32px), var(--lab-act-max-w, 720px));
+  max-height: min(34vh, 300px);
+  z-index: 16; /* come la barra del player: sopra il pannello del codice (15) */
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #1e3a5f;
+  border-radius: 12px;
+  background: rgba(8, 13, 24, 0.95);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.lab-act-board[hidden] { display: none; }
+/* con la camera libera il chip "Segui l'azione" sta subito sopra la barra del player (core/ui/navPad.js):
+   la lavagna sale sopra di lui, così il pulsante resta cliccabile */
+.lab-tab:has(.nav-follow:not([hidden])) .lab-act-board { bottom: calc(44px + var(--lab-act-player-h, 150px) + 56px); }
+.lab-act-board-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 10px 5px 14px; border-bottom: 1px solid #13243d; }
+.lab-act-board-title { font-size: 13.5px; color: #e0f2fe; overflow-wrap: anywhere; }
+.lab-act-kicker { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #7dd3fc; font-weight: 600; }
+.lab-act-board-toggle { flex: none; width: 28px; height: 26px; padding: 0; border-radius: 7px; background: #111c30; border: 1px solid #1e293b; color: #cbd5e1; }
+.lab-act-board-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lab-act-board-body { padding: 6px 14px 10px; overflow-y: auto; }
+.lab-act-board.collapsed .lab-act-board-body { display: none; }
+.lab-act-line { margin: 4px 0; color: #e2e8f0; }
+.lab-act-formula { margin: 4px 0; font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: #cbd5e1; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.lab-act-note { margin: 5px 0 2px; font-size: 12px; color: var(--muted); }
+.lab-act-seg.lab-act-num { color: #e0f2fe; font-variant-numeric: tabular-nums; }
+.lab-act-seg.lab-act-pos { color: #fdba74; font-variant-numeric: tabular-nums; }
+.lab-act-seg.lab-act-neg { color: #93c5fd; font-variant-numeric: tabular-nums; }
+.lab-act-seg.lab-act-muted { color: var(--muted); }
+.lab-act-seg.lab-act-accent { color: #fde047; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lab-act-seg.lab-act-good { color: #86efac; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lab-act-seg.lab-act-bad { color: #fca5a5; }
+code.lab-act-seg { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; color: #e2e8f0; background: #020617; border-radius: 4px; padding: 0 4px; }
+.lab-act-vector { display: flex; flex-wrap: wrap; gap: 2px; margin: 4px 0; }
+.lab-act-cell { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; min-width: 40px; padding: 2px 3px; border-radius: 4px; font: 11px "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.lab-act-cell small { font-size: 9.5px; opacity: 0.85; }
+.lab-act-cell.empty { background: repeating-linear-gradient(135deg, #1e293b 0 4px, #0f172a 4px 8px); color: #64748b; }
+.lab-act-cell.marked { outline: 2px solid #fde047; outline-offset: 0; }
+.lab-act-bars { display: grid; gap: 3px; margin: 4px 0; }
+.lab-act-bar { display: grid; grid-template-columns: minmax(48px, max-content) 1fr minmax(64px, max-content); gap: 8px; align-items: center; font-size: 12px; }
+.lab-act-bar-label { font-family: "JetBrains Mono", ui-monospace, monospace; color: #e2e8f0; white-space: nowrap; }
+.lab-act-bar-track { height: 10px; border-radius: 5px; background: #13243d; overflow: hidden; }
+.lab-act-bar-fill { display: block; height: 100%; border-radius: 5px; background: #a78bfa; }
+.lab-act-bar.marked .lab-act-bar-fill { background: #fde047; }
+.lab-act-bar.marked .lab-act-bar-label { color: #fde047; }
+.lab-act-bar-value { color: #cbd5e1; font-variant-numeric: tabular-nums; text-align: right; }
+.lab-act-chart-box { margin: 4px 0; }
+.lab-act-chart { display: block; width: 100%; height: auto; max-height: 104px; }
+.lab-act-chart .axis { stroke: #334155; stroke-width: 1; }
+.lab-act-chart .tick { fill: #94a3b8; font: 11px Inter, system-ui, sans-serif; }
+.lab-act-chart .marker { stroke: #fde047; stroke-width: 2; stroke-dasharray: 4 3; }
+.lab-act-legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 2px 0 0; font-size: 11.5px; color: var(--muted); }
+.lab-act-legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: 3px; }
+.lab-act-table { border-collapse: collapse; margin: 4px 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.lab-act-table th, .lab-act-table td { padding: 3px 10px 3px 0; text-align: left; }
+.lab-act-table thead th { color: var(--muted); font-weight: 500; border-bottom: 1px solid #1e293b; }
+.lab-act-table tbody th { color: #cbd5e1; font-weight: 500; font-family: "JetBrains Mono", ui-monospace, monospace; }
+.lab-act-table td { color: #e0f2fe; }
+
+/* ---------------------------------------------------------------- durante un'azione */
+/* la didascalia della scena tace durante un'azione: c'è quella del player, e la sua riga finiva sotto la
+   barra (a 1100 px e sul telefono va a capo e una parola usciva sotto il player) */
+.lab-tab.lab-act-playing .caption { visibility: hidden; }
+@media (min-width: 901px) {
+  /* il codice più stretto lascia la scena alle matrici; più basso per non finire sotto la lavagna */
+  .lab-tab.lab-act-playing .code-panel { width: min(440px, 32vw); }
+  /* il codice finisce sopra il posto del pad nell'angolo e sopra la lavagna (--lab-act-code-max, misurato
+     dalla regia); più specifica della regola del nucleo (.tab:has(.player-bar:not([hidden])) .code-panel) */
+  .lab-tab.lab-act-playing:has(.player-bar:not([hidden])) .code-panel { max-height: var(--lab-act-code-max, calc(100% - 300px - var(--lab-act-board-h, 0px))); }
+  /* con i grafici aperti la barra del player è centrata nella parte libera (core.css): la lavagna con lei */
+  .lab-tab.lab-act-playing:has(.charts-panel.open) .lab-act-board { --lab-act-left: calc((100% - 460px) / 2 - min(720px, 100% - 492px) / 2); width: min(720px, calc(100% - 492px), var(--lab-act-max-w, 720px)); }
+}
+@media (min-width: 901px) and (max-width: 1280px) {
+  .lab-act-board { max-height: min(30vh, 250px); font-size: 12.5px; }
+}
+@media (max-width: 900px) {
+  .lab-act-board { left: 12px; width: calc(100% - 24px); max-height: 26vh; font-size: 12.5px; }
+  .lab-act-board-body { padding: 4px 10px 8px; }
+  .lab-act-cell { min-width: 34px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lab-act-board, .lab-act-bar-fill { transition: none; }
+}

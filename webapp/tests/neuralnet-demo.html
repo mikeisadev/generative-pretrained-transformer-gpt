@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prova della rete neurale orizzontale</title>
+    <link rel="stylesheet" href="../css/core.css" />
+    <link rel="stylesheet" href="../css/nav.css" />
+    <link rel="stylesheet" href="../css/neuralnet.css" />
+    <style>
+      /* Solo per questa pagina di prova: niente barra dei tab, la pagina è un tab solo. */
+      #app { inset: 0; }
+      .demo-pane { display: grid; gap: 10px; }
+      .demo-pane h1 { font-size: 16px; margin: 0; }
+      .demo-pane p { margin: 0; }
+      .demo-specs { display: grid; gap: 6px; }
+      .demo-specs button { text-align: left; }
+      .demo-specs button[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.1); }
+      .demo-stats { font: 12px/1.5 "JetBrains Mono", ui-monospace, monospace; color: #cbd5e1; white-space: pre-wrap; margin: 0; }
+      .demo-warnings { color: #fde68a; font-size: 12px; margin: 0; padding-left: 18px; }
+      /* il livello della rappresentazione: come .rep-layer, sopra il canvas e trasparente ai clic */
+      .demo-layer { position: absolute; inset: 0; pointer-events: none; z-index: 13; }
+    </style>
+    <script type="importmap">
+      { "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+    </script>
+  </head>
+  <body>
+    <div id="app"><div class="tab-root" id="tab"></div></div>
+    <script type="module">
+      import { el, fmt } from "../js/core/dom.js";
+      import { createTabLayout } from "../js/core/layout.js";
+      import { DEMO_SPECS, loadTestSpec } from "../js/core/neuralNet/demoSpecs.js";
+      import { createNetworkView } from "../js/core/neuralNet/view.js";
+
+      // Una specifica sbagliata apposta: la scheda deve dire dove sono i problemi.
+      const BROKEN = {
+        title: "Specifica sbagliata (prova degli errori)",
+        sections: [{ id: "a", label: "A", role: "magia", neurons: 4 }, { id: "b", label: "B", role: "mlp", neurons: -2 }],
+        links: [{ from: "a", to: "zzz", pattern: "dense" }],
+      };
+      const SPECS = {
+        llm: { label: "LLM MoE (DeepSeek-V3 ridotto)", spec: () => DEMO_SPECS.llm },
+        unet: { label: "U-Net di Stable Diffusion", spec: () => DEMO_SPECS.unet },
+        audio: { label: "Codec audio (EnCodec)", spec: () => DEMO_SPECS.audio },
+        load: { label: "Prova di carico (~60.000 neuroni)", spec: () => loadTestSpec() },
+        broken: { label: "Specifica sbagliata", spec: () => BROKEN },
+      };
+
+      const root = document.getElementById("tab");
+      root.dataset.tab = "demo";
+      const ui = createTabLayout(root, { hint: "Pagina di prova del nucleo: la vista della rete neurale senza i tab." });
+      const pane = ui.sidebar.addPane({ id: "prova", title: "Prova" });
+      ui.sidebar.select("prova");
+      const layer = el("div", { className: "demo-layer" });
+      ui.stage.append(layer);
+
+      const buttons = el("div", { className: "demo-specs" });
+      const statsBox = el("pre", { className: "demo-stats" }, "…");
+      const warnings = el("ul", { className: "demo-warnings" });
+      pane.append(
+        el(
+          "div",
+          { className: "demo-pane" },
+          el("h1", {}, "Rete neurale orizzontale con profondità"),
+          el("p", { className: "hint" }, "Ogni rete è una specifica di soli dati (js/core/neuralNet/demoSpecs.js). Di lato si legge da sinistra a destra; \"Guarda lo spessore\" mostra la profondità con i meccanismi che la attraversano."),
+          buttons,
+          el("p", { className: "hint" }, "Costo del codice della rete (escluso il disegno della GPU): ciclo per frame, aggiornamento quando la camera si muove, ricerca del neurone sotto il mouse."),
+          statsBox,
+          warnings,
+        ),
+      );
+
+      let view = null;
+      let current = null;
+      async function show(name) {
+        if (!SPECS[name]) name = "llm";
+        view?.dispose();
+        current = name;
+        for (const b of buttons.children) b.setAttribute("aria-pressed", String(b.dataset.spec === name));
+        const spec = SPECS[name].spec();
+        view = createNetworkView({ host: ui.host, director: ui.director, nav: ui.nav, layer, tabId: "demo", spec, app: null, reps: null });
+        window.__nnDemo.view = view;
+        await view.ready;
+        warnings.replaceChildren(...(view.model?.net.warnings ?? []).map((w) => el("li", {}, w)));
+        const url = new URL(location.href);
+        url.searchParams.set("spec", name);
+        history.replaceState(null, "", url);
+      }
+      for (const [name, { label }] of Object.entries(SPECS)) {
+        buttons.append(el("button", { type: "button", dataset: { spec: name }, onclick: () => show(name) }, label));
+      }
+
+      // frame rate misurato con requestAnimationFrame (tutto: JavaScript + disegno del rendering software)
+      const frames = [];
+      let last = performance.now();
+      function measure(now) {
+        frames.push(now - last);
+        last = now;
+        if (frames.length > 60) frames.shift();
+        requestAnimationFrame(measure);
+      }
+      requestAnimationFrame(measure);
+      const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+      setInterval(() => {
+        const s = view?.stats;
+        if (!s) return;
+        const m = s.model;
+        statsBox.textContent = [
+          `rete: ${SPECS[current].label}`,
+          `neuroni ${fmt(s.units)} · segmenti ${fmt(s.segments)} · archi ${fmt(s.arcs)}`,
+          m ? `costruzione ${fmt(s.buildMs, 1)} ms (specifica ${fmt(m.spec, 1)}, layout ${fmt(m.layout, 1)}, valori ${fmt(m.values, 1)}, collegamenti ${fmt(m.links, 1)})` : "",
+          `frame ${fmt(avg(frames), 1)} ms (${fmt(1000 / Math.max(1, avg(frames)), 0)} fps)`,
+          `ciclo della rete ${fmt(s.tickMs * 1000, 0)} µs/frame · LOD+etichette ${fmt(s.updateMs, 2)} ms (${fmt(s.updates)} volte) · mouse ${fmt(s.pickMs, 2)} ms`,
+        ].filter(Boolean).join("\n");
+      }, 500);
+
+      window.__nnDemo = { ui, show, view: null, frames };
+      ui.host.start();
+      ui.host.resize();
+      show(new URL(location.href).searchParams.get("spec") ?? "llm");
+    </script>
+  </body>
+</html>

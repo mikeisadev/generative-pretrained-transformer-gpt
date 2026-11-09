@@ -1,0 +1,166 @@
+/* Tab "Laboratorio pesi": classi con prefisso .lab- (vedi ARCHITECTURE.md). Stili della fase 2 in
+   lab-actions.css (azioni) e lab-analysis.css (confronto, grafici, benchmark). Niente backdrop-filter:
+   con il rendering software costa 18-30 ms per frame (core.css). */
+
+.lab-tab { --lab-gap: 10px; }
+/* il suggerimento del pannello sta sopra un corpo che scorre: una riga di separazione, se no la prima riga
+   tagliata dallo scorrimento sembra scritta sopra il suggerimento */
+.lab-tab .tab-sidebar .menu-hint { padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.lab-tab button:focus-visible,
+.lab-tab input:focus-visible,
+.lab-tab summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------------------------------------------------------------- testi comuni della sidebar */
+.lab-h3 { font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 18px 0 8px; }
+.lab-h3:first-child { margin-top: 4px; }
+.lab-h4 { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 14px 0 6px; }
+.lab-intro { margin: 0 0 8px; }
+.lab-legend { margin: 6px 0 8px; }
+.lab-details { border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; margin: 8px 0 12px; background: #0b1324; }
+.lab-details summary { cursor: pointer; color: #93c5fd; font-size: 13px; }
+.lab-details[open] summary { margin-bottom: 6px; }
+.lab-role-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; font-size: 12.5px; }
+.lab-role-legend strong { margin-right: 4px; }
+.lab-role-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.lab-link { background: none; border: 0; padding: 0; color: #7dd3fc; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; font-size: inherit; }
+.lab-link:hover { color: #bae6fd; }
+.lab-small { font-size: 12px; padding: 3px 9px; border-radius: 7px; }
+.lab-primary { background: #0c4a6e; border-color: #0ea5e9; color: #e0f2fe; }
+.lab-primary:hover { background: #075985; }
+.lab-danger { border-color: #7f1d1d; color: #fecaca; }
+.lab-danger:hover { border-color: #f87171; }
+.lab-check { display: flex; gap: 6px; align-items: flex-start; font-size: 12.5px; color: var(--muted); margin: 8px 0 0; cursor: pointer; }
+.lab-check input { margin-top: 2px; accent-color: var(--accent); }
+.lab-empty { color: var(--muted); border: 1px dashed #334155; border-radius: 10px; padding: 14px; }
+.lab-ok { color: #4ade80; }
+.lab-no { color: #fbbf24; }
+.lab-error { color: #fca5a5; margin: 4px 0; font-size: 12.5px; }
+.lab-ok-line { color: #bbf7d0; margin: 4px 0; font-size: 12.5px; }
+.lab-busy { color: #bae6fd; margin: 4px 0; font-size: 12.5px; }
+
+/* ---------------------------------------------------------------- pannello Modello */
+.lab-run-line { margin: 10px 0 6px; font-size: 13px; }
+.lab-timeline { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: #0b1324; }
+.lab-step-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-weight: 600; }
+.lab-step-value { color: #e0f2fe; font-variant-numeric: tabular-nums; font-weight: 600; }
+.lab-step-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.lab-range-box { position: relative; flex: 1; padding-bottom: 8px; }
+.lab-range { width: 100%; accent-color: var(--accent); margin: 0; }
+.lab-ticks { position: absolute; left: 8px; right: 8px; bottom: 0; height: 6px; pointer-events: none; }
+.lab-tick { position: absolute; top: 0; width: 2px; height: 6px; margin-left: -1px; background: #475569; border-radius: 1px; }
+.lab-tick-final { background: var(--learned); }
+.lab-step-note { margin: 6px 0 0; }
+.lab-arch-note { margin: 12px 0 4px; padding: 8px 10px; border-left: 3px solid #fbbf24; background: rgba(251, 191, 36, 0.07); border-radius: 0 8px 8px 0; font-size: 12.5px; }
+.lab-arch-note ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* l'indice dei moduli (print(model)) */
+.lab-outline { list-style: none; margin: 4px 0 0; padding: 0; font-size: 12px; }
+.lab-outline li { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.lab-tree-toggle { flex: none; width: 20px; height: 22px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 11px; line-height: 22px; text-align: center; }
+button.lab-tree-toggle:hover { color: var(--text); }
+.lab-tree-line { flex: 1; min-width: 0; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; text-align: left; border: 1px solid transparent; background: none; padding: 2px 6px; border-radius: 6px; }
+.lab-tree-line:hover { border-color: #334155; background: #111c30; }
+.lab-tree-line[aria-current="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.1); }
+.lab-tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
+.lab-tree-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
+.lab-role-embedding .lab-tree-label { color: #fcd34d; }
+.lab-role-attention .lab-tree-label { color: #7dd3fc; }
+.lab-role-mlp .lab-tree-label { color: #6ee7b7; }
+.lab-role-norm .lab-tree-label { color: #c4b5fd; }
+.lab-role-output .lab-tree-label { color: #f9a8d4; }
+.lab-role-buffer .lab-tree-label { color: #94a3b8; font-style: italic; }
+
+/* ---------------------------------------------------------------- pannello Tensore */
+.lab-inspect[hidden] { display: none; }
+.lab-kicker { margin: 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.lab-tensor-name { margin: 2px 0 4px; font-size: 14px; color: #e0f2fe; word-break: break-all; }
+.lab-meta, .lab-source, .lab-role { margin: 3px 0; font-size: 12.5px; }
+.lab-source { color: #bae6fd; }
+.lab-role { color: var(--muted); }
+.lab-code-line { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: #0b1324; border: 1px solid var(--border); display: grid; gap: 4px; font-size: 12px; }
+.lab-code-line code { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: #e2e8f0; white-space: pre-wrap; word-break: break-word; }
+.lab-code-where { color: #64748b; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; }
+.lab-code-line .lab-link { justify-self: start; font-size: 12px; }
+.lab-axes { margin: 6px 0; }
+.lab-readout { min-height: 3.2em; margin: 8px 0; padding: 6px 8px; border-radius: 8px; background: rgba(56, 189, 248, 0.06); border: 1px solid #1e3a5f; font-size: 12.5px; }
+.lab-readout strong { font-variant-numeric: tabular-nums; color: #e0f2fe; }
+.lab-cell-meaning { color: var(--muted); }
+.lab-table { margin: 6px 0; --tt-max-height: 300px; }
+.lab-members[hidden], .lab-tensor-parts[hidden] { display: none; }
+.lab-member-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.lab-member { width: 100%; display: flex; justify-content: space-between; gap: 10px; text-align: left; font-size: 12px; padding: 5px 8px; }
+.lab-member small { color: var(--muted); white-space: nowrap; }
+
+/* ---------------------------------------------------------------- pannello Run */
+.lab-pane-intro { margin-top: 0; }
+.lab-run-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.lab-run { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: #0b1324; }
+.lab-run.is-a { border-color: var(--accent); background: rgba(56, 189, 248, 0.06); }
+/* B ha lo stesso arancione di grafici, istogrammi e pannello Confronto (era rosa: due colori per la stessa cosa) */
+.lab-run.is-b { box-shadow: inset 3px 0 0 var(--an-b, #d95926); }
+.lab-run-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.lab-run-head strong { overflow-wrap: anywhere; }
+.lab-run-facts { margin: 3px 0 6px; font-size: 12px; color: var(--muted); }
+.lab-run-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lab-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #1e293b; color: #cbd5e1; white-space: nowrap; }
+.lab-badge-a { background: rgba(56, 189, 248, 0.16); color: #bae6fd; }
+.lab-storage { margin: 8px 0 0; }
+.lab-drop-area { margin: 14px 0 6px; padding: 10px 12px 12px; border: 1px dashed #334155; border-radius: 12px; }
+.lab-drop-area.lab-dropping { border-color: var(--accent); background: rgba(56, 189, 248, 0.08); }
+.lab-drop-area .lab-h3 { margin-top: 2px; }
+.lab-upload-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
+.lab-accepted { margin: 8px 0 0; font-size: 12.5px; }
+.lab-accepted summary { cursor: pointer; color: #93c5fd; }
+.lab-accepted ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+.lab-upload-status:empty { display: none; }
+.lab-upload-status { margin-top: 8px; }
+.lab-run-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.lab-run-title { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.lab-run-desc { margin: 3px 0 0; color: #cbd5e1; }
+.lab-facts { margin: 8px 0 0; display: grid; gap: 6px; }
+.lab-fact { display: grid; grid-template-columns: 88px 1fr; gap: 8px; font-size: 12.5px; }
+.lab-fact dt { color: var(--muted); }
+.lab-fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.lab-config, .lab-notes { margin: 0; padding-left: 16px; }
+.lab-config li.changed { color: #fde68a; }
+.lab-config small { color: var(--muted); }
+.lab-was { color: #fbbf24; }
+.lab-notes li { margin: 2px 0; }
+.lab-guide { margin: 16px 0 8px; border: 1px solid #1d4ed8; border-radius: 10px; padding: 8px 10px; background: rgba(29, 78, 216, 0.08); }
+.lab-guide summary { cursor: pointer; color: #93c5fd; font-weight: 600; }
+.lab-flow { margin: 8px 0; padding-left: 20px; font-size: 12.5px; }
+.lab-flow li { margin: 3px 0; }
+.lab-cmd { margin: 10px 0 0; }
+.lab-cmd .hint { margin: 2px 0 4px; }
+.lab-cmd-row { display: flex; gap: 6px; align-items: flex-start; }
+.lab-cmd-row code { flex: 1; min-width: 0; display: block; padding: 6px 8px; border-radius: 6px; background: #020617; border: 1px solid var(--border); font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; color: #e2e8f0; }
+
+/* ---------------------------------------------------------------- stage */
+.lab-toolbar { max-width: min(420px, calc(100% - 520px)); }
+.lab-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; padding: 5px 10px; background: var(--panel); }
+.lab-chip strong { color: #e0f2fe; }
+.lab-chip span { color: #bae6fd; }
+.lab-tip { position: absolute; left: 0; top: 0; z-index: 14; max-width: min(380px, calc(100% - 24px)); padding: 7px 10px; border-radius: 9px; background: rgba(15, 23, 42, 0.96); border: 1px solid #334155; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); pointer-events: none; font-size: 12.5px; line-height: 1.45; }
+.lab-tip[hidden] { display: none; }
+.lab-tip strong, .lab-tip span { display: block; }
+.lab-tip strong { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; color: #e0f2fe; word-break: break-all; }
+.lab-tip span { color: #cbd5e1; }
+.lab-tip span:last-child { color: #fde68a; font-variant-numeric: tabular-nums; }
+/* La scena del Laboratorio ha celle chiare e numeri fino in fondo: la didascalia del nucleo ha un fondo suo,
+   altrimenti il testo si perde sui colori (fit-content + margin auto la centra tra il left e il right del nucleo). */
+.lab-tab .caption:not(:empty) { width: fit-content; margin-inline: auto; padding: 4px 12px; border-radius: 10px; background: rgba(13, 17, 23, 0.86); }
+/* Pannelli opachi, didascalia che tace sotto un avviso e che sale sopra il pad quando accanto è stretta: ora
+   sono regole del nucleo (core.css, palette.css, navPad.js), per tutti i tab. */
+.lab-drop-overlay { position: absolute; inset: 12px; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 2px dashed var(--accent); border-radius: 16px; background: rgba(13, 17, 23, 0.82); pointer-events: none; font-size: 15px; }
+.lab-drop-overlay[hidden] { display: none; }
+.lab-drop-overlay span { color: var(--muted); font-size: 13px; }
+
+@media (min-width: 901px) and (max-width: 1280px) {
+  .lab-toolbar { max-width: min(300px, calc(100% - 470px)); }
+  .lab-chip { font-size: 12px; padding: 5px 8px; }
+}
+@media (max-width: 900px) {
+  .lab-toolbar { max-width: calc(100% - 170px); }
+  .lab-chip { font-size: 12px; padding: 5px 8px; }
+  .lab-fact { grid-template-columns: 76px 1fr; }
+}

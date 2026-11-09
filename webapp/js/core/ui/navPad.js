@@ -9,13 +9,14 @@
  * La logica del movimento è in js/core/navigation.js: qui solo DOM, posizionamento e testi.
  */
 import { el } from "../dom.js";
-import { padBottom, snapshotName } from "../navMath.js";
+import { captionPlacement, padPlacement, snapshotName } from "../navMath.js";
 import { readPref, writePref } from "../navigation.js";
 
 const PREF_COLLAPSED = "nav.padCollapsed";
 const PREF_TIP_SEEN = "nav.tipSeen";
 const NARROW = "(max-width: 900px)";
 const FAB_ROOM = 56; // spazio a destra della didascalia per il pulsante unico sul telefono (8 + 40 + 8 px)
+const HUD_MIN_WIDTH = 360; // in un livello, i chip vanno a destra della scheda della vista se resta almeno tanto
 let tipShownThisSession = false; // il suggerimento iniziale compare in un solo tab
 
 /** Icone SVG (stroke = colore del testo). Stringhe costanti, mai dati esterni. */
@@ -283,6 +284,32 @@ export class NavPad {
     this.stage.append(this.help);
   }
 
+  /**
+   * Una scorciatoia del tab nell'aiuto ("?"), es. `nav.pad.addShortcut({ keys: "V", text: "Vista d'insieme ↔
+   * Architettura completa" })`: una riga nella sezione `section` (creata la prima volta, in fondo alla
+   * griglia). Testi come testo. Restituisce la funzione che toglie la riga (e la sezione rimasta vuota).
+   * @param {{keys: string, text: string, section?: string}} o
+   */
+  addShortcut({ keys, text, section = "Questo tab" }) {
+    this.shortcutSections ??= new Map();
+    let block = this.shortcutSections.get(section);
+    if (!block) {
+      const dl = el("dl", {});
+      block = { node: el("section", { className: "nav-help-shortcuts" }, el("h3", {}, section), dl), dl };
+      this.help.querySelector(".nav-help-grid").append(block.node);
+      this.shortcutSections.set(section, block);
+    }
+    const row = [el("dt", {}, keys), el("dd", {}, text)];
+    block.dl.append(...row);
+    return () => {
+      for (const node of row) node.remove();
+      if (!block.dl.children.length && this.shortcutSections.get(section) === block) {
+        block.node.remove();
+        this.shortcutSections.delete(section);
+      }
+    };
+  }
+
   buildFollowChip() {
     this.follow = el(
       "div",
@@ -304,7 +331,10 @@ export class NavPad {
     }));
     sub(nav.on("help", () => this.toggleHelp()));
     sub(nav.on("escape", () => !this.help.hidden && this.toggleHelp(false)));
-    sub(nav.on("lost", (lost) => (this.lostHint.hidden = !lost)));
+    sub(nav.on("lost", (lost) => {
+      this.lostHint.hidden = !lost;
+      if (lost) this.placeHud();
+    }));
     sub(nav.on("input", () => this.onFirstInput()));
     sub(nav.on("dispose", () => this.dispose()));
     sub(nav.director.onFollowChange((following) => {
@@ -320,6 +350,38 @@ export class NavPad {
     for (const node of [this.stage, this.pad, this.player?.bar, this.codePanel?.root, caption]) if (node) ro.observe(node);
     sub(() => ro.disconnect());
 
+    // In un livello delle rappresentazioni la scheda della vista (rete, cervello) nasce dopo i chip, quando la
+    // sua specifica è pronta, e cambia misura (ridotta, aperta): i chip si rimettono a posto a ogni figlio nuovo
+    // dello stage e a ogni suo cambio di misura (eventi, mai per frame). Sul telefono il benvenuto copriva la
+    // scheda del Cervello, arrivata dopo di lui.
+    if (this.root === this.stage) {
+      const sized = new ResizeObserver(() => this.scheduleHud());
+      const watch = () => {
+        for (const node of this.stage.children) if (node !== this.hud && !(node instanceof HTMLCanvasElement)) sized.observe(node);
+      };
+      const added = new MutationObserver(() => {
+        watch();
+        this.scheduleHud();
+      });
+      added.observe(this.stage, { childList: true });
+      watch();
+      sub(() => {
+        added.disconnect();
+        sized.disconnect();
+      });
+    } else {
+      // Ordine di Tab nella scena di un tab: i comandi in alto (☰, zoom, selettore delle rappresentazioni,
+      // pulsanti del tab) entrano nello stage dopo la navigazione, e il selettore ci rientra quando cambia
+      // posto. Suggerimento e pad restano gli ultimi figli, così Tab arriva prima a quei comandi e poi ai
+      // 15 pulsanti del pad (nel RAG, dall'inizio della pagina al selettore: 24 pressioni di Tab, non 41).
+      // Cambia solo l'ordine nel DOM: sono posizionati in assoluto, con il loro z-index. Solo a ogni figlio
+      // nuovo dello stage, mai per frame.
+      const last = new MutationObserver(() => this.keepLast());
+      last.observe(this.stage, { childList: true });
+      this.keepLast();
+      sub(() => last.disconnect());
+    }
+
     const onNarrow = () => {
       if (this.narrow.matches) this.setCollapsed(true, { persist: false });
       this.scheduleLayout();
@@ -333,10 +395,14 @@ export class NavPad {
     sub(() => document.removeEventListener("fullscreenchange", onFullscreen));
     sub(() => document.removeEventListener("webkitfullscreenchange", onFullscreen));
 
-    // Il suggerimento iniziale compare al primo frame disegnato, cioè quando il tab è davvero visibile.
-    const offFrame = nav.host.onFrame(() => {
-      offFrame();
-      this.maybeShowWelcome();
+    // Il suggerimento iniziale compare al primo frame disegnato in cui i chip si vedono davvero (il tab è
+    // visibile, nessun livello lo copre, il cassetto del telefono è chiuso). Finché non si vedono si riprova
+    // ogni mezzo secondo, solo mentre la scena gira; poi la funzione per frame si toglie.
+    let nextCheck = 0;
+    const offFrame = nav.host.onFrame((dt, elapsed) => {
+      if (elapsed < nextCheck) return;
+      nextCheck = elapsed + 0.5;
+      if (this.maybeShowWelcome() !== "later") offFrame();
     });
     sub(offFrame);
   }
@@ -344,13 +410,28 @@ export class NavPad {
   dispose() {
     for (const off of this.disposers.splice(0)) off();
     cancelAnimationFrame(this.raf);
+    cancelAnimationFrame(this.hudRaf);
     clearTimeout(this.toastTimer);
     this.pad.remove();
     this.hud.remove();
     this.help.remove();
     this.follow?.remove();
-    this.root.classList.remove("has-nav-pad");
+    this.root.classList.remove("has-nav-pad", "nav-caption-squeezed");
     this.root.style.removeProperty("--nav-caption-right");
+    this.root.style.removeProperty("--nav-caption-bottom");
+  }
+
+  /**
+   * Suggerimento e pad in fondo allo stage (l'ordine di Tab, vedi wire). Spostare un elemento nel DOM gli
+   * toglie il focus: se l'aveva un loro pulsante, torna lì.
+   */
+  keepLast() {
+    const { stage, hud, pad } = this;
+    if (stage.lastElementChild === pad && pad.previousElementSibling === hud) return;
+    const focused = document.activeElement;
+    const ours = focused && (hud.contains(focused) || pad.contains(focused));
+    stage.append(hud, pad);
+    if (ours && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
 
   // ---------------------------------------------------------------- stato
@@ -435,11 +516,53 @@ export class NavPad {
     clearTimeout(this.toastTimer);
     this.toast.replaceChildren(node ?? el("span", {}, text));
     this.toast.hidden = false;
+    this.placeHud();
     this.toastTimer = setTimeout(() => (this.toast.hidden = true), ms);
   }
 
+  /**
+   * I chip in alto (benvenuto, avvisi, "Ti sei perso?") nella pila di un livello delle rappresentazioni
+   * (radice = stage: core/representations.js) evitano la scheda della vista, che sta in alto a sinistra:
+   * a destra della scheda se lì c'è posto, altrimenti sotto (sul telefono copriva i suoi comandi). Nello
+   * stage di un tab non fa niente: lì le regole dei tab (CSS) sanno dove stanno le loro barre.
+   * A eventi (un chip che compare, un ridimensionamento, una scheda che nasce o cambia misura), mai per frame.
+   */
+  placeHud() {
+    if (this.root !== this.stage) return;
+    this.hud.style.left = "";
+    this.hud.style.top = "";
+    const sw = this.stage.clientWidth;
+    const sh = this.stage.clientHeight;
+    if (!sw || !sh) return;
+    const box = this.stage.getBoundingClientRect();
+    const right = parseFloat(this.hud.style.right) || 0;
+    let left = 0;
+    let top = parseFloat(getComputedStyle(this.hud).top) || 0;
+    const cssTop = top;
+    for (const node of this.stage.children) {
+      if (node === this.pad || node === this.hud || node === this.help || node instanceof HTMLCanvasElement) continue;
+      const r = node.getBoundingClientRect();
+      const w = r.width;
+      const h = r.height;
+      // livelli a tutto schermo (etichette, linee guida) e suggerimenti nascosti non contano
+      if (w < 2 || h < 2 || w * h > 0.5 * sw * sh || r.top - box.top > sh * 0.4 || !node.checkVisibility?.({ visibilityProperty: true })) continue;
+      if (r.bottom - box.top <= cssTop) continue; // già sopra i chip
+      const besideLeft = r.right - box.left + 12;
+      if (sw - right - besideLeft >= HUD_MIN_WIDTH) left = Math.max(left, besideLeft);
+      else top = Math.max(top, r.bottom - box.top + 10);
+    }
+    if (left) this.hud.style.left = `${Math.round(left)}px`;
+    if (top !== cssTop) this.hud.style.top = `${Math.round(top)}px`;
+  }
+
+  /**
+   * Il suggerimento di benvenuto, una volta per pagina e una volta per sempre (nav.tipSeen), solo se i chip
+   * di questo pad si vedono davvero: non sotto un livello delle rappresentazioni (link diretto a
+   * view:rete) né dietro il cassetto aperto del telefono. @returns {"done"|"later"|"shown"}
+   */
   maybeShowWelcome() {
-    if (tipShownThisSession || readPref(PREF_TIP_SEEN, "0") === "1") return;
+    if (tipShownThisSession || readPref(PREF_TIP_SEEN, "0") === "1") return "done";
+    if (!(this.hud.checkVisibility?.({ visibilityProperty: true }) ?? Boolean(this.hud.offsetParent))) return "later";
     tipShownThisSession = true;
     writePref(PREF_TIP_SEEN, "1");
     const touch = window.matchMedia("(pointer: coarse)").matches;
@@ -461,6 +584,15 @@ export class NavPad {
   }
 
   // ---------------------------------------------------------------- posizionamento
+  /** placeHud al prossimo frame, una volta sola anche se lo chiedono più eventi insieme. */
+  scheduleHud() {
+    if (this.hudRaf) return;
+    this.hudRaf = requestAnimationFrame(() => {
+      this.hudRaf = 0;
+      this.placeHud();
+    });
+  }
+
   scheduleLayout() {
     if (this.raf) return;
     this.raf = requestAnimationFrame(() => {
@@ -485,48 +617,48 @@ export class NavPad {
     if (!this.collapsed && !this.squeezed) this.openSize = { w: this.pad.offsetWidth, h: this.pad.offsetHeight };
     const narrow = this.narrow.matches;
     const codeRoot = this.codePanel?.root;
-    const codeRect = codeRoot && !codeRoot.hidden && codeRoot.offsetHeight ? rel(codeRoot.getBoundingClientRect()) : null;
+    // visibility: hidden (un tab può nascondere il codice senza toglierlo) conta come nascosto
+    const codeRect = codeRoot && !codeRoot.hidden && codeRoot.offsetHeight && getComputedStyle(codeRoot).visibility !== "hidden" ? rel(codeRoot.getBoundingClientRect()) : null;
     const bar = this.placeFollowChip(this.player && !this.player.bar.hidden ? rel(this.player.bar.getBoundingClientRect()) : null, codeRect);
-    // Sul telefono il pulsante unico sta sotto tutto (accanto alla didascalia); aperto, il pad sale
-    // sopra la didascalia invece di schiacciarla.
-    const caption = this.root.querySelector(":scope > .caption");
-    const captionTop = caption?.textContent.trim() ? 14 + caption.offsetHeight + 6 : 14;
-    const base = narrow ? (this.collapsed ? 4 : Math.max(46, captionTop)) : 14;
     const chartsWidth = this.charts?.coveredWidth() ?? 0;
-    const code = !narrow && !chartsWidth ? codeRect : null;
+    const caption = this.root.querySelector(":scope > .caption");
+    const captionShown = Boolean(caption?.textContent.trim());
+    const rootWidth = this.root.clientWidth;
+    // il `left` del CSS (un tab può restringere la didascalia al suo testo e centrarla)
+    const captionLeft = caption ? parseFloat(getComputedStyle(caption).left) || 16 : 16;
+    const captionHeight = caption?.offsetHeight ?? 0;
+    // la didascalia è figlia della radice: la barra del player passa dalle coordinate dello stage alle sue
+    const shift = stageRect.left - this.root.getBoundingClientRect().left;
+    const barInRoot = bar ? { ...bar, left: bar.left + shift, right: bar.right + shift } : null;
+    // Sul telefono prima la didascalia (sopra il codice ridotto se gli finirebbe sotto), poi il pad: il
+    // pulsante unico sta sotto tutto, accanto a lei; aperto, il pad sale sopra la didascalia.
+    let captionSpot = null;
+    if (narrow) captionSpot = captionPlacement({ width: rootWidth, left: captionLeft, sh, height: captionHeight, code: codeRect, bar: barInRoot, narrow: true, fabRoom: FAB_ROOM });
+    const captionTop = captionShown ? (captionSpot?.bottom ?? 14) + captionHeight + 6 : 14;
+    const base = narrow ? (this.collapsed ? 4 : Math.max(46, captionTop)) : 14;
     // Sul telefono il codice (anche ridotto) sta in basso per tutta la larghezza: il pad aperto gli sta sopra.
     const lowest = narrow && !this.collapsed && codeRect && codeRect.top > sh / 2 ? codeRect : null;
-
-    const candidates = chartsWidth ? [chartsWidth + 12] : [narrow ? 8 : 14];
-    if (code) candidates.push(sw - code.left + 12);
-    /** Il primo posto libero per un riquadro w×h; `ok` = non copre il codice né il centro della scena. */
-    const place = (w, h) => {
-      let spot = null;
-      for (const right of candidates) {
-        const extent = { left: sw - right - w, right: sw - right, height: h };
-        const bottom = padBottom(extent, bar, sh, padBottom(extent, lowest, sh, padBottom(extent, bar, sh, base)));
-        const top = sh - bottom - h;
-        const clashes = code && sw - right > code.left && top < code.bottom + 8 && sh - bottom > code.top;
-        // accanto al codice va bene solo se resta nella metà destra della scena visibile
-        const central = code && right > candidates[0] && extent.left < code.left / 2;
-        spot = { right, bottom, ok: !clashes && !central };
-        if (spot.ok) break;
-      }
-      return spot;
-    };
+    const where = (size) => padPlacement({ sw, sh, size, bar, code: !narrow && !chartsWidth ? codeRect : null, lowest, chartsWidth, edge: narrow ? 8 : 14, base });
 
     const open = !this.collapsed;
-    let spot = place(this.openSize?.w ?? this.pad.offsetWidth, this.openSize?.h ?? this.pad.offsetHeight);
+    let spot = where({ w: this.openSize?.w ?? this.pad.offsetWidth, h: this.openSize?.h ?? this.pad.offsetHeight });
     if (spot.ok) this.forceOpen = false;
     this.setSqueezed(open && !narrow && !spot.ok && !this.forceOpen);
-    if (this.squeezed) spot = place(this.fab.offsetWidth || 40, this.fab.offsetHeight || 40);
+    if (this.squeezed) spot = where({ w: this.fab.offsetWidth || 40, h: this.fab.offsetHeight || 40 });
     this.pad.style.right = `${spot.right}px`;
     this.pad.style.bottom = `${spot.bottom}px`;
+    // I chip in alto (benvenuto, "Ti sei perso?") stanno sopra la parte visibile della scena (in una parte
+    // stretta il benvenuto mette il testo sopra e i pulsanti sotto: container query in nav.css).
     this.hud.style.right = `${this.coveredRight()}px`;
-    // La didascalia in basso lascia spazio al pad quando questo sta sulla sua stessa riga.
-    const padW = this.pad.offsetWidth;
-    const captionRight = narrow ? FAB_ROOM : spot.bottom < 44 && padW ? spot.right + padW + 10 : 16;
-    this.root.style.setProperty("--nav-caption-right", `${captionRight}px`);
+    this.placeHud();
+    // La didascalia in basso: accanto al pad se stanno sulla stessa riga e resta larga, altrimenti sopra.
+    if (!narrow) {
+      const padSize = this.pad.offsetWidth ? { w: this.pad.offsetWidth, h: this.pad.offsetHeight } : { w: 0, h: 0 };
+      captionSpot = captionPlacement({ width: rootWidth, left: captionLeft, sh, height: captionHeight, pad: { right: spot.right, bottom: spot.bottom, ...padSize }, chartsWidth, bar: barInRoot });
+    }
+    this.root.style.setProperty("--nav-caption-right", `${captionSpot.right}px`);
+    this.root.style.setProperty("--nav-caption-bottom", `${captionSpot.bottom}px`);
+    this.root.classList.toggle("nav-caption-squeezed", captionShown && captionSpot.hidden);
   }
 
   /**

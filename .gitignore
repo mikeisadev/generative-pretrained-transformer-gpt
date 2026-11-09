@@ -9,5 +9,9 @@ __pycache__/
 /data/
 /checkpoints/
 
+# Run esportati con scripts/export_run.py: il Laboratorio pesi li carica dal disco, quindi non
+# serve versionarli (pesano qualche MB ciascuno). Togli la riga per condividerne uno nel repository.
+/runs/
+
 # File di sistema di macOS
 .DS_Store

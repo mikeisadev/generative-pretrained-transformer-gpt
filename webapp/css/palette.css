@@ -252,6 +252,9 @@ kbd {
   overflow-wrap: anywhere;
 }
 .app-toast.visible { opacity: 1; transform: translate(-50%, 0); }
+/* L'avviso sta in basso al centro, sopra tutto: per quei secondi la didascalia del tab tace, invece di
+   spuntare ai due lati dell'avviso (valeva solo per il Laboratorio: ora per ogni tab). */
+body:has(.app-toast.visible) .tab .caption { visibility: hidden; }
 .clipboard-helper { position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; }
 
 /* --- progressi nel Menu del Percorso ------------------------------------------------- */

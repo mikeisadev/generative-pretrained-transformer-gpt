@@ -7,6 +7,7 @@
  * così il testo ha la stessa grandezza su tutte le schede).
  */
 import * as THREE from "three";
+import { roundRect } from "../../../core/diagram.js";
 
 // Pixel per unità di scena: 20 unità → 960 px. Da vicino (Dettaglio) una scheda occupa ~20-40 px
 // per unità sullo schermo: 48 basta per un testo nitido e, rispetto a 64, quasi dimezza la memoria
@@ -52,16 +53,6 @@ export class Card {
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
   }
-}
-
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
 }
 
 function frame(ctx, w, h, color) {

@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prova delle matrici con i numeri</title>
+    <link rel="stylesheet" href="../css/core.css" />
+    <link rel="stylesheet" href="../css/nav.css" />
+    <style>
+      /* Solo per questa pagina di prova: niente barra dei tab, la pagina è un tab solo. */
+      #app { inset: 0; }
+      .demo-pane { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+      .demo-pane h1 { font-size: 16px; margin: 0; }
+      .demo-pane p { margin: 0; }
+      .demo-field { display: grid; gap: 4px; }
+      .demo-field label { font-size: 12.5px; color: var(--muted); }
+      /* width 100%: senza, una <select> è larga quanto la sua opzione più lunga e sul telefono esce dal cassetto */
+      .demo-field select { font: inherit; color: var(--text); background: #0b1220; border: 1px solid #334155; border-radius: 8px; padding: 6px 8px; width: 100%; min-width: 0; }
+      .demo-field select:focus-visible, .demo-pane button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .demo-row { display: flex; flex-wrap: wrap; gap: 6px; }
+      .demo-row button { font-size: 12.5px; padding: 5px 9px; }
+      .demo-row button[aria-pressed="true"] { border-color: var(--accent); background: rgba(56, 189, 248, 0.12); }
+      .demo-box { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: rgba(15, 23, 42, 0.6); display: grid; gap: 6px; }
+      .demo-box h2 { font-size: 13px; margin: 0; color: var(--muted); font-weight: 600; }
+      .demo-cell { font: 13px/1.5 "JetBrains Mono", ui-monospace, monospace; min-height: 2.6em; }
+      .demo-cell b { color: #fde68a; font-weight: 600; }
+      .demo-code { font: 12px/1.45 "JetBrains Mono", ui-monospace, monospace; color: #cbd5e1; white-space: pre-wrap; word-break: break-word; margin: 0; }
+      .demo-code .where { color: var(--muted); }
+      .demo-stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font: 12px/1.5 "JetBrains Mono", ui-monospace, monospace; margin: 0; }
+      .demo-stats dt { color: var(--muted); }
+      .demo-stats dd { margin: 0; text-align: right; }
+      .demo-costs { font: 12px/1.5 "JetBrains Mono", ui-monospace, monospace; color: #cbd5e1; white-space: pre-wrap; margin: 0; }
+      .demo-error { color: #fca5a5; }
+      .demo-legend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+      .demo-legend .bar { flex: 1; height: 10px; border-radius: 5px; background: linear-gradient(90deg, rgb(59, 130, 246), rgb(22, 27, 34) 50%, rgb(251, 146, 60)); }
+    </style>
+    <script type="importmap">
+      { "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+    </script>
+  </head>
+  <body>
+    <div id="app"><div class="tab-root" id="tab"></div></div>
+    <script type="module">
+      import * as THREE from "three";
+      import { el, fmt } from "../js/core/dom.js";
+      import { fetchJson } from "../js/core/binary.js";
+      import { createTabLayout } from "../js/core/layout.js";
+      import { CELL, label, matrixPlane, weightTexture } from "../js/core/visuals.js";
+      import { NumbersGroup, NumericMatrix, attachNumbers, colormapLUT } from "../js/core/matrixNumbers.js";
+      import { formatCell, formatPrecise, quantizeSigned } from "../js/shared/weights/display.js";
+      import { buildModuleTree, findNode, pythonPath } from "../js/shared/weights/moduleTree.js";
+      import { loadBuiltinRun } from "../js/shared/weights/run.js";
+      import { absMax, tensorStats } from "../js/shared/weights/stats.js";
+
+      const QUICK = [
+        ["blocks.0.ffwd.net.0.weight", "FFN 256×64"],
+        ["token_embedding_table.weight", "Embedding 65×64"],
+        ["blocks.0.ffwd.net.0.bias", "Bias 256 (1D)"],
+        ["blocks.0.ln1.weight", "γ LayerNorm 64"],
+        ["blocks.0.sa.heads.0.key.weight", "Key 16×64"],
+      ];
+      const BAR_W = 0.12; // come le barre dei vettori del Transformer (architecture.js)
+      const GAP = 0.8;
+
+      const root = document.getElementById("tab");
+      root.dataset.tab = "matrici";
+      const ui = createTabLayout(root, { hint: "Pagina di prova del nucleo: NumericMatrix e attachNumbers con i pesi veri del GPT del corso." });
+      const pane = ui.sidebar.addPane({ id: "prova", title: "Prova" });
+      ui.sidebar.select("prova");
+      // Da vicino le celle (0,04 unità) superano i 100 px: si arriva fino a tutta la precisione del float32.
+      ui.host.controls.minDistance = 0.12;
+
+      const status = el("p", { className: "hint" }, "Carico i pesi del GPT del corso…");
+      const tensorSelect = el("select", { id: "demo-tensor" });
+      const stepSelect = el("select", { id: "demo-step" });
+      const quick = el("div", { className: "demo-row", role: "group", ariaLabel: "Tensori di prova" });
+      const cellBox = el("div", { className: "demo-cell", ariaLive: "polite" }, "Passa con il mouse su una cella.");
+      const numbersInfo = el("p", { className: "hint" }, "");
+      const codeBox = el("pre", { className: "demo-code" });
+      const statsBox = el("dl", { className: "demo-stats" });
+      const costsBox = el("pre", { className: "demo-costs" }, "…");
+      pane.append(
+        el(
+          "div",
+          { className: "demo-pane" },
+          el("h1", {}, "Matrici con i numeri veri"),
+          el("p", { className: "hint" }, "A sinistra una NumericMatrix (celle colorate dai float32 del run), a destra la heatmap a 8 bit di core/visuals.js con attachNumbers. Avvicinati con la rotella: quando le celle sono abbastanza grandi compaiono i numeri, con più decimali man mano che crescono."),
+          status,
+          el("div", { className: "demo-field" }, el("label", { htmlFor: "demo-tensor" }, "Tensore"), tensorSelect),
+          quick,
+          el("div", { className: "demo-field" }, el("label", { htmlFor: "demo-step" }, "Pesi"), stepSelect),
+          el(
+            "div",
+            { className: "demo-row" },
+            el("button", { type: "button", onclick: () => goToNumbers() }, "Vai ai numeri"),
+            el("button", { type: "button", onclick: () => ui.nav.home() }, "Vista d'insieme"),
+          ),
+          el("div", { className: "demo-legend" }, el("span", {}, "negativo"), el("span", { className: "bar", ariaHidden: "true" }), el("span", {}, "positivo")),
+          el("div", { className: "demo-box" }, el("h2", {}, "Cella sotto il mouse"), cellBox, numbersInfo),
+          el("div", { className: "demo-box" }, el("h2", {}, "La riga Python che crea questo peso"), codeBox),
+          el("div", { className: "demo-box" }, el("h2", {}, "Statistiche del tensore"), statsBox),
+          el("div", { className: "demo-box" }, el("h2", {}, "Costo del codice (senza il disegno della GPU)"), costsBox),
+        ),
+      );
+
+      const numbers = new NumbersGroup({ maxOverlays: 4 });
+      const state = { run: null, spec: null, tree: null, name: null, step: "final", values: null, matrix: null, heat: null, handle: null, scale: 1, objects: null, labels: [], pointer: null };
+      const costs = { idle: [], busy: [], frames: [] };
+
+      /** Valori del tensore scelto per la sorgente scelta (pesi finali float32 o uno snapshot float16). */
+      async function valuesFor(name, step) {
+        if (step === "final") return state.run.tensor(name).data;
+        const snap = await state.run.loadSnapshot(step);
+        return snap.tensors.get(name).data;
+      }
+
+      /** Ridisegna la heatmap di visuals.js con altri valori (stessa scala a 8 bit di model.json), come fa il Transformer. */
+      function paintHeatmap(mesh, values, scale) {
+        const lut = colormapLUT("diverging");
+        const image = mesh.material.map.image;
+        const { width: cols, height: rows } = image;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const i = 4 * quantizeSigned(values[r * cols + c], scale);
+            const o = ((rows - 1 - r) * cols + c) * 4;
+            image.data[o] = lut[i];
+            image.data[o + 1] = lut[i + 1];
+            image.data[o + 2] = lut[i + 2];
+          }
+        }
+        mesh.material.map.needsUpdate = true; // attachNumbers se ne accorge e ridisegna i numeri
+      }
+
+      function clearScene() {
+        state.handle?.dispose();
+        state.matrix?.dispose();
+        if (state.objects) {
+          ui.host.scene.remove(state.objects);
+          state.objects.traverse((o) => {
+            o.geometry?.dispose();
+            o.material?.map?.dispose();
+            o.material?.dispose();
+          });
+        }
+        state.handle = state.matrix = state.heat = state.objects = null;
+        state.labels = [];
+      }
+
+      async function show(name, { fly = true } = {}) {
+        const tensor = state.run.tensor(name);
+        if (!tensor) return;
+        clearScene();
+        state.name = name;
+        tensorSelect.value = name;
+        cellBox.textContent = "Passa con il mouse su una cella.";
+        for (const b of quick.children) b.setAttribute("aria-pressed", String(b.dataset.name === name));
+        const values = await valuesFor(name, state.step);
+        state.values = values;
+        const final = state.run.tensor(name).data;
+        const is1D = tensor.shape.length === 1;
+        const n = tensor.numel;
+        const [rows, cols] = is1D ? [1, n] : tensor.shape;
+
+        const objects = new THREE.Group();
+        // A sinistra: NumericMatrix con la scala dei pesi FINALI (così si vede quanto crescono durante il training).
+        const range = absMax(final) || 1;
+        state.matrix = new NumericMatrix({ rows, cols, data: values, range, group: numbers });
+        const mw = cols * CELL;
+        const mh = rows * CELL;
+        // A destra: la heatmap a 8 bit di model.json (core/visuals.js); i vettori come colonne, come nel Transformer.
+        const q = state.spec.tensors[name];
+        state.scale = q.scale;
+        const heat = is1D ? matrixPlane(weightTexture({ ...q, shape: [n, 1] }), n, 1) : matrixPlane(weightTexture(q), rows, cols);
+        if (is1D) heat.scale.x = BAR_W / CELL;
+        const hw = is1D ? BAR_W : cols * CELL;
+        const hh = is1D ? n * CELL : rows * CELL;
+        state.matrix.object3d.position.x = -(mw / 2 + GAP / 2);
+        heat.position.x = hw / 2 + GAP / 2;
+        state.heat = heat;
+        objects.add(state.matrix.object3d, heat);
+        const tag = (text, sub, x, h) => {
+          const s = label(text, { sub, size: 0.16 });
+          s.position.set(x, h / 2 + 0.32, 0);
+          objects.add(s);
+          state.labels.push(s);
+        };
+        tag("NumericMatrix", `${pythonPath(name)} · float32`, state.matrix.object3d.position.x, mh);
+        tag("Heatmap di visuals.js + attachNumbers", is1D ? "vettore come colonna (n, 1)" : "8 bit di model.json, numeri dal run", heat.position.x, hh);
+        ui.host.scene.add(objects);
+        state.objects = objects;
+        state.handle = attachNumbers(heat, { getValue: is1D ? (r) => state.values[r] : (r, c) => state.values[r * cols + c], group: numbers });
+        if (state.step !== "final") paintHeatmap(heat, values, q.scale);
+        describe(name, values);
+        // Di fronte (le matrici sono piatte) e con le etichette dentro l'inquadratura.
+        const home = () => ui.director.focus(new THREE.Box3().setFromObject(objects), { showFrame: false, margin: 1.1, minDistance: 1, direction: new THREE.Vector3(0, 0, 1) });
+        ui.nav.setHome(home);
+        ui.nav.setBounds(() => new THREE.Box3().setFromObject(objects).expandByScalar(1));
+        if (fly) await home();
+        const url = new URL(location.href);
+        url.searchParams.set("tensor", name);
+        history.replaceState(null, "", url);
+      }
+
+      async function setStep(step) {
+        state.step = step === "final" ? "final" : Number(step);
+        stepSelect.value = String(step);
+        const values = await valuesFor(state.name, state.step);
+        state.values = values;
+        state.matrix.setData(values); // stessa scala: i pesi "nascono" dal rumore dell'inizializzazione
+        paintHeatmap(state.heat, values, state.scale);
+        describe(state.name, values);
+        readCell(); // il mouse non si è mosso ma il valore sotto di lui sì
+      }
+
+      function describe(name, values) {
+        const s = tensorStats(values);
+        const rows = [
+          ["valori", fmt(s.count)],
+          ["media", formatPrecise(s.mean, 4)],
+          ["dev. std", formatPrecise(s.std, 4)],
+          ["min / max", `${formatPrecise(s.min, 4)} / ${formatPrecise(s.max, 4)}`],
+          ["norma L2", formatPrecise(s.l2, 5)],
+          [`|w| < 0,001`, `${fmt(s.nearZero.fraction * 100, 2)} %`],
+          ["percentili 5 / 50 / 95", `${formatCell(s.percentiles[5], 3)} / ${formatCell(s.percentiles[50], 3)} / ${formatCell(s.percentiles[95], 3)}`],
+        ];
+        statsBox.replaceChildren(...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+        const node = findNode(state.tree, name);
+        const code = node?.code;
+        codeBox.replaceChildren(
+          code ? el("span", { className: "where" }, `${code.file}:${code.line}\n`) : "",
+          code ? code.text : "(nessuna riga del codice del corso per questo tensore)",
+          code?.role ? el("span", { className: "where" }, `\n${code.param}: ${code.role}`) : "",
+        );
+      }
+
+      function goToNumbers() {
+        // Distanza a cui una cella è ~64 px sullo schermo (3-4 decimali), davanti al centro della matrice.
+        const h = ui.host.container.clientHeight;
+        const perUnit = h / (2 * Math.tan(THREE.MathUtils.degToRad(ui.host.camera.fov) / 2));
+        const d = (CELL * perUnit) / 64;
+        const target = new THREE.Vector3();
+        state.matrix.mesh.getWorldPosition(target);
+        ui.director.noteUserIntent();
+        return ui.director.flyTo(target.clone().add(new THREE.Vector3(0, 0, d)), target, 1);
+      }
+
+      // Cella sotto il mouse (solo quando il mouse si muove o cambiano i dati: nessun lavoro per frame).
+      function readCell() {
+        const ev = state.pointer;
+        if (!ev || !state.matrix) return;
+        const t0 = performance.now();
+        const hit = ui.host.pick(ev, [state.matrix.mesh, state.heat], false)[0];
+        const cell = hit ? (hit.object === state.heat ? state.handle.cellAt(hit) : state.matrix.cellAt(hit)) : null;
+        state.matrix.highlight(hit?.object === state.matrix.mesh ? cell : null);
+        state.handle.highlight(hit?.object === state.heat ? cell : null);
+        costs.pickMs = performance.now() - t0;
+        if (!cell) return;
+        const is1D = state.run.tensor(state.name).shape.length === 1;
+        const where = is1D ? `[${hit.object === state.heat ? cell.row : cell.col}]` : `[${cell.row}, ${cell.col}]`;
+        const source = state.step === "final" ? "pesi finali" : `step ${fmt(state.step)}`;
+        cellBox.replaceChildren(`${pythonPath(state.name)}${where} · ${source}`, el("br"), "valore ", el("b", {}, formatPrecise(cell.value)), hit.object === state.heat ? " (numero vero; il colore è a 8 bit)" : "");
+      }
+      let queued = false;
+      ui.host.renderer.domElement.addEventListener("pointermove", (e) => {
+        state.pointer = { clientX: e.clientX, clientY: e.clientY };
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => {
+          queued = false;
+          readCell();
+        });
+      });
+
+      // Una chiamata per frame per tutta la scena: a camera ferma esce subito.
+      ui.host.onFrame(() => {
+        // Da vicino le etichette sprite diventerebbero enormi e coprirebbero i numeri.
+        const far = ui.host.zoomDistance() > 3;
+        for (const s of state.labels) s.visible = far;
+        const t0 = performance.now();
+        const did = numbers.update(ui.host.camera, ui.host.container.clientHeight);
+        (did ? costs.busy : costs.idle).push(performance.now() - t0);
+        if (costs.idle.length > 240) costs.idle.shift();
+        if (costs.busy.length > 120) costs.busy.shift();
+      });
+      let last = performance.now();
+      (function measure(now) {
+        costs.frames.push(now - last);
+        last = now;
+        if (costs.frames.length > 60) costs.frames.shift();
+        requestAnimationFrame(measure);
+      })(last);
+      const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+      /**
+       * Costo di update() a camera ferma. Una chiamata sola dura ~1-2 µs, sotto la risoluzione del timer
+       * del browser (100 µs con il rendering software): misurata frame per frame darebbe 0 o 100 µs a caso.
+       * Si misurano quindi 2.000 chiamate di fila, solo a camera ferma (l'ultima non ha ricalcolato niente).
+       */
+      function idleText() {
+        const cam = ui.host.camera;
+        const h = ui.host.container.clientHeight;
+        if (numbers.update(cam, h)) return "misura alla prossima pausa della camera";
+        const t0 = performance.now();
+        for (let i = 0; i < 2000; i++) numbers.update(cam, h);
+        return `${fmt(((performance.now() - t0) * 1000) / 2000, 2)} µs/frame`;
+      }
+      setInterval(() => {
+        const shown = numbers.shown();
+        numbersInfo.textContent = shown.length
+          ? shown.map(({ target, window: w, decimals }) => `${target === state.matrix?.target ? "NumericMatrix" : "heatmap"}: ${decimals} decimali su ${fmt((w.r1 - w.r0) * (w.c1 - w.c0))} celle (righe ${w.r0}-${w.r1 - 1}, colonne ${w.c0}-${w.c1 - 1})`).join(" · ")
+          : "Numeri nascosti: le celle sono ancora piccole sullo schermo. Avvicinati.";
+        const s = numbers.stats;
+        costsBox.textContent = [
+          `a riposo ${idleText()} (${fmt(s.idle)} frame senza lavoro)`,
+          `in movimento ${fmt(avg(costs.busy), 3)} ms/frame (${fmt(s.recomputes)} ricalcoli)`,
+          `ridisegno dei numeri: ultimo ${fmt(s.lastRedrawMs, 2)} ms, massimo ${fmt(s.maxRedrawMs, 2)} ms (${fmt(s.redraws)} in tutto, ${fmt(s.lastRedrawCells)} celle)`,
+          `cella sotto il mouse ${fmt(costs.pickMs ?? 0, 2)} ms`,
+          `frame ${fmt(avg(costs.frames), 1)} ms (${fmt(1000 / Math.max(1, avg(costs.frames)), 0)} fps, disegno compreso)`,
+        ].join("\n");
+      }, 500);
+
+      window.__matrixDemo = { ui, numbers, state, costs, show, setStep, goToNumbers };
+      ui.host.start();
+      ui.host.resize();
+
+      try {
+        const [run, spec] = await Promise.all([loadBuiltinRun({ baseUrl: "../data/" }), fetchJson("../data/model.json")]);
+        state.run = run;
+        state.spec = spec;
+        state.tree = buildModuleTree(run.params, { snippets: spec.snippets, config: run.config });
+        status.textContent = `${run.name}: ${fmt(run.totalParams)} parametri in ${fmt(run.tensors.size)} tensori, ${run.steps.length} snapshot del training.`;
+        // Tensori raggruppati per modulo, come l'albero del codice (GPTLanguageModel → blocks[i] → …).
+        const groups = new Map();
+        for (const p of run.params) {
+          const key = p.name.startsWith("blocks.") ? `blocks[${p.name.split(".")[1]}]` : "modello";
+          if (!groups.has(key)) groups.set(key, el("optgroup", { label: key }));
+          groups.get(key).append(el("option", { value: p.name }, `${pythonPath(p.name)} (${p.shape.join(" × ")})`));
+        }
+        tensorSelect.append(...groups.values());
+        tensorSelect.addEventListener("change", () => show(tensorSelect.value));
+        for (const [name, text] of QUICK) quick.append(el("button", { type: "button", dataset: { name }, ariaPressed: "false", onclick: () => show(name) }, text));
+        stepSelect.append(
+          el("option", { value: "final" }, "Pesi finali (float32, step 5.000)"),
+          ...run.snapshots.map((s) => el("option", { value: String(s.step) }, `Snapshot step ${fmt(s.step)} (float16) · loss ${fmt(s.meta.loss, 2)}`)),
+        );
+        stepSelect.addEventListener("change", () => setStep(stepSelect.value));
+        const params = new URL(location.href).searchParams;
+        const first = params.get("tensor") ?? QUICK[0][0];
+        if (params.has("step")) state.step = params.get("step") === "final" ? "final" : Number(params.get("step"));
+        stepSelect.value = String(state.step);
+        await show(run.tensor(first) ? first : QUICK[0][0]);
+        window.__matrixDemo.ready = true;
+      } catch (error) {
+        status.className = "demo-error";
+        status.textContent = `Errore: ${error.message}`;
+        console.error(error);
+      }
+    </script>
+  </body>
+</html>

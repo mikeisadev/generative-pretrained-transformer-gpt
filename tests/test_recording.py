@@ -197,14 +197,15 @@ def test_groups_cover_every_parameter_once(recorded):
     assert trace["groups"][-2:] == ["ln_f", "lm_head"]
 
 
-def test_group_of_maps_names_and_rejects_unknown_ones():
+def test_group_of_keeps_the_course_groups_and_never_rejects_a_name():
     assert group_of("blocks.3.sa.heads.1.query.weight") == "blocks.3.attention"
     assert group_of("blocks.0.sa.proj.bias") == "blocks.0.attention"
     assert group_of("blocks.1.ln2.weight") == "blocks.1.layernorm"
     assert group_of("blocks.1.ffwd.net.2.weight") == "blocks.1.ffwd"
     assert group_of("lm_head.bias") == "lm_head"
-    with pytest.raises(ValueError):
-        group_of("decoder.weight")
+    # Un nome che il GPT del corso non ha va nel suo modulo (prima fermava la registrazione).
+    assert group_of("decoder.weight") == "decoder"
+    assert group_of("blocks.1.norm1.weight") == "blocks.1.norm1"
     assert len(parameter_groups(GPTLanguageModel(GPTConfig()))) == 2 + 3 * 4 + 2
 
 
@@ -257,6 +258,28 @@ def test_save_removes_stale_snapshots(recorded, tokenizer, splits):
     recorder.save(recorded["dir"])
     assert not stale.exists()
     assert len(list(recorded["dir"].glob("snap_*.f16.bin"))) == len(recorder.snapshots)
+
+
+def test_save_replaces_links_instead_of_writing_through_them(tokenizer, splits, tmp_path):
+    outside = tmp_path / "fuori.txt"
+    outside.write_text("da non toccare", encoding="utf-8")
+    out = tmp_path / "training"
+    out.mkdir()
+    try:
+        (out / "trace.json").symlink_to(outside)
+        (out / "snap_00000.f16.bin").symlink_to(outside)
+    except OSError:  # Windows senza i permessi per i collegamenti simbolici
+        pytest.skip("il file system non permette collegamenti simbolici")
+    (out / "snap_00007.f16.bin").mkdir()  # una cartella con il nome di uno snapshot non si tocca
+    recorder = TrainingRecorder(tokenizer, splits.val, BLOCK, REC_CFG)
+    train(new_model(tokenizer), splits, BLOCK, TRAIN_CFG, CPU, log=lambda _msg: None, callbacks=[recorder])
+    recorder.save(out)
+    assert outside.read_text(encoding="utf-8") == "da non toccare"  # niente scritto fuori dalla cartella
+    assert not (out / "trace.json").is_symlink()
+    assert json.loads((out / "trace.json").read_text(encoding="utf-8"))["snapshots"]
+    assert not (out / "snap_00000.f16.bin").is_symlink()
+    assert (out / "snap_00007.f16.bin").is_dir()
+    assert not list(out.glob(".*.tmp"))  # nessun file temporaneo rimasto
 
 
 def test_recorder_without_training_cannot_be_saved(tokenizer, splits, tmp_path):

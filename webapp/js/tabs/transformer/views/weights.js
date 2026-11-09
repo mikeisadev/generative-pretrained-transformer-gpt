@@ -431,6 +431,7 @@ export function installWeightsView(tab) {
     label: "Pesi",
     description: "Dove stanno i parametri appresi: ogni tensore con nome, forma e numero di pesi.",
     order: 10,
+    flow: true, // il flusso continua (opaco) sopra la pila
     enter: () => {
       arch.root.visible = true;
       arch.rail.visible = true;

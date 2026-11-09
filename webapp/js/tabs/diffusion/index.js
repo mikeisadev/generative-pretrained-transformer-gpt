@@ -14,10 +14,12 @@
  *   sceneNav.js   navigazione libera: "Centra", confini, "Dettaglio" dove si guarda, didascalie delle zone
  *   content.js    percorso didattico, fonti; snippets.js frammenti di codice veri
  *   search.js     indice della ricerca globale (passi, azioni, viste); i link diretti arrivano a goto()
+ *   network.js, brain.js  rappresentazioni "Rete neurale" e "Cervello" (soli dati, viste del nucleo)
  */
 import * as THREE from "three";
 import { el } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
+import { installRepresentations } from "../../core/representations.js";
 import { installStepKeys } from "../../core/stepKeys.js";
 import { parseHash } from "../../core/search.js";
 import { Menu } from "../../core/ui/menu.js";
@@ -181,6 +183,31 @@ export async function createTab(root, app) {
   const panePath = sidebar.addPane({ id: "percorso", title: "Percorso", hint: PATH_HINT });
   const paneActions = sidebar.addPane({ id: "azioni", title: "Azioni", hint: "Animazioni passo per passo: usa i controlli in basso per pausa, passo avanti/indietro e velocità." });
   const paneViews = sidebar.addPane({ id: "viste", title: "Viste", hint: "Scegli quale denoiser mostrare e dove guardare." });
+  // Rappresentazioni del nucleo (selettore "Architettura · Rete neurale · Cervello" e pannello "Cervello",
+  // che deve stare prima di "Fonti"). Le due viste sono specifiche di soli dati caricate alla prima apertura;
+  // il nucleo torna da solo all'Architettura quando lo studente chiede qualcosa della scena (un passo, una
+  // vista, un'azione, un link diretto): qui non serve altro.
+  const reps = installRepresentations(ui, {
+    tabId: "diffusion",
+    app,
+    network: {
+      load: () => import("./network.js").then((m) => m.networkSpec),
+      description: "Il text encoder, la U-Net e il decoder del VAE neurone per neurone, da sinistra a destra. Girando la camera vedi la griglia del latente: convoluzioni tra vicini, skip connection, self-attention e cross-attention verso il testo.",
+    },
+    brain: {
+      load: () => import("./brain.js").then((m) => m.brainSpec),
+      description: "La via visiva del cervello (retina, talamo, V1, V4, corteccia inferotemporale) e le analogie con la diffusione, ognuna con i suoi limiti e le fonti.",
+    },
+  });
+  // Aprendo una rappresentazione il nucleo chiude l'azione in corso e porta subito a destinazione il volo
+  // della camera. Se l'azione stava volando verso il banco di lavoro, la camera resta a guardare il banco,
+  // che intanto è stato svuotato (sceneNav.js controlla la camera quando l'azione si chiude, cioè prima
+  // della fine del volo). Tornando all'Architettura si applica la stessa regola di sceneNav: niente azione e
+  // camera sopra la scena → vista d'insieme. Un volo chiesto subito dopo (un passo, un'azione) la sostituisce.
+  const sceneTop = Math.max(levels.boxes.detail.max.y, levels.boxes.blocks.max.y);
+  reps.on("change", (id, previous) => {
+    if (id === "main" && previous !== "main" && !ui.player.action && host.controls.target.y > sceneTop) sceneNav.overview();
+  });
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Paper, codice ufficiale e documentazione da cui vengono numeri e formule." });
 
   tab.menu = new Menu(panePath, PATH, {
@@ -270,7 +297,12 @@ export async function createTab(root, app) {
   ]);
 
   /** Link diretto o risultato della ricerca globale: porta il tab su un passo, un'azione o una vista. */
-  async function goto({ kind, id }) {
+  async function goto(target) {
+    // view:rete e view:cervello mostrano la rappresentazione; per tutto il resto un livello aperto si chiude
+    // (si torna all'Architettura) e si prosegue come sempre
+    const shown = reps.goto(target);
+    if (shown) return shown;
+    const { kind, id } = target;
     if (kind === "step") return tab.menu.reveal(id, { sidebar }); // apre il Percorso sul passo
     if (kind === "action") {
       if (!actionIds.has(id)) return false;

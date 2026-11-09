@@ -207,6 +207,111 @@ export function padBottom(pad, bar, stageHeight, base = 14, gap = 10) {
   return overlaps ? Math.max(base, stageHeight - bar.top + gap) : base;
 }
 
+/**
+ * Dove va il pad della navigazione (core/ui/navPad.js): la regola intera, pura, così la usa anche chi deve
+ * sapere in anticipo dove starà (es. la lavagna delle azioni del Laboratorio, che altrimenti la copiava).
+ * Coordinate in px dello stage (origine in alto a sinistra); i rettangoli sono {left, right, top, bottom}.
+ * - Nell'angolo in basso a destra (`edge` px dal bordo: 14, sul telefono 8), oppure a sinistra dei grafici
+ *   aperti (`chartsWidth` + 12), ma solo se resta nella metà destra della scena visibile accanto ai grafici
+ *   (1100 px con sidebar e grafici aperti: 260 px di scena, il pad aperto ne coprirebbe tre quarti);
+ * - se il codice (visibile, schermo largo, grafici chiusi) arriva fin giù: accanto al codice, ma solo se così
+ *   resta nella metà destra della scena visibile;
+ * - sopra la barra del player (con il chip "Segui l'azione": `bar` ne è l'ingombro) se la toccherebbe e, sul
+ *   telefono, sopra il codice in basso (`lowest`), poi di nuovo sopra la barra se serve.
+ * @param {object} o
+ * @param {number} o.sw larghezza dello stage   @param {number} o.sh altezza dello stage
+ * @param {{w: number, h: number}} o.size il pad (aperto) o il pulsante unico
+ * @param {object|null} [o.bar] la barra del player (+ chip), o null
+ * @param {object|null} [o.code] il codice di cui tenere conto ai lati (null sul telefono e con i grafici aperti)
+ * @param {object|null} [o.lowest] sul telefono il codice in basso, sotto il quale il pad non scende
+ * @param {number} [o.chartsWidth] px coperti dai grafici aperti (0 = chiusi o telefono)
+ * @param {number} [o.edge] distanza dal bordo destro senza ostacoli (14; 8 sul telefono)
+ * @param {number} [o.base] distanza dal fondo senza ostacoli (14)
+ * @returns {{right: number, bottom: number, ok: boolean}} `ok` = non copre il codice né il centro della scena
+ *   (altrimenti navPad.js riduce il pad al pulsante unico finché lo spazio torna)
+ */
+export function padPlacement({ sw, sh, size, bar = null, code = null, lowest = null, chartsWidth = 0, edge = 14, base = 14 }) {
+  const candidates = chartsWidth ? [chartsWidth + 12] : [edge];
+  if (code) candidates.push(sw - code.left + 12);
+  let spot = null;
+  for (const right of candidates) {
+    const extent = { left: sw - right - size.w, right: sw - right, height: size.h };
+    const bottom = padBottom(extent, bar, sh, padBottom(extent, lowest, sh, padBottom(extent, bar, sh, base)));
+    const top = sh - bottom - size.h;
+    const clashes = Boolean(code) && sw - right > code.left && top < code.bottom + 8 && sh - bottom > code.top;
+    // accanto al codice va bene solo se resta nella metà destra della scena visibile
+    const central = Boolean(code) && right > candidates[0] && extent.left < code.left / 2;
+    // accanto ai grafici aperti, idem: la scena visibile è quella a sinistra dei grafici
+    const crowded = chartsWidth > 0 && extent.left < (sw - chartsWidth) / 2;
+    spot = { right, bottom, ok: !clashes && !central && !crowded };
+    if (spot.ok) break;
+  }
+  return spot;
+}
+
+/** Sotto questa larghezza la didascalia accanto al pad andrebbe a capo quasi a ogni parola: sale sopra il pad. */
+export const CAPTION_MIN_WIDTH = 320;
+/** Sotto questa larghezza (anche sopra il pad) la didascalia non si legge: tace finché lo spazio torna. */
+export const CAPTION_HIDE_WIDTH = 140;
+
+/**
+ * Dove va la didascalia in basso del tab (`.caption`, figlia della radice: right e bottom in px dal bordo
+ * destro e dal fondo, che sono quelli dello stage). Pura: la usa navPad.js a ogni evento di layout.
+ * - Sullo schermo largo: sopra la barra del player se la toccherebbe; poi, se il pad sta sulla stessa fascia
+ *   (in fondo, o anche lui sopra la barra), accanto al pad se lei resta larga almeno CAPTION_MIN_WIDTH,
+ *   altrimenti sopra il pad su tutta la larghezza visibile; mai sotto i grafici aperti; nascosta se nemmeno
+ *   così è larga CAPTION_HIDE_WIDTH.
+ * - Sul telefono: a destra lascia il posto al pulsante unico del pad (`fabRoom`); se finirebbe sotto il
+ *   codice in basso (una didascalia di più righe sotto l'intestazione del codice ridotto) sale sopra il
+ *   codice, con la stessa larghezza (così il numero di righe non cambia e il posto non oscilla).
+ * @param {object} o
+ * @param {number} o.width larghezza della radice del tab   @param {number} o.left bordo sinistro della didascalia
+ * @param {number} o.sh altezza dello stage   @param {number} o.height altezza attuale della didascalia
+ * @param {{right: number, bottom: number, w: number, h: number}|null} [o.pad] il pad (posto e misura) o null
+ * @param {number} [o.chartsWidth] px coperti dai grafici aperti
+ * @param {object|null} [o.bar] la barra del player (rettangolo dello stage) o null
+ * @param {object|null} [o.code] sul telefono: il codice visibile in basso, o null
+ * @param {boolean} [o.narrow] telefono
+ * @param {number} [o.fabRoom] spazio a destra per il pulsante unico sul telefono
+ * @returns {{right: number, bottom: number, hidden: boolean, abovePad: boolean}}
+ */
+export function captionPlacement({ width, left, sh, height, pad = null, chartsWidth = 0, bar = null, code = null, narrow = false, fabRoom = 56 }) {
+  const base = 14;
+  let right;
+  let bottom = base;
+  let abovePad = false;
+  // La barra del player sta in basso al centro: la didascalia non le passa sotto (sale sopra di lei).
+  const clearBar = (r, b) => {
+    if (!bar) return b;
+    const top = sh - b - height;
+    const overlaps = left < bar.right && width - r > bar.left && top < bar.bottom && sh - b > bar.top;
+    return overlaps ? Math.round(sh - bar.top + 8) : b;
+  };
+  if (narrow) {
+    right = fabRoom;
+    if (code && code.top > sh / 2 && sh - code.bottom < base + height) bottom = Math.round(sh - code.top + 6);
+    bottom = clearBar(right, bottom);
+  } else {
+    const floor = chartsWidth ? chartsWidth + 16 : 16;
+    right = floor;
+    bottom = clearBar(right, base);
+    // Il pad sulla stessa fascia (in fondo, o sopra la barra del player come la didascalia): accanto o sopra.
+    if (pad && pad.w) {
+      const sameBand = pad.bottom < bottom + height && pad.bottom + pad.h > bottom;
+      const overlapsX = width - right > width - pad.right - pad.w;
+      if (sameBand && overlapsX) {
+        const beside = Math.max(floor, pad.right + pad.w + 10);
+        if (width - left - beside >= CAPTION_MIN_WIDTH) right = beside;
+        else {
+          bottom = Math.round(pad.bottom + pad.h + 8);
+          abovePad = true;
+        }
+      }
+    }
+  }
+  return { right, bottom, hidden: width - left - right < CAPTION_HIDE_WIDTH, abovePad };
+}
+
 /** Nome del file della foto: scena-<tab>-AAAA-MM-GG-hhmmss.png (ordinabile, senza caratteri strani). */
 export function snapshotName(tabId, date = new Date()) {
   const p = (n) => String(n).padStart(2, "0");

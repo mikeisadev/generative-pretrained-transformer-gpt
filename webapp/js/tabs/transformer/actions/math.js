@@ -127,12 +127,12 @@ export function lerpInto(out, a, b, t) {
 
 /**
  * Quantizzazione dei pesi come gpt/export.py (_quantize_signed): byte 0..255, 128 = zero,
- * simmetrica rispetto a `scale` (il massimo in valore assoluto del tensore addestrato).
+ * simmetrica rispetto a `scale` (il massimo in valore assoluto del tensore addestrato). Una sola
+ * implementazione per la web app, quella della libreria dei pesi (riesportata qui per chi la
+ * importava da questo modulo): per valori finiti e scala > 0 è identica a quella che stava qui, in
+ * più un NaN diventa lo zero (128) invece di un indice NaN nella tabella dei colori.
  */
-export function quantizeSigned(v, scale) {
-  const q = Math.round((v / scale) * 127) + 128;
-  return q < 0 ? 0 : q > 255 ? 255 : q;
-}
+export { quantizeSigned } from "../../../shared/weights/display.js";
 
 /**
  * Disposizione dei caratteri di un testo in una griglia "da macchina da scrivere": si va a capo

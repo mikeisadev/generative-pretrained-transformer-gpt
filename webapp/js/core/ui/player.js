@@ -41,6 +41,9 @@ export class ActionPlayer {
     this.data = {};
     this.run = 0; // cresce a ogni start/stop: una preparazione (build) superata non deve partire
     this.listeners = { step: new Set(), state: new Set(), end: new Set(), restart: new Set() };
+    // Gli elenchi disegnati da renderOverview (un tab può averne più di uno, es. i due sottotab di LLM
+    // moderni): la scheda dell'azione in corso si accende in tutti.
+    this.overviews = new Set();
     this.renderBar(parent);
     host.onFrame((dt) => this.tick(dt));
   }
@@ -76,7 +79,20 @@ export class ActionPlayer {
         ),
       ),
     );
-    this.overview = container;
+    this.overview = container; // l'ultimo disegnato (compatibilità)
+    this.overviews.add(container);
+    this.highlightCard(this.action?.id ?? null);
+  }
+
+  /** Accende la scheda dell'azione `id` (null: nessuna) in ogni elenco ancora nella pagina. */
+  highlightCard(id) {
+    for (const list of this.overviews) {
+      if (!list.isConnected) {
+        this.overviews.delete(list);
+        continue;
+      }
+      list.querySelectorAll(".action-card").forEach((c) => c.classList.toggle("active", c.dataset.action === id));
+    }
   }
 
   // ---------------------------------------------------------------- controllo
@@ -90,7 +106,7 @@ export class ActionPlayer {
     this.bar.hidden = false;
     this.title.textContent = action.title;
     this.caption.textContent = "Preparazione…";
-    this.overview?.querySelectorAll(".action-card").forEach((c) => c.classList.toggle("active", c.dataset.action === id));
+    this.highlightCard(id);
     const ctx = this.ctx();
     ctx.isStale = () => run !== this.run; // per le build lunghe: smetti di toccare la scena se true
     await action.onStart?.(ctx);
@@ -114,7 +130,7 @@ export class ActionPlayer {
     this.index = -1;
     this.playing = false;
     this.bar.hidden = true;
-    this.overview?.querySelectorAll(".action-card").forEach((c) => c.classList.remove("active"));
+    this.highlightCard(null);
     this.emit("state");
   }
 

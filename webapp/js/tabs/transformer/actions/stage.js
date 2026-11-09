@@ -12,8 +12,11 @@ import { Board } from "./board.js";
 import { SceneTextures } from "./sceneTextures.js";
 
 const GAP = 0.8;
-/** Pulsanti fluttuanti in alto nello stage (layout.js, lod.js, index.js del tab). */
-const TOP_OVERLAYS = ".sidebar-toggle, .lod-switch, .stage-toolbar, .charts-fab";
+/**
+ * Pulsanti fluttuanti in alto nello stage (layout.js, lod.js, index.js del tab) e il selettore delle
+ * rappresentazioni del nucleo (core/ui/repSwitch.js), che può stare nella seconda fila.
+ */
+const TOP_OVERLAYS = ".sidebar-toggle, .lod-switch, .stage-toolbar, .charts-fab, .rep-switch";
 
 export class Stage {
   constructor(tab) {

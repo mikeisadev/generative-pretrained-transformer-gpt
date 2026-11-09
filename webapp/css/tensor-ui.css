@@ -1,0 +1,77 @@
+/* Componenti condivisi per guardare i numeri di un tensore (js/core/ui/tensorTable.js, histogram.js):
+   tabella virtualizzata (.tt-), scheda delle statistiche (.tt-stats) e istogramma (.hist-).
+   Tema scuro dell'app (variabili di core.css); testo delle celle nero o bianco scelto in JS per contrasto. */
+
+/* ---------------------------------------------------------------- tabella */
+.tt { margin: 8px 0 10px; min-width: 0; }
+.tt-caption { margin: 0 0 3px; font-size: 12.5px; color: var(--text); line-height: 1.4; }
+.tt-caption-text { font-weight: 600; }
+.tt-name { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #fbbf24; word-break: break-all; }
+.tt-axes { margin: 0 0 5px; font-size: 12px; color: var(--muted); }
+.tt-axes[hidden] { display: none; }
+.tt-grid {
+  position: relative;
+  width: fit-content; /* un vettore (una colonna) non lascia mezza tabella vuota */
+  max-width: 100%;
+  overflow: auto;
+  max-height: var(--tt-max-height, 312px);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b1220;
+  overscroll-behavior: contain; /* in fondo alla tabella la rotellina non fa scorrere la sidebar */
+  font: 12px/24px "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+.tt-grid:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.tt-content { position: relative; min-width: 100%; }
+/* intestazione delle colonne: ferma in alto mentre si scorre in verticale */
+.tt-head { position: sticky; top: 0; z-index: 3; height: 26px; background: #0f172a; border-bottom: 1px solid #334155; }
+.tt-corner { position: sticky; left: 0; z-index: 4; width: var(--tt-rowhead-w, 40px); height: 26px; background: #0f172a; border-right: 1px solid #334155; }
+.tt-colhead { position: absolute; top: 0; width: var(--tt-cell-w, 64px); height: 26px; line-height: 26px; padding: 0 4px; text-align: center; color: var(--muted); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.tt-colhead.on, .tt-rowhead.on { color: #e0f2fe; background: #173152; }
+.tt-body { position: relative; }
+.tt-row { position: absolute; left: 0; width: 100%; height: 24px; }
+/* intestazione delle righe: ferma a sinistra mentre si scorre in orizzontale */
+.tt-rowhead { position: sticky; left: 0; z-index: 2; width: var(--tt-rowhead-w, 40px); height: 24px; padding: 0 6px; text-align: right; color: var(--muted); background: #0f172a; border-right: 1px solid #334155; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.tt-cell { position: absolute; top: 0; width: var(--tt-cell-w, 64px); height: 24px; padding: 0 6px; text-align: right; white-space: nowrap; cursor: pointer; box-shadow: inset -1px -1px 0 rgba(3, 6, 12, 0.55); }
+.tt-cell.hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.75); }
+.tt-cell.active { z-index: 1; box-shadow: inset 0 0 0 2px #e0f2fe, 0 0 0 1px #020617; }
+.tt-grid:focus-visible .tt-cell.active { box-shadow: inset 0 0 0 2px #020617, inset 0 0 0 4px #ffffff; }
+.tt-probe { position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; white-space: pre; }
+.tt-status { margin: 4px 0 0; min-height: 1.5em; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- statistiche */
+.tt-stats { margin: 8px 0; }
+.tt-stats h5 { margin: 0 0 4px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+/* coppie etichetta-valore (un <div> per coppia dentro il <dl>), due per riga */
+.tt-stats dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; margin: 0; }
+.tt-stat { min-width: 0; }
+.tt-stats dt { margin: 0; font-size: 11.5px; color: var(--muted); }
+.tt-stats dd { margin: 0; font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- istogramma */
+.hist { margin: 8px 0 10px; min-width: 0; }
+.hist-title { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+.hist-title[hidden], .hist-legend[hidden], .hist-tip[hidden] { display: none; }
+.hist-plot { position: relative; width: 100%; border-radius: 6px; outline: none; }
+.hist-plot:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.hist-canvas { display: block; }
+.hist-tip { position: absolute; top: 4px; z-index: 2; display: grid; gap: 2px; min-width: 128px; max-width: 240px; padding: 5px 8px; font-size: 12px; color: var(--muted); background: var(--panel-solid); border: 1px solid #334155; border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); pointer-events: none; }
+.hist-tip strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* il conteggio resta su una riga ("175 valori"); il nome della serie, se lungo ("≈ step 750 (stima)"), va a capo */
+.hist-tip-row { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; }
+.hist-tip-row b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hist-tip-key, .hist-key { flex: none; width: 12px; height: 2px; border-radius: 1px; background: var(--c); }
+.hist-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--text); }
+.hist-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.hist-legend .hist-key { height: 8px; width: 12px; border-radius: 2px; }
+.hist-legend small { color: var(--muted); }
+.hist-live { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (forced-colors: active) {
+  .tt-cell.active { outline: 2px solid Highlight; }
+  .tt-grid:focus-visible, .hist-plot:focus-visible { outline: 2px solid Highlight; }
+}

@@ -34,6 +34,14 @@ export const TABS = [
     search: () => import("./tabs/transformer/search.js"),
   },
   {
+    id: "lab",
+    title: "Laboratorio pesi",
+    description: "I pesi del GPT in Python come nel codice: numeri, run caricati dal training, confronti e benchmark.",
+    keywords: ["pesi", "weights", "run", "snapshot", "safetensors", "confronto", "benchmark", "laboratorio"],
+    load: () => import("./tabs/lab/index.js"),
+    search: () => import("./tabs/lab/search.js"),
+  },
+  {
     id: "rag",
     title: "Database vettoriale (RAG)",
     description: "Dal PDF ai vettori, indice HNSW, ricerca e risposta dell'LLM (lezioni L17-L18).",

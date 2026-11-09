@@ -5,6 +5,7 @@
  * Il modulo è PURO (nessun accesso a DOM o canvas): così si può testare con `node --test`
  * e ogni bug di calcolo emerge senza aprire il browser. Lo usa `charts.js`.
  */
+import { histogram as binCounts } from "../../shared/weights/stats.js";
 import { fmt } from "../dom.js";
 
 /* ------------------------------------------------------------------------------------------------
@@ -205,6 +206,36 @@ export function logTicks(min, max, { pad } = {}) {
   return { min: lower, max: upper, ticks };
 }
 
+/**
+ * Importanza di un tick per le etichette (0 = la più importante): sull'asse logaritmico prima le potenze
+ * di 10, poi 2 e 5 × 10^k, poi le altre mantisse; sull'asse lineare tutte uguali.
+ */
+export function tickPriority(value, { log = false } = {}) {
+  if (!log || !(value > 0)) return 0;
+  const mantissa = Math.round(value / 10 ** Math.floor(Math.log10(value) + 1e-9));
+  return mantissa === 1 || mantissa === 10 ? 0 : mantissa === 2 || mantissa === 5 ? 1 : 2;
+}
+
+/**
+ * Quali etichette dei tick dell'asse y disegnare: in ordine di importanza, un'etichetta resta solo se è
+ * almeno `gap` px lontana da quelle già tenute (sotto una decade, in scala log, 9 e 10 distano 8 px: le
+ * etichette si sovrapponevano). Le righe della griglia restano tutte.
+ * @param {number[]} positions y in px di ogni tick
+ * @param {number[]} [priorities] importanza di ogni tick (0 = la più alta; predefinite tutte uguali)
+ * @returns {boolean[]}
+ */
+export function keepTickLabels(positions, priorities = [], { gap = 12 } = {}) {
+  const order = positions.map((_, i) => i).sort((a, b) => (priorities[a] ?? 0) - (priorities[b] ?? 0) || a - b);
+  const kept = [];
+  const keep = positions.map(() => false);
+  for (const i of order) {
+    if (kept.some((y) => Math.abs(y - positions[i]) < gap)) continue;
+    kept.push(positions[i]);
+    keep[i] = true;
+  }
+  return keep;
+}
+
 /** Scala lineare dominio → pixel, con `invert` (pixel → dominio). */
 export function linearScale([d0, d1], [r0, r1]) {
   const span = d1 - d0 || 1;
@@ -242,6 +273,9 @@ export function bandLayout(n, length, { maxBar = 24, gap = 2 } = {}) {
 
 /**
  * Divide i valori finiti in `bins` intervalli uguali [a, b); l'ultimo include il massimo.
+ * I conteggi li fa `histogram` di shared/weights/stats.js (la stessa regola degli istogrammi dei pesi:
+ * un solo posto in cui si decide in quale intervallo cade un valore); qui i valori fuori da [min, max]
+ * si escludono, mentre stats.js li mette nel primo e nell'ultimo intervallo contandoli a parte.
  * @param {ArrayLike<number>} values
  * @param {object} [o] @param {number} [o.bins=40] @param {number} [o.min] @param {number} [o.max]
  * @returns {{edges: Float64Array, counts: Uint32Array, min:number, max:number, total:number, ignored:number} | null}
@@ -258,15 +292,12 @@ export function histogram(values, { bins = 40, min, max } = {}) {
     lo -= 0.5;
     hi += 0.5;
   }
+  const h = binCounts(values, { bins: n, min: lo, max: hi });
+  const counts = h.counts;
+  counts[0] -= h.below; // i fuori scala che stats.js ha messo agli estremi
+  counts[n - 1] -= h.above;
+  const total = h.total - h.below - h.above;
   const width = (hi - lo) / n;
-  const counts = new Uint32Array(n);
-  let total = 0;
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i];
-    if (!Number.isFinite(v) || v < lo || v > hi) continue;
-    counts[Math.min(n - 1, Math.floor((v - lo) / width))]++;
-    total++;
-  }
   const edges = new Float64Array(n + 1);
   for (let i = 0; i <= n; i++) edges[i] = lo + i * width;
   edges[n] = hi; // esatto, senza errore accumulato

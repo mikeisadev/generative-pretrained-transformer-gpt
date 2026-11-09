@@ -1,14 +1,17 @@
 // Test della matematica pura della navigazione libera (js/core/navMath.js):
 //   node --test webapp/tests/*.test.mjs
 // Niente DOM e niente three.js: tasti → movimenti, accelerazione e frenata indipendenti dal frame rate,
-// bordo "elastico", zoom limitato, "ti sei perso?", doppio tocco, posizione del pad, nome della foto.
+// bordo "elastico", zoom limitato, "ti sei perso?", doppio tocco, posizione del pad e della didascalia, nome della foto.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
   AXES,
+  CAPTION_HIDE_WIDTH,
+  CAPTION_MIN_WIDTH,
   MODIFIERS,
   REST_EPSILON,
+  captionPlacement,
   classifyKey,
   dollyDistance,
   edgeResistance,
@@ -19,6 +22,7 @@ import {
   isLost,
   maxUserDistance,
   padBottom,
+  padPlacement,
   resistMove,
   boundsMargin,
   smoothTowards,
@@ -221,6 +225,60 @@ test("pad sul telefono: sale sopra il codice in basso e poi, se serve, sopra il 
   const bar = { left: 16, right: 374, top: 470, bottom: 620 };
   assert.equal(padBottom(pad, bar, 792, bottom), 792 - 470 + 10);
   assert.equal(padBottom(pad, null, 792, bottom), bottom, "senza player resta dov'è");
+});
+
+test("posto del pad (padPlacement): angolo, accanto ai grafici, sopra il player, accanto al codice, telefono", () => {
+  const size = { w: 190, h: 146 };
+  // stage 1220×848 libero: angolo in basso a destra
+  assert.deepEqual(padPlacement({ sw: 1220, sh: 848, size }), { right: 14, bottom: 14, ok: true });
+  // grafici aperti: a sinistra dei loro 460 px
+  assert.deepEqual(padPlacement({ sw: 1220, sh: 848, size, chartsWidth: 460 }), { right: 472, bottom: 14, ok: true });
+  // ... ma con 260 px di scena accanto ai grafici (1100 px, sidebar aperta) il pad aperto ne coprirebbe tre quarti:
+  // ok false, navPad lo riduce al pulsante unico (che ci sta: 40 px)
+  assert.equal(padPlacement({ sw: 720, sh: 748, size, chartsWidth: 460 }).ok, false);
+  assert.equal(padPlacement({ sw: 720, sh: 748, size: { w: 40, h: 40 }, chartsWidth: 460 }).ok, true);
+  assert.equal(padPlacement({ sw: 900, sh: 748, size, chartsWidth: 460 }).ok, true, "1280 px con la sidebar: 440 px di scena");
+  // la barra del player sotto l'angolo: il pad sale sopra di lei (la regola di padBottom)
+  const bar = { left: 700, right: 1210, top: 680, bottom: 804 };
+  assert.deepEqual(padPlacement({ sw: 1220, sh: 848, size, bar }), { right: 14, bottom: 848 - 680 + 10, ok: true });
+  // codice lungo fino in fondo: il pad va accanto al codice, che resta nella metà destra della scena visibile
+  const code = { left: 766, right: 1206, top: 56, bottom: 800 };
+  assert.deepEqual(padPlacement({ sw: 1220, sh: 848, size, code }), { right: 1220 - 766 + 12, bottom: 14, ok: true });
+  // codice corto (non arriva all'angolo): il pad resta nell'angolo
+  assert.deepEqual(padPlacement({ sw: 1220, sh: 848, size, code: { ...code, bottom: 500 } }), { right: 14, bottom: 14, ok: true });
+  // stage stretto: accanto al codice finirebbe al centro della scena → ok false (navPad lo riduce al pulsante)
+  assert.equal(padPlacement({ sw: 700, sh: 848, size, code: { left: 300, right: 686, top: 56, bottom: 800 } }).ok, false);
+  // telefono: sopra il codice ridotto in fondo allo stage
+  const phone = padPlacement({ sw: 390, sh: 792, size: { w: 203, h: 192 }, lowest: { left: 16, right: 374, top: 685, bottom: 744 }, edge: 8, base: 46 });
+  assert.deepEqual(phone, { right: 8, bottom: 792 - 685 + 10, ok: true });
+});
+
+test("posto della didascalia (captionPlacement): accanto al pad, sopra il pad, mai sotto i grafici, sopra il player, telefono", () => {
+  assert.ok(CAPTION_MIN_WIDTH > CAPTION_HIDE_WIDTH);
+  const pad = { right: 14, bottom: 14, w: 190, h: 146 };
+  // schermo largo: accanto al pad, larga più di CAPTION_MIN_WIDTH
+  assert.deepEqual(captionPlacement({ width: 1600, left: 396, sh: 848, height: 23, pad }), { right: 14 + 190 + 10, bottom: 14, hidden: false, abovePad: false });
+  // 1100 px con sidebar e grafici aperti: accanto al pad resterebbero 32 px (una parola per riga) → sopra il pad,
+  // su tutta la parte visibile ma mai sotto i grafici
+  const beside = { right: 472, bottom: 14, w: 190, h: 146 };
+  assert.deepEqual(captionPlacement({ width: 1100, left: 396, sh: 748, height: 23, pad: beside, chartsWidth: 460 }), { right: 476, bottom: 14 + 146 + 8, hidden: false, abovePad: true });
+  assert.equal(captionPlacement({ width: 1600, left: 396, sh: 848, height: 23, chartsWidth: 460 }).right, 476, "senza pad: il margine dei grafici");
+  // nemmeno sopra il pad c'è posto per leggerla: tace (navPad mette .nav-caption-squeezed)
+  assert.equal(captionPlacement({ width: 1000, left: 396, sh: 748, height: 23, pad: beside, chartsWidth: 460 }).hidden, true);
+  // pad già alzato (sopra il player): non è sulla stessa riga, la didascalia resta in fondo
+  assert.deepEqual(captionPlacement({ width: 1600, left: 396, sh: 848, height: 23, pad: { ...pad, bottom: 178 } }), { right: 16, bottom: 14, hidden: false, abovePad: false });
+  // la barra del player in basso al centro: la didascalia sale sopra di lei
+  const bar = { left: 500, right: 1100, top: 680, bottom: 834 };
+  assert.equal(captionPlacement({ width: 1600, left: 396, sh: 848, height: 23, pad, bar }).bottom, 848 - 680 + 8);
+  // grafici aperti durante un'azione (Immagini e video, 1280 px): la barra sta nella scena visibile e anche il pad
+  // è salito sopra di lei: la didascalia, salita pure lei, non gli finisce addosso (sopra il pad: accanto non c'è posto)
+  const raised = { right: 472, bottom: 848 - 680 + 10, w: 190, h: 146 };
+  const action = captionPlacement({ width: 1280, left: 396, sh: 848, height: 23, pad: raised, chartsWidth: 460, bar: { left: 120, right: 760, top: 680, bottom: 834 } });
+  assert.deepEqual(action, { right: 476, bottom: raised.bottom + 146 + 8, hidden: false, abovePad: true });
+  // telefono: a destra lo spazio del pulsante del pad; sopra il codice ridotto se gli finirebbe sotto
+  const code = { left: 16, right: 374, top: 733, bottom: 778 };
+  assert.deepEqual(captionPlacement({ width: 390, left: 16, sh: 792, height: 46, code, narrow: true }), { right: 56, bottom: 792 - 733 + 6, hidden: false, abovePad: false });
+  assert.equal(captionPlacement({ width: 390, left: 16, sh: 792, height: 46, narrow: true }).bottom, 14, "senza codice: in fondo");
 });
 
 test("tasti: '+' scritto con Shift (tastiera americana) è zoom; l'id del tasto è lo stesso al rilascio", () => {
