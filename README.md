@@ -36,19 +36,34 @@ gpt/                    il modello, un file per ogni step della lezione
   feedforward.py        6. FeedForward
   block.py              7. Block: residui + LayerNorm
   model.py              8. GPTLanguageModel
-  training.py           9. training, stima della loss, checkpoint
+  training.py           9. training, stima della loss, checkpoint (scritto in modo atomico: un'interruzione non lo rovina)
   generation.py         10. generazione token per token (con temperature)
   loss.py               cross-entropy condivisa da bigram e GPT
   weights.py            inventario dei pesi e modifica di un singolo peso
-  export.py             genera webapp/data/model.json dal codice e dal checkpoint; capture_attention
-  recording.py          registra la storia di un training (loss, metriche, snapshot), anche di un'architettura modificata
-  runs.py               run esportabili per il Laboratorio pesi: pesi, storia del training, run.json
+  export.py             genera webapp/data/model.json dal codice e dal checkpoint; capture_attention (anche per attention nuove)
+  recording.py          registra la storia di un training (loss, metriche, snapshot, note), anche di un'architettura modificata
+  runs.py               run esportabili per il Laboratorio pesi: pesi, storia del training, run.json con le note
   benchmark.py          benchmark deterministico e confrontabile (protocollo finestre-contigue-v1)
 experiments/            script da proiettare in aula, nell'ordine del video
   01_data_and_tokenization.py … 06_edit_a_weight.py
-tests/                  pytest: forme, maschera causale, loss, generazione, overfitting, bug, registrazione, run, benchmark
-webapp/                 web app 3D a tab (Three.js, KaTeX, highlight.js inclusi; vedi webapp/ARCHITECTURE.md)
-  js/…                  nuove: core/neuralNet/ (rete neurale), core/brain/ (cervello 3D), shared/weights/ (pesi e run), tabs/lab/ (Laboratorio pesi)
+tests/                  pytest: forme, maschera causale, loss, generazione, overfitting, bug, registrazione (anche di
+                        architetture modificate e da riga di comando), run, benchmark, dati della web app
+webapp/                 web app 3D a sei tab (Three.js, KaTeX, highlight.js inclusi; vedi webapp/ARCHITECTURE.md)
+  index.html, js/app.js il guscio e il registro dei tab
+  js/core/              nucleo: scena, navigazione libera, zoom semantico, ricerca, glossario, grafici, codice,
+                        representations.js (selettore Architettura · Rete neurale · Cervello), matrixNumbers.js
+                        (matrici con i numeri veri), ui/tensorTable.js e ui/histogram.js (numeri dei tensori)
+  js/core/neuralNet/    rete neurale orizzontale con profondità, guidata da una specifica di soli dati
+  js/core/brain/        cervello 3D (regioni, percorsi, piani di taglio, microcircuiti di neuroni) e pannello delle analogie
+  js/engine/            motore del GPT in JavaScript (esegue i pesi veri nel browser)
+  js/shared/rag/        libreria RAG didattica (chunking, embedding, HNSW, vector store)
+  js/shared/weights/    pesi e run: formati, safetensors, statistiche, confronto, salvataggio nel browser
+  js/tabs/<id>/         un tab per cartella (transformer, lab, rag, diffusion, audio, modern-llm), con
+                        network.js (la sua rete neurale) e brain.js (il suo cervello), moduli di soli dati
+  js/tabs/lab/          Laboratorio pesi: scena come il codice Python, run, azioni (actions/), confronto e benchmark (analysis/)
+  js/tabs/modern-llm/full/  Architettura LLM moderni completa (DeepSeek-V4.1-Flash, Kimi K3.1 Pro, gpt-oss-120b)
+  data/                 dati esportati dal Python: model.json, pesi, storia del training, benchmark del corso
+  tests/                test JS (node --test), pagine di prova dei moduli, screenshot.mjs
 scripts/
   serve_webapp.py       esporta i dati del modello e avvia la web app
   record_training.py    rifà il training registrandone la storia (webapp/data/training/, o una cartella tua)
@@ -77,15 +92,20 @@ fallisce se `webapp/data/` non è allineato al codice: dopo aver modificato il p
 
 | Tab | Cosa mostra |
 |---|---|
-| **Transformer** | Il GPT del corso in 3D: ogni cella colorata è un peso vero (arancione positivo, blu negativo). Viste: *Architettura*, *Pesi* (dove stanno i 209.729 parametri), *Rete neurale* (tutti i neuroni, le connessioni e i calcoli, con un clic su un neurone), *Contesto* (domanda → database vettoriale → system prompt e tool → richiesta all'LLM, collegata al tab RAG). Azioni *Prompt* (dalla scrittura del prompt ai token, dentro i blocchi, fino al token estratto, calcolato dal motore JS con i pesi veri) e *Training* (uno step al microscopio e il training completo registrato) |
+| **Transformer** | Il GPT del corso in 3D: ogni cella colorata è un peso vero (arancione positivo, blu negativo). Viste: *Architettura*, *Pesi* (dove stanno i 209.729 parametri), *Pesi numerici* (i numeri veri dentro le matrici, anche durante il training), *Rete neurale* (tutti i neuroni, le connessioni e i calcoli, con un clic su un neurone; *A righe* oppure *Orizzontale con profondità*), *Contesto* (domanda → database vettoriale → system prompt e tool → richiesta all'LLM, collegata al tab RAG). Azioni *Prompt* (dalla scrittura del prompt ai token, dentro i blocchi, fino al token estratto, calcolato dal motore JS con i pesi veri) e *Training* (uno step al microscopio e il training completo registrato) |
+| **Laboratorio pesi** | I pesi del GPT organizzati come il codice Python (`GPTLanguageModel` → `blocks` → `Block` → `sa.heads[h].key`…), come celle colorate e da vicino come numeri; animazioni dei calcoli con i numeri veri; i run che esporti dal Python (anche con l'architettura modificata), il confronto A/B, i grafici del training e il benchmark |
 | **Database vettoriale (RAG)** | La pipeline delle lezioni L16-L18 (Spring Boot + Spring AI + pgvector): database vuoto, upload, pulizia, chunking, embedding, tabella `vector_store`, indice HNSW; poi ricerca HNSW, prompt e risposta in streaming |
 | **Immagini e video** | Modelli di diffusione: processo diretto e training, generazione (text encoder, U-Net o DiT, scheduler, VAE), video con VAE 3D e patch spazio-temporali |
 | **Audio e musica** | Dal suono ai numeri (STFT, scala Mel), codec neurale con RVQ, generazione di musica a token, Whisper; laboratorio con suono vero |
-| **LLM moderni** | Cosa cambia rispetto al nostro GPT: RoPE, GQA, MoE, KV cache, FlashAttention, BPE, leggi di scala, post-training, ragionamento, agenti, coding, capacità emergenti, multimodalità, modelli 3D |
+| **LLM moderni** | Due sottotab: la *Vista d'insieme* di cosa cambia rispetto al nostro GPT (RoPE, GQA, MoE, KV cache, FlashAttention, BPE, leggi di scala, post-training, ragionamento, agenti, coding, capacità emergenti, multimodalità, modelli 3D) e l'*Architettura completa* di un modello aperto vero, DeepSeek-V4.1-Flash (con Kimi K3.1 Pro e gpt-oss-120b a confronto) |
+
+In ogni tab, in alto nella scena, il selettore **Architettura · Rete neurale · Cervello** mostra lo stesso
+sistema in tre modi (vedi "Novità della web app" qui sotto).
 
 ### Come si usa
 
-- **Sidebar a sinistra**: *Percorso* (gli step in ordine, con spiegazione, formule e tabella dei pesi), *Azioni* (panoramica delle animazioni, divise per categoria: prompt, training…), *Viste*, *Fonti*. Con la tastiera: ↑ ↓ cambiano step, lo spazio mette in pausa l'azione (in tutti i tab).
+- **Sidebar a sinistra**: *Percorso* (gli step in ordine, con spiegazione, formule e tabella dei pesi), *Azioni* (panoramica delle animazioni, divise per categoria: prompt, training…), *Viste*, *Cervello* (le analogie con il cervello), *Fonti*. Con la tastiera: ↑ ↓ cambiano step, lo spazio mette in pausa l'azione (in tutti i tab).
+- **Selettore delle rappresentazioni** in alto nella scena: *Architettura* (la scena del tab), *Rete neurale*, *Cervello*. Con la tastiera: Tab fino al selettore, poi ← →. Un passo del Percorso, un'azione o un link riportano da soli all'Architettura.
 - **Zoom semantico**: rotellina per avvicinarsi o allontanarsi, oppure il selettore in alto a sinistra. *Dettaglio* mostra ogni elemento, *Blocchi* un rettangolo con titolo e descrizione per componente, *Panoramica* il diagramma a blocchi (nel Transformer un unico rettangolo con input sotto e output sopra).
 - **Azioni**: barra in basso con play/pausa, passo avanti/indietro, ricomincia, velocità e chiudi. Chiudendo un'azione la scena torna com'era.
 - **Grafici**: il pulsante in alto a destra apre i grafici che usano AI engineer e data scientist (loss, learning rate, norma dei gradienti, distribuzioni, attention…), che si riempiono mentre le azioni avanzano.
@@ -118,13 +138,106 @@ Ogni scena è come un plastico sul tavolo: ci giri attorno, ti sposti di lato, t
 ### Test della web app
 
 ```bash
-node --test webapp/tests/*.test.mjs            # motore GPT in JS, libreria RAG, HNSW, grafici, navigazione, ricerca
+node --test webapp/tests/*.test.mjs            # motore GPT in JS, RAG, grafici, navigazione, ricerca, rete neurale, cervello, pesi, tab
 NODE_PATH=$(npm root -g) node webapp/tests/screenshot.mjs http://127.0.0.1:8765/ /tmp/shots --lod --nav
 ```
 
-Lo script di screenshot (Playwright con Chromium) apre tutti i tab e i livelli dello zoom (`--lod`), prova
-la navigazione con i tasti e "Centra" (`--nav`), usa il formato telefono con `--mobile` e termina con
-errore se la console ne segnala. L'architettura del codice è descritta in `webapp/ARCHITECTURE.md`.
+Lo script di screenshot (Playwright con Chromium) apre tutti e sei i tab e le loro viste principali, i livelli
+dello zoom (`--lod`), prova la navigazione con i tasti e "Centra" (`--nav`), usa il formato telefono con
+`--mobile` (o più dimensioni con `--sizes=1600x900,390x844`) e termina con errore se la console segnala errori o
+warning. L'architettura del codice è descritta in `webapp/ARCHITECTURE.md`.
+
+## Novità della web app: rete neurale, cervello, pesi numerici, Laboratorio pesi
+
+Cinque cose nuove, pensate per vedere **lo stesso modello da più lati**: com'è costruito, quali neuroni lavorano e
+con quali numeri, da quale idea del cervello viene, come cambia quando lo modifichi tu.
+
+### Tre modi di guardare ogni tab: Architettura · Rete neurale · Cervello
+
+In alto nella scena di **ogni** tab c'è il selettore *Architettura · Rete neurale · Cervello*. Pensa a una città:
+*Architettura* è la mappa dei quartieri (i blocchi del modello), *Rete neurale* è l'impianto elettrico casa per
+casa (ogni neurone e ogni collegamento), *Cervello* è la città vera da cui gli urbanisti hanno copiato le idee.
+Ogni vista ha la sua navigazione (trascina, rotella, `W A S D`, `C` per tornare alla vista iniziale, `?` per
+l'aiuto); un passo del Percorso, un'azione o un link diretto riportano da soli all'Architettura, esattamente dove
+eri.
+
+**La rete neurale orizzontale con profondità.** I neuroni sono disposti da sinistra a destra nell'ordine in cui
+lavorano (ingresso → strati → uscita); in verticale ci sono i neuroni di ogni strato; **in profondità** c'è la cosa su
+cui lavorano i meccanismi più "intricati": i token della frase (Transformer, RAG, LLM moderni), la griglia
+dell'immagine (Immagini e video), i frame nel tempo (Audio). È come un libro visto di taglio: di lato leggi lo schema
+classico, girandolo vedi le pagine (i token) una dietro l'altra, con gli archi dell'attention che le collegano.
+- Nella scheda in alto a sinistra: **▶ Anima** (un'onda di attivazione da sinistra a destra), **Guarda lo spessore**
+  (la camera di tre quarti), **Di lato**, **Fetta** (un solo token e il suo percorso), **Collegamenti** (quanti
+  disegnarne). Passa sopra un neurone per il suo valore; clic su un neurone o sul nome di una sezione per la scheda
+  con che cosa fa e da chi riceve.
+- Le reti lunghe (LLM moderni, Audio, Immagini e video) partono da una **parte** leggibile: ◀ ▶ scorrono le parti, *Tutta la rete* le
+  mostra insieme.
+- Il **badge dell'onestà** dice da dove vengono i numeri: *Attivazioni vere* (calcolate dal modello, come nel
+  Transformer e nel Laboratorio), *in parte vere* (per esempio nel RAG l'embedder e il database sono veri, l'LLM è
+  illustrativo), *simulazione didattica*. Cliccalo per "Scala e onestà": quanto è ridotta la rete rispetto a quella vera.
+
+**Il cervello.** Nel pannello *Cervello* della sidebar ogni analogia ha "In comune", **"Dove non regge"**, la forza
+(forte, media, debole) e le fonti; *Mostra nel modello 3D* vola sulle regioni nel cervello stilizzato (coordinate MNI
+approssimate, lo dice l'etichetta). Nella vista 3D: scala **Regioni** o **Neuroni** (il microcircuito del tab,
+disposto da sinistra a destra come la rete AI), cursore *Corteccia* per vederci attraverso, *Taglio* sagittale,
+coronale o assiale, **▶ Anima impulsi**.
+
+### Transformer: i numeri veri dei pesi e la rete in profondità
+
+- **Pesi numerici** (pannello *Viste*): avvicinandoti a una matrice i colori diventano i numeri veri (float32) che usa
+  il modello. Come una foto: da lontano vedi i colori, da vicino i pixel, e qui ogni pixel è il numero vero. Scegli
+  la sorgente: *Pesi finali* oppure uno **step del training** (gli 11 snapshot veri, da 0 a 5000); **▶ Guarda i pesi
+  nascere** è il time-lapse dal rumore iniziale ai pesi addestrati. *Interpola* mostra anche gli step intermedi, ma
+  li dichiara stime (in giallo). Nella sidebar: la riga Python che crea il tensore, la tabella dei numeri (frecce per
+  muoversi, clic su una cella della scena per trovarla), statistiche, istogramma e **Apri nel Laboratorio pesi**.
+- **Rete neurale**: l'interruttore *A righe* (com'era: una riga per blocco) / **Orizzontale con profondità** mostra
+  tutta la rete vera del GPT del corso, 4 blocchi, con tutti i token del prompt in profondità e gli archi di attention
+  veri tra i token (mai verso il futuro: la maschera causale si vede). Clic su un neurone = la stessa scheda con la
+  formula e i numeri veri.
+
+### Laboratorio pesi: il tuo GPT smontato come il codice
+
+Un banco di laboratorio: i pesi sono sistemati come le classi Python (`GPTLanguageModel` → `blocks[0]` →
+`sa.heads[0].key`), con la riga di codice che crea ogni peso; da lontano i moduli, poi le celle colorate, da vicino i
+numeri. Pannelli: **Modello** (l'indice dei moduli, come `print(model)`, e lo step del training), **Tensore** (numeri,
+statistiche, istogramma), **Run** (il GPT del corso e i run che carichi: *Ricordali in questo browser*, *Dimentica*),
+**Azioni**, **Confronto**, **Benchmark**.
+- **Azioni** con i numeri veri, sulle matrici della scena: x · Wᵀ riga per colonna, q · kᵀ con la maschera e la
+  softmax, att · V e il residuo, LayerNorm, feed-forward con la ReLU, logits e probabilità, **un passo di training**
+  (gradiente e aggiornamento, come farebbe PyTorch), **i pesi durante il training**. Una lavagna sopra la barra
+  scrive ogni conto.
+- **Confronto A/B**: A è il run nella scena, B il termine di paragone; *Mostra A − B nella scena* colora la
+  differenza sulle matrici, come due fotografie in cui si colora solo ciò che è cambiato. I "confronti pronti" fanno
+  tutto da soli (che cosa ha cambiato il training, step 5000 contro 500, il tuo run contro il GPT del corso).
+- **Benchmark**: i numeri del Python e, per i run che il motore JavaScript sa eseguire, *Calcola per A*: lo stesso
+  benchmark rifatto nel browser. Il verdetto è ✓ se i due calcoli coincidono (come due bilance che segnano lo stesso
+  peso), ≈ se differiscono di un'inezia ammessa, ✗ se i due calcoli non tornano.
+
+### LLM moderni: l'architettura completa di un modello aperto
+
+Sopra la scena due sottotab: *Vista d'insieme* (i 16 meccanismi di sempre) e **Architettura completa**; il tasto
+**V** passa dall'uno all'altro. L'architettura completa è DeepSeek-V4.1-Flash (selettore per Kimi K3.1 Pro e
+gpt-oss-120b) in tre livelli di zoom: *Panoramica* (dai dati del pre-training fino ai **pesi**: 510 GB, 96.085
+tensori), *Blocchi* (i 40 layer raggruppati in "× N", come "ripeti 18 volte" in una ricetta; *Espandi le ripetizioni*
+li srotola), *Dettaglio* (dentro un layer: attention, KV cache, router e i 384 esperti, 6 accesi per token). I
+segnaposto numerati dicono dove vive ognuno dei 16 meccanismi; ogni passo della vista d'insieme ha "Dove sta in
+DeepSeek-V4.1-Flash". Ciò che le fonti non confermano è scritto "da verificare".
+
+### Link diretti utili
+
+| Link | Che cosa apre |
+|---|---|
+| `#transformer/go=view:numeri.training` | i Pesi numerici dallo step 0, pronti per "▶ Guarda i pesi nascere" |
+| `#transformer/go=tensor:lm_head.weight@1000` | il tensore `lm_head.weight` allo step 1000 del training |
+| `#transformer/go=view:neuroni-profondita` | la Rete neurale orizzontale con profondità del GPT del corso |
+| `#lab/go=view:confronto:training` | che cosa ha cambiato il training: pesi finali contro step 0, con la differenza nella scena |
+| `#lab/go=action:attention` | l'animazione di q · kᵀ, maschera e softmax con i numeri veri |
+| `#lab/go=view:benchmark:browser` | il benchmark ricalcolato nel browser, con il controllo ✓ / ≈ |
+| `#modern-llm/go=view:full` | l'Architettura LLM moderni completa |
+| `#modern-llm/go=view:full-moe` | i layer MoE di DeepSeek-V4.1-Flash e i loro esperti |
+| `#rag/go=view:rete`, `#audio/go=view:cervello` | la Rete neurale del RAG, il Cervello dell'Audio (vale `view:rete` / `view:cervello` in ogni tab) |
+
+La ricerca (`Ctrl/⌘+K`) trova tutte queste viste: prova "pesi numerici", "rete neurale audio", "ippocampo".
 
 ## Esportare un run e confrontarlo nel Laboratorio pesi
 
@@ -143,6 +256,7 @@ python scripts/benchmark.py webapp/data
 
 # 2. riaddestra registrando la storia; --no-export è importante: non tocca i dati della web app
 python scripts/record_training.py --checkpoint checkpoints/gelu/gpt.pt --out checkpoints/gelu/training --no-export
+#    prova veloce (meno di un minuto): aggiungi --max-iters 200 --snapshot-steps 0,50,100,200 --threads 1
 #    più veloce e senza storia: python train.py --checkpoint checkpoints/gelu/gpt.pt
 
 # 3. esporta il run in runs/gpt-con-gelu/, misurato con il codice modificato
@@ -183,6 +297,29 @@ python scripts/export_run.py checkpoints/sei-blocchi/gpt.pt --name "6 blocchi, F
 #    in terminale: python scripts/benchmark.py webapp/data/benchmark/builtin.json runs/6-blocchi-ffn-3c/benchmark.json
 ```
 
+Il flusso in cinque passi, con quello che vedi a ogni passo:
+
+1. **Modifico** il codice in `gpt/` (un campo nuovo in `GPTConfig` diventa da solo un'opzione dello script).
+2. **Registro** il training con `scripts/record_training.py … --out <cartella> --no-export`: loss, gradienti,
+   snapshot dei pesi e, se serve, le note su ciò che è cambiato (i dati del corso restano protetti).
+3. **Esporto** il run con `scripts/export_run.py … --trace <cartella> --benchmark`: in `runs/<nome>/` ci sono pesi,
+   storia, benchmark e `run.json` con le note (le tue, quelle della registrazione, quelle dell'export).
+4. **Carico** la cartella nel tab **Laboratorio pesi** (pannello *Run*: scegli la cartella, o trascinala sulla
+   scena): il run diventa **A**, nella scena con i suoi moduli e la sua riga di codice, e **B** diventa da solo il
+   GPT del corso. Le note sono nella scheda del run.
+5. **Confronto**: pannello *Confronto* (tabella dei tensori più cambiati, *Mostra A − B nella scena*; i tensori che
+   non hanno un gemello con la stessa forma, come la FFN da 192 neuroni contro 256, sono elencati e velati), pannello
+   *Grafici* (loss train e validation di A e di B, gradienti e update ratio per gruppo di pesi, entropia
+   dell'attention) e pannello *Benchmark* (A − B con la colonna "meglio"; per i run che il motore JavaScript sa
+   eseguire anche il ricalcolo nel browser con il verdetto ✓ / ≈).
+
+Due cose da sapere: due cartelle con **gli stessi pesi** sono lo stesso run (il Laboratorio li riconosce
+dall'impronta dei pesi): la seconda risulta "Già caricato" e tiene nome e note della prima. E la regola dei gruppi
+guarda un nome alla volta: un contenitore di blocchi annidato più in basso del terzo livello
+(`model.decoder.layers.0…`) dà un solo gruppo, e un'attention con le head messe direttamente nel modello
+(`sa_heads.heads.0.key`, il modello intermedio della lezione) dà un gruppo per head, che i grafici chiamano
+"blocco 0…3".
+
 - **La registrazione non si ferma per un nome nuovo** (`gpt/recording.py`). I parametri con i nomi del
   corso restano nei loro gruppi (`blocks.0.attention`, `blocks.0.ffwd`, `blocks.0.layernorm`, `ln_f`…);
   un nome nuovo va nel suo modulo: il sotto-modulo del blocco numerato (`blocks.0.norm1.weight` →
@@ -199,8 +336,14 @@ python scripts/export_run.py checkpoints/sei-blocchi/gpt.pt --name "6 blocchi, F
   dei pesi, testo generato e probabilità sul prompt ci sono sempre.
 - **Le note** spiegano ogni adattamento (gruppi nuovi, pesi condivisi come il weight tying tra embedding
   e `lm_head`, attention letta da moduli nuovi o saltata, valori non finiti di un training divergente
-  scritti come `null`): stanno nel campo `notes` di `training/trace.json` e le stampa
-  `record_training.py` alla fine. Il GPT del corso non ne ha: il suo trace è identico a prima.
+  scritti come `null`): sono il diario di bordo del training. Stanno nel campo `notes` di
+  `training/trace.json` e le stampa `record_training.py` alla fine; `export_run.py --trace` le **copia in
+  `run.json`**, dopo le tue note (`--note`), con il prefisso «storia del training: » (e le stampa come
+  `nota: storia del training: …`), e il **Laboratorio pesi le mostra nella scheda del run**. Così capisci
+  perché un grafico manca: con un'attention scritta con `F.scaled_dot_product_attention` la registrazione non
+  può misurare l'entropia dell'attention, e nei *Grafici* del Laboratorio, al posto della heatmap, la sezione
+  "Entropia dell'attention di ogni head" dice proprio questo, con la nota tra virgolette. Il GPT del corso non
+  ne ha: il suo trace è identico a prima.
 - **I dati del corso sono protetti**: se il modello o il training non sono quelli di riferimento e il
   comando scriverebbe in `webapp/data` o su `checkpoints/gpt.pt`, `record_training.py` si ferma *prima*
   del training e dice che cosa aggiungere (`--out`, `--checkpoint`, `--no-export`). "Di riferimento"
@@ -249,7 +392,9 @@ come quella del corso (vedi "Un'architettura modificata, dall'idea al confronto"
 
 **Sicurezza.** I checkpoint si leggono con `torch.load(weights_only=True)`: un file scaricato non può
 eseguire codice. I nomi dei file letti dai JSON (snapshot, binario dei pesi) devono stare accanto al
-JSON, e `--force` cancella soltanto i file che l'export scrive.
+JSON, e `--force` cancella soltanto i file che l'export scrive (riesportando un run sul posto, con
+`--trace runs/<nome>/training`, la sua storia del training resta dov'è). Nei JSON non finisce la tua cartella
+personale: un checkpoint fuori dal progetto diventa `…/gpt.pt`.
 
 ## Bug corretti rispetto al notebook
 

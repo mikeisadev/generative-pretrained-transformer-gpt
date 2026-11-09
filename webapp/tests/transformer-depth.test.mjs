@@ -20,6 +20,7 @@ import {
   DEPTH_VIEW_ID,
   attentionWeights,
   buildDepthSpec,
+  depthBuildPlan,
   depthCounts,
   depthSectionIds,
   depthSectionValues,
@@ -319,6 +320,23 @@ test("testi: niente simulazioni dichiarate per sbaglio, niente copie (qui non ci
   assert.match(spec.note, /LayerNorm e softmax/);
   const texts = depthSections(SMALL).map((s) => s.text).join(" ");
   assert.doesNotMatch(texts, /simulat/);
+});
+
+test("quote: si ricostruisce solo con un prompt o pesi nuovi, o oltre la quota costruita (poi alla massima)", () => {
+  const max = Math.max(...DEPTH_FRACTIONS);
+  const key = "trained:|1,2,3";
+  // nessun modello o un prompt diverso: costruzione alla quota chiesta
+  assert.deepEqual(depthBuildPlan({ key, builtKey: undefined, builtFraction: 0, T: 3, fraction: 0.02 }), { rebuild: true, fraction: 0.02 });
+  assert.deepEqual(depthBuildPlan({ key, builtKey: "trained:|1,2", builtFraction: max, T: 3, fraction: 0.02 }), { rebuild: true, fraction: 0.02 });
+  // stesso prompt, quota già costruita o più bassa: niente ricostruzione (setSliceDensity)
+  for (const fraction of [0.005, 0.01, 0.02]) assert.equal(depthBuildPlan({ key, builtKey: key, builtFraction: 0.02, T: 3, fraction }).rebuild, false);
+  // stesso prompt, quota più alta: una volta sola, alla massima; poi tutte le quote senza ricostruire
+  assert.deepEqual(depthBuildPlan({ key, builtKey: key, builtFraction: 0.02, T: 3, fraction: 0.05 }), { rebuild: true, fraction: max });
+  for (const fraction of DEPTH_FRACTIONS) assert.equal(depthBuildPlan({ key, builtKey: key, builtFraction: max, T: 3, fraction }).rebuild, false);
+  // pesi personalizzati (chiave null): sempre nuovi; un solo token: vale solo la quota esatta
+  assert.equal(depthBuildPlan({ key: null, builtKey: null, builtFraction: max, T: 3, fraction: 0.02 }).rebuild, true);
+  assert.equal(depthBuildPlan({ key, builtKey: key, builtFraction: 0.02, T: 1, fraction: 0.02 }).rebuild, false);
+  assert.deepEqual(depthBuildPlan({ key, builtKey: key, builtFraction: 0.02, T: 1, fraction: 0.01 }), { rebuild: true, fraction: 0.01 });
 });
 
 test("quote: anche la più alta resta sotto il tetto dei pesi della fetta del nucleo", () => {

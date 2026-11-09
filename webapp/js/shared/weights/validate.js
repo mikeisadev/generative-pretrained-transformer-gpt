@@ -26,10 +26,48 @@ export const LIMITS = Object.freeze({
   maxNameLength: 512,
 });
 
-/** Errore di formato: `file` dice quale file (o campo) ha il problema. */
+/**
+ * Controlli bidirezionali espliciti: incassamenti e sostituzioni (U+202A–U+202E: LRE, RLE, PDF, LRO, RLO)
+ * e isolamenti (U+2066–U+2069: LRI, RLI, FSI, PDI). Aprono un livello di direzione che vale fino alla fine
+ * del paragrafo: un U+202E nel nome di un run rovescerebbe anche la frase del Laboratorio che lo contiene
+ * («Nella scena: «…», 209.729 parametri.» si leggerebbe al contrario dopo il nome), e un U+2069 chiuderebbe
+ * prima del tempo l'isolamento che il Laboratorio mette attorno ai testi dei file (isolate di
+ * tabs/lab/runs/describe.js). Restano i segni U+200E, U+200F e U+061C: sono lettere invisibili con una
+ * direzione, non aprono livelli, e un nome in arabo o in ebraico può averne bisogno.
+ */
+const BIDI_CONTROLS = /[\u202a-\u202e\u2066-\u2069]/g;
+const BIDI_CONTROL = /[\u202a-\u202e\u2066-\u2069]/; // per test(): senza /g, niente lastIndex tra una chiamata e l'altra
+
+/**
+ * `value` senza i controlli bidirezionali espliciti (BIDI_CONTROLS). Un testo che ne contiene solo (o
+ * soltanto spazi) non dice niente: null, come un campo assente (il nome del run torna quello della cartella).
+ * @param {string|null} value
+ * @returns {string|null}
+ */
+export function withoutBidiControls(value) {
+  if (typeof value !== "string") return null;
+  const clean = value.replace(BIDI_CONTROLS, "");
+  return clean.trim() ? clean : null;
+}
+
+/**
+ * Un testo da mettere dentro una frase dell'interfaccia (un percorso del disco dello studente, un messaggio
+ * che cita un file): senza i controlli bidirezionali, il resto com'è (anche vuoto, mai null).
+ */
+export function stripBidiControls(text) {
+  return String(text ?? "").replace(BIDI_CONTROLS, "");
+}
+
+/** `text` con i controlli bidirezionali scritti come «\u202e»: per dire nel messaggio che cosa non va. */
+const showBidiControls = (text) => text.replace(BIDI_CONTROLS, (c) => `\\u${c.charCodeAt(0).toString(16)}`);
+
+/**
+ * Errore di formato: `file` dice quale file (o campo) ha il problema. Il messaggio non contiene controlli
+ * bidirezionali: cita percorsi e nomi presi dai file dello studente e finisce nello stato del caricamento.
+ */
 export class WeightsFormatError extends Error {
   constructor(file, message) {
-    super(file ? `${file}: ${message}` : message);
+    super(stripBidiControls(file ? `${file}: ${message}` : message));
     this.name = "WeightsFormatError";
     this.file = file ?? null;
   }
@@ -75,7 +113,11 @@ export function checkShape(shape, where, limits = LIMITS) {
   return [...shape];
 }
 
-/** Nome di un tensore: stringa non vuota, senza caratteri di controllo, lunghezza limitata. */
+/**
+ * Nome di un tensore: stringa non vuota, senza caratteri di controllo, lunghezza limitata. Niente controlli
+ * bidirezionali (BIDI_CONTROLS): il nome compare in molte frasi del Laboratorio (scheda del run, motivi del
+ * motore JS, didascalie, etichette della scena) e le rovescerebbe; nessun modello di PyTorch li ha nei nomi.
+ */
 export function checkName(name, where, limits = LIMITS) {
   if (typeof name !== "string" || name.length === 0) throw new WeightsFormatError(where, "nome del tensore mancante o vuoto");
   if (name.length > limits.maxNameLength) {
@@ -83,6 +125,9 @@ export function checkName(name, where, limits = LIMITS) {
   }
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(name)) throw new WeightsFormatError(where, `il nome ${JSON.stringify(name)} contiene caratteri di controllo`);
+  if (BIDI_CONTROL.test(name)) {
+    throw new WeightsFormatError(where, `il nome "${showBidiControls(name)}" contiene caratteri che cambiano la direzione del testo (U+202A–U+202E, U+2066–U+2069)`);
+  }
   return name;
 }
 
@@ -160,7 +205,11 @@ export function cleanConfig(config, where) {
   if (!isPlainObject(config)) throw new WeightsFormatError(where, "config deve essere un oggetto");
   const out = {};
   for (const [key, value] of Object.entries(config)) {
-    if (["number", "string", "boolean"].includes(typeof value) && key.length <= 64) out[key] = value;
+    // chiave e valore vanno nella scheda del run (`n_embd = 64 · …`): niente controlli bidirezionali, che
+    // rovescerebbero la riga. Una chiave che ne ha non è di GPTConfig e si salta (pulita potrebbe coprirne
+    // una vera, es. "\u202en_embd" → "n_embd").
+    if (!["number", "string", "boolean"].includes(typeof value) || key.length > 64 || BIDI_CONTROL.test(key)) continue;
+    out[key] = typeof value === "string" ? stripBidiControls(value) : value;
   }
   for (const key of ["vocab_size", "block_size", "n_embd", "n_head", "n_layer"]) {
     if (key in out && !(Number.isSafeInteger(out[key]) && out[key] > 0)) {

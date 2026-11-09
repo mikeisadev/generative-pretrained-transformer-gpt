@@ -101,3 +101,29 @@ export function avoidRect(free, block, gap = 8) {
   const area = (r) => (r.x1 - r.x0) * (r.y1 - r.y0);
   return area(a) >= area(b) ? a : b;
 }
+
+/**
+ * Inquadratura di fronte di un riquadro (largo 2·halfW, alto 2·halfH, profondo `depth`, in unità di scena)
+ * dentro la parte libera dello stage dove viene più grande, fra `rects` (pixel { x0, y0, x1, y1 } di uno
+ * stage W × H, per esempio i due tagli di avoidRectVariants attorno al pad). I `covered` pixel a destra sono
+ * coperti da pannelli: il punto principale della camera sta al centro del resto, come in SceneHost.
+ * Con lo stage intero e covered 0 è la distanza di CameraDirector.focus (senza minDistance).
+ * @returns {{ rect: object, distance: number, dx: number, dy: number }} la parte scelta, la distanza della
+ *   camera dal centro del riquadro e lo spostamento che porta il centro al centro della parte (unità di
+ *   scena lungo destra e su della camera): il punto guardato è centro − destra·dx − su·dy
+ */
+export function fitInFreeRect({ halfW, halfH, depth = 0, rects, W, H, covered = 0, tanV, margin = 1 }) {
+  let best = null;
+  for (const rect of rects) {
+    const fw = Math.max(80, rect.x1 - rect.x0);
+    const fh = Math.max(80, rect.y1 - rect.y0);
+    const distance = Math.max((halfW * H) / (fw * tanV), (halfH * H) / (fh * tanV)) * margin + depth;
+    if (!best || distance < best.distance) best = { rect, distance };
+  }
+  const k = (2 * best.distance * tanV) / H; // unità di scena per pixel, nel piano del centro
+  return {
+    ...best,
+    dx: ((best.rect.x0 + best.rect.x1) / 2 - (W - covered) / 2) * k,
+    dy: (H / 2 - (best.rect.y0 + best.rect.y1) / 2) * k,
+  };
+}

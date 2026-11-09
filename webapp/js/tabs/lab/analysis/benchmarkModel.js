@@ -176,6 +176,18 @@ export function referenceAt(bench, step = null) {
 }
 
 /**
+ * La continuazione greedy da ricalcolare nel browser per il controllo di coerenza: il prompt e i token di
+ * `generation` (readBenchmark), ma al più BENCH_LIMITS.text token. Il testo del Python si legge fino a quel
+ * limite: generando di più (`scripts/benchmark.py --tokens 5000`) il confronto diceva «diverso dal carattere
+ * 4.001» per un testo solo più lungo, e un max_new_tokens enorme scritto nel file teneva il calcolo acceso per ore.
+ * @param {{prompt: string|null, maxNewTokens: number|null}|null} generation
+ * @returns {{prompt: string, tokens: number}}
+ */
+export function greedyRequest(generation, { prompt = "ROMEO:\n", tokens = 200 } = {}) {
+  return { prompt: generation?.prompt ?? prompt, tokens: Math.min(generation?.maxNewTokens ?? tokens, BENCH_LIMITS.text) };
+}
+
+/**
  * Le righe del confronto A/B: `{key, label, a, b, delta (A − B), better: "A" | "B" | "=" | null}`.
  * Le velocità non hanno mai un verdetto (dipendono dalla macchina), come in gpt/benchmark.py.
  */

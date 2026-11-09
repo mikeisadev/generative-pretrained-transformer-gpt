@@ -9,13 +9,13 @@ import { MODE, computeRouting, resolveValues, simulateAttention, topK } from "..
 import { DEMO_SPECS, loadTestSpec } from "../js/core/neuralNet/demoSpecs.js";
 import { SPACING, boxOf, decodeUnit, unitIndex } from "../js/core/neuralNet/layout.js";
 import { ARC_KIND, LINK_LIMITS, pairDepths } from "../js/core/neuralNet/links.js";
-import { ScreenIndex } from "../js/core/neuralNet/pickIndex.js";
+import { ScreenIndex, hoverUnit } from "../js/core/neuralNet/pickIndex.js";
 import { gaussian, hashSeed, mulberry32 } from "../js/core/neuralNet/random.js";
 import { PATTERNS, ROLES, linkSummary } from "../js/core/neuralNet/roles.js";
 import { buildNetworkModel } from "../js/core/neuralNet/model.js";
 import { LIMITS, NetworkSpecError, normalizeSpec } from "../js/core/neuralNet/spec.js";
 import { LONG_NETWORK_RATIO, startsCollapsed } from "../js/core/neuralNet/card.js";
-import { avoidRect, avoidRectVariants, partIndexAt, partTitle, readableHeight, walkParts } from "../js/core/neuralNet/framing.js";
+import { avoidRect, avoidRectVariants, fitInFreeRect, partIndexAt, partTitle, readableHeight, walkParts } from "../js/core/neuralNet/framing.js";
 import { attentionSource, badgeOf, honestyLines, listText, plural, valueSources } from "../js/core/neuralNet/honesty.js";
 import { distanceToBox, occluderOpacity } from "../js/core/neuralNet/occlusion.js";
 
@@ -606,6 +606,21 @@ test("indice sullo schermo: il neurone più vicino alla camera vince; fuori dal 
   assert.equal(index.query(p2 + 2, index.sy[2] - 1), 2);
 });
 
+test("passaggio del mouse: sotto il titolo di una sezione i neuroni di un'altra hanno l'etichetta; il resto come prima", () => {
+  const sectionIdOf = (u) => (u < 10 ? "toy_wave" : "toy_feat"); // unità 0-9 «Forma d'onda», 10-… «Spettro del frame»
+  const title = (id) => ({ text: id, ref: { kind: "section", id } });
+  // niente titolo sotto il puntatore: l'unità (o niente), come sempre
+  assert.equal(hoverUnit(null, 12, sectionIdOf), 12);
+  assert.equal(hoverUnit(null, -1, sectionIdOf), -1);
+  // il caso di Audio: il titolo «Forma d'onda» sopra un neurone di «Spettro del frame» → l'etichetta del neurone
+  assert.equal(hoverUnit(title("toy_wave"), 12, sectionIdOf), 12);
+  // sopra i neuroni della sua sezione o fuori dai neuroni: il titolo, niente etichetta (come prima)
+  assert.equal(hoverUnit(title("toy_feat"), 12, sectionIdOf), -1);
+  assert.equal(hoverUnit(title("toy_wave"), -1, sectionIdOf), -1);
+  // gruppi, "× N" e nomi dei token: niente etichetta (come prima)
+  for (const ref of [{ kind: "group", index: 0 }, { kind: "repeat", id: "r0" }, { kind: "slice", index: 3 }]) assert.equal(hoverUnit({ text: "x", ref }, 12, sectionIdOf), -1, ref.kind);
+});
+
 // ------------------------------------------------------------------------------------------ esempi
 test("esempi: le tre reti e la prova di carico sono valide, oneste sulla scala, con fonti", () => {
   for (const [name, spec] of Object.entries(DEMO_SPECS)) {
@@ -855,3 +870,31 @@ test("linkSummary: una voce per sezione; sezioni uguali (i livelli della U-Net) 
   assert.deepEqual(linkSummary([], (l) => l.to), []);
 });
 
+test("fitInFreeRect: lo stage intero dà la distanza di CameraDirector.focus; con il pad vince il taglio dove il riquadro è più grande", () => {
+  const tanV = Math.tan(Math.PI / 8); // fov 45°
+  const W = 1200;
+  const H = 800;
+  const stage = { x0: 0, y0: 0, x1: W, y1: H };
+  // come focus: max(alto / tan, largo / (tan · aspetto)) · margine + profondità, e nessuno spostamento
+  const whole = fitInFreeRect({ halfW: 60, halfH: 30, depth: 2, rects: [stage], W, H, tanV, margin: 1.02 });
+  const focus = Math.max(30 / tanV, 60 / (tanV * (W / H))) * 1.02 + 2;
+  assert.ok(Math.abs(whole.distance - focus) < 1e-9);
+  assert.equal(whole.dx, 0);
+  assert.equal(whole.dy, 0);
+  // un riquadro quasi quadrato e il pad in basso a destra: a sinistra del pad resta tutta l'altezza
+  const cuts = avoidRectVariants(stage, { x0: 1000, y0: 640, x1: 1186, y1: 786 });
+  const fit = fitInFreeRect({ halfW: 50, halfH: 40, rects: cuts, W, H, tanV, margin: 1.02 });
+  assert.equal(fit.rect, cuts[1], "il taglio a sinistra");
+  assert.ok(fit.dx < 0 && fit.dy === 0, "il centro va a sinistra, alla stessa altezza");
+  for (const r of cuts) assert.ok(fit.distance <= fitInFreeRect({ halfW: 50, halfH: 40, rects: [r], W, H, tanV, margin: 1.02 }).distance);
+  // il riquadro inquadrato sta dentro la parte scelta: proiezione dei suoi bordi in pixel
+  const px = H / (2 * fit.distance * tanV); // pixel per unità di scena nel piano del centro
+  const cx = W / 2 + fit.dx * px;
+  assert.ok(cx - 50 * px >= fit.rect.x0 - 1e-6 && cx + 50 * px <= fit.rect.x1 + 1e-6);
+  // pannelli a destra: il punto principale è al centro della parte non coperta
+  const covered = 400;
+  const left = fitInFreeRect({ halfW: 20, halfH: 20, rects: [{ x0: 0, y0: 0, x1: W - covered, y1: H }], W, H, covered, tanV });
+  assert.ok(Math.abs(left.dx) < 1e-12 && Math.abs(left.dy) < 1e-12);
+  // una parte più in alto del centro: il punto guardato scende (dy > 0, si sottrae)
+  assert.ok(fitInFreeRect({ halfW: 10, halfH: 10, rects: [{ x0: 0, y0: 0, x1: W, y1: 400 }], W, H, tanV }).dy > 0);
+});

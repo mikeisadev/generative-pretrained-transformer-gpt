@@ -16,7 +16,7 @@
  */
 
 import { WeightRun, snapshotEntry } from "./run.js";
-import { megabytes } from "./validate.js";
+import { megabytes, stripBidiControls, withoutBidiControls } from "./validate.js";
 
 const DB_NAME = "gpt-didattico-pesi";
 const DB_VERSION = 1;
@@ -108,8 +108,8 @@ export function deserializeRun(record, weights, readBlob) {
   );
   return new WeightRun({
     id: record.id,
-    name: record.name,
-    description: record.description,
+    name: savedName(record.name),
+    description: withoutBidiControls(record.description) ?? "",
     source: "upload",
     tensors,
     flat,
@@ -119,9 +119,15 @@ export function deserializeRun(record, weights, readBlob) {
     snapshots,
     benchmark: record.benchmark,
     info: record.info,
-    meta: { ...record.meta, savedAt: record.savedAt, warnings: [...(record.meta?.warnings ?? [])] },
+    meta: { ...record.meta, savedAt: record.savedAt, warnings: (record.meta?.warnings ?? []).map(stripBidiControls), files: (record.meta?.files ?? []).map(stripBidiControls) },
   });
 }
+
+/**
+ * Il nome di un run salvato, da mostrare: senza controlli bidirezionali anche se salvato da una versione che non
+ * li toglieva (validate.js, withoutBidiControls); uno fatto solo di quelli diventa «Run salvato».
+ */
+const savedName = (name) => withoutBidiControls(name) ?? "Run salvato";
 
 /** Promessa di una richiesta IndexedDB. */
 function request(req) {
@@ -239,7 +245,7 @@ export class RunStore {
       const records = await request(db.transaction(RUNS, "readonly").objectStore(RUNS).getAll());
       return records
         .filter((r) => r?.format === RECORD_FORMAT)
-        .map((r) => ({ ...r.summary, id: r.id, name: r.name, description: r.description, savedAt: r.savedAt, bytes: r.bytes }))
+        .map((r) => ({ ...r.summary, id: r.id, name: savedName(r.name), description: withoutBidiControls(r.description) ?? "", savedAt: r.savedAt, bytes: r.bytes }))
         .sort((a, b) => b.savedAt - a.savedAt);
     } catch (error) {
       this.lastError = { message: error?.message ?? String(error), fatal: this.lastError?.fatal ?? false };

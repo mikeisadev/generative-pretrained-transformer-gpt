@@ -206,6 +206,10 @@ def test_invalid_inputs_are_rejected_with_clear_errors():
         weights_from_state_dict({"contatore": torch.tensor([1, 2])})
     with pytest.raises(ValueError, match="nome di tensore"):
         weights_from_state_dict({"a\nb": torch.ones(1)})
+    # i controlli bidirezionali nel nome: il Laboratorio li rifiuta (rovescerebbero le sue frasi), e l'export
+    for control in ("\u202e", "\u2066", "\u2069"):
+        with pytest.raises(ValueError, match="nome di tensore"):
+            weights_from_state_dict({f"blocks.0.{control}thgiew": torch.ones(1)})
     with pytest.raises(ValueError, match="anche il modulo"):
         weights_from_state_dict({"a.b": torch.ones(1), "a.b.c": torch.ones(1)})
     with pytest.raises(ValueError, match="vocab_size"):
@@ -362,6 +366,26 @@ def test_existing_runs_are_protected_and_force_replaces_only_run_files(tmp_path,
         export_run(weights, run / "run.json", name="Un file")
 
 
+def test_reexporting_a_run_in_place_keeps_its_training_history(tmp_path, recorded):
+    """Prima: `export_run.py … --trace runs/x/training --out runs/x --force` cancellava trace.json e gli
+    snapshot di runs/x/training e poi non li trovava più da copiare (FileNotFoundError): storia e run
+    persi."""
+    weights = read_checkpoint(recorded["ckpt"])
+    run = tmp_path / "run"
+    export_run(weights, run, name="Primo", training_dir=recorded["trace"])
+    before = {p.name: p.read_bytes() for p in (run / "training").iterdir()}
+    with pytest.raises(FileExistsError):  # senza --force non si tocca niente
+        export_run(weights, run, name="Secondo", training_dir=run / "training")
+    # anche scritto in un altro modo (con ".."): è la stessa cartella
+    info = export_run(weights, run, name="Rinominato", training_dir=run / "training" / ".." / "training",
+                      overwrite=True)
+    assert {p.name: p.read_bytes() for p in (run / "training").iterdir()} == before
+    assert info["name"] == "Rinominato" and info["training"]["snapshots"] == [0, 10, 30]
+    assert not any("restano altri file" in n or "non coincide" in n for n in info["notes"])
+    assert json.loads((run / "weights.json").read_text(encoding="utf-8"))["training"] == {
+        "dir": "training", "trace": "training/trace.json"}
+
+
 def test_benchmark_is_written_and_checked_against_the_weights(tmp_path, tokenizer):
     weights = weights_from_model(small_model(tokenizer))
     bench = {"format_version": 1, "metrics": {"loss": 2.5}, "model": {"weights_sha256": weights.sha256()}}
@@ -391,6 +415,22 @@ def test_names_texts_and_paths(tmp_path):
     assert not (tmp_path / "mai").exists()  # i testi si controllano prima di toccare il disco
     assert display_path(PROJECT_ROOT / "runs" / "a") == "runs/a"
     assert display_path(Path("/home/mario/esperimenti/gpt.pt")) == "…/esperimenti/gpt.pt"
+
+
+def test_paths_written_in_the_json_never_name_the_home_folder(monkeypatch):
+    """Prima: un checkpoint direttamente nella home dava "…/mario/gpt.pt" in run.json (e model.json scriveva
+    il percorso assoluto): il nome della persona finiva nei file condivisi."""
+    import gpt.export as export_module
+
+    assert display_path(Path("/home/mario/gpt.pt")) == "…/gpt.pt"
+    assert display_path(Path("/Users/mario/gpt.pt")) == "…/gpt.pt"
+    assert display_path(Path("/gpt.pt")) == "…/gpt.pt"
+    # una home più in basso (es. /var/home/<nome> di Fedora Silverblue): la cartella non si scrive
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/var/home/mario")))
+    assert display_path(Path("/var/home/mario/gpt.pt")) == "…/gpt.pt"
+    assert display_path(Path("/var/home/mario/prove/gpt.pt")) == "…/prove/gpt.pt"
+    # una sola funzione per run.json (gpt.runs) e model.json (gpt.export, anche con il nome di prima)
+    assert display_path is export_module.display_path is export_module._display_path
 
 
 def test_run_folders_are_read_as_untrusted_input(tmp_path, tokenizer):

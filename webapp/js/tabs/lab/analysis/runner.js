@@ -62,7 +62,12 @@ export class BenchmarkRunner {
           this._inWorker({ job, manifest, weights, text, greedy, onProgress, done, fail });
           return;
         } catch {
-          this.workerBroken = true; // es. pagina aperta da file://: si lavora nella pagina
+          // es. pagina aperta da file:// (il worker non si crea) o un postMessage rifiutato: si lavora nella pagina.
+          // I listener già messi sul worker si tolgono e il worker si chiude (prima restavano lì, con lui).
+          this.active.cleanup?.();
+          this.active.cleanup = null;
+          this._dropWorker();
+          this.workerBroken = true;
         }
       }
       this._inPage({ job, manifest, weights, text, greedy, onProgress, done, fail });
@@ -85,6 +90,7 @@ export class BenchmarkRunner {
       event.preventDefault?.();
       // il worker non è nemmeno partito (moduli nei worker non supportati, file non trovato): nella pagina
       if (!answered) {
+        this.active.cleanup?.(); // via i listener da questo worker, che si chiude
         this._dropWorker();
         this.workerBroken = true;
         this.active.cleanup = null;

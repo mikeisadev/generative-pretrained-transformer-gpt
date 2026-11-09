@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -41,6 +42,7 @@ from gpt.benchmark import (
     open_source,
     run_tokenizer,
     score_tokens,
+    terminal_text,
     validation_text,
 )
 from gpt.config import GPTConfig, TrainConfig
@@ -304,6 +306,33 @@ def test_an_integer_buffer_does_not_stop_the_benchmark_or_its_snapshots(tmp_path
                for n in from_run["notes"])
 
 
+def test_export_run_benchmark_says_the_integer_tensors_come_from_the_code(tmp_path, tokenizer, monkeypatch):
+    """scripts/export_run.py --benchmark ricostruisce il modello con build_model come benchmark_path: la stessa
+    nota sui tensori interi (num_batches_tracked di una BatchNorm), che il run non contiene."""
+    monkeypatch.setattr(benchmark, "GPTLanguageModel", BatchNormGPT)  # il "codice attuale" di build_model
+    torch.manual_seed(1337)
+    model = BatchNormGPT(small_model(tokenizer).config)
+    model.train()
+    model(torch.tensor([tokenizer.encode(TEXT[:8])]))  # un passo in train: il contatore int64 vale 1
+    ckpt = tmp_path / "bn.pt"
+    save_checkpoint(ckpt, model, tokenizer)
+    spec = importlib.util.spec_from_file_location("export_run_script", PROJECT_ROOT / "scripts" / "export_run.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    monkeypatch.setattr(script, "load_text", lambda: TEXT)  # niente download: il testo dei test
+    monkeypatch.setattr(script, "BENCHMARK_DATA_DIR", tmp_path)  # niente estratto (è di Tiny Shakespeare)
+    out = tmp_path / "run"
+    monkeypatch.setattr(sys, "argv", ["export_run.py", str(ckpt), "--name", "BatchNorm", "--out", str(out),
+                                      "--benchmark", "--threads", "1"])
+    assert script.main() == 0
+    notes = json.loads((out / "benchmark.json").read_text(encoding="utf-8"))["notes"]
+    assert any(n.startswith("tensori interi o booleani che il run non contiene (ln_f.num_batches_tracked)")
+               for n in notes)
+    # la stessa frase di benchmark_path; un modello senza tensori interi non ha la nota
+    assert benchmark.rebuilt_tensors_note(build_model(read_run_folder(out))) in notes
+    assert benchmark.rebuilt_tensors_note(small_model(tokenizer)) is None
+
+
 def test_the_code_fingerprint_is_public_and_keeps_its_old_names():
     """record_training.py importa code_files e code_sha256; i nomi privati restano per chi li usava."""
     assert benchmark._code_files is benchmark.code_files and benchmark._code_sha256 is benchmark.code_sha256
@@ -338,6 +367,29 @@ def test_benchmark_needs_the_current_architecture(tmp_path, tokenizer):
         open_source(tmp_path)
 
 
+def test_a_huge_config_is_checked_without_building_the_huge_model(tokenizer, monkeypatch):
+    """La config di un run è un file: n_embd 4096 e 32 blocchi accanto a pesi piccoli si scoprono sulle sole
+    forme (device "meta"), senza allocare i 25 GB del modello vero. Prima build_model lo costruiva subito."""
+    built = []
+
+    class Recording(GPTLanguageModel):
+        def __init__(self, config):
+            built.append(torch.get_default_device().type)  # dove nasce il modello: "meta" = niente memoria
+            super().__init__(config)
+
+    monkeypatch.setattr(benchmark, "GPTLanguageModel", Recording)  # il "codice attuale" di build_model
+    state = small_model(tokenizer).state_dict()
+    huge = {**small_model(tokenizer).config.to_dict(), "n_embd": 4096, "n_head": 8, "n_layer": 32}
+    with pytest.raises(ArchitectureMismatch):
+        build_model(weights_from_state_dict(state, config=huge))
+    assert built == ["meta"]
+    # con le forme giuste il modello vero nasce dopo il controllo, con i pesi del run
+    built.clear()
+    model = build_model(weights_from_state_dict(state, config=small_model(tokenizer).config.to_dict()))
+    assert built == ["meta", "cpu"]
+    assert all(torch.equal(model.state_dict()[n], t) for n, t in state.items())
+
+
 # --------------------------------------------------------------------------- confronto
 
 
@@ -368,6 +420,21 @@ def test_comparison_says_which_run_is_better(builtin):
     assert "Loss sulla validation durante il training" in table  # entrambi hanno gli snapshot
     same = format_comparison(builtin, builtin)
     assert "stessi pesi, bit per bit" in same and "Attenzione" not in same
+
+
+def test_reports_never_send_control_characters_to_the_terminal(builtin, capsys):
+    """Un benchmark.json altrui (o il vocabolario di un run scaricato) con un ESC nel nome, nelle note o nel testo
+    generato: prima il riepilogo e il confronto lo stampavano così com'era e il terminale lo eseguiva (titolo,
+    colori, appunti con OSC 52); ora si legge come escape. A capo e tabulazioni restano."""
+    evil = copy.deepcopy(builtin)
+    evil["name"] = "Run \x1b]0;titolo\x07 \u202egnp"
+    evil["notes"] = ["nota \x1b[2J pulita\r"]
+    evil["generation"]["sampled"] = "ciao\x1b]52;c;aGk=\x07\n\tfine"
+    for text in (format_summary(evil), format_comparison(evil, builtin)):
+        assert not any(c in text for c in "\x1b\x07\r\u202e"), repr(text[:200])
+        assert "\\x1b]0;titolo\\x07" in text and "\\u202egnp" in text
+    assert "\\x1b[2J" in format_summary(evil) and "\n" in format_summary(evil)
+    assert terminal_text("a\tb\nc\x9bd\x00") == "a\tb\nc\\x9bd\\x00"
 
 
 def test_benchmark_differences_ignore_timing_but_not_results(builtin):

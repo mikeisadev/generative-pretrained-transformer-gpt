@@ -16,7 +16,6 @@
  * Un blocco ripetuto ({ repeat: N, of: [...] }) si disegna UNA volta: dopo vengono poche lastre
  * "fantasma" con l'ingombro del blocco e la parentesi "× N" (vedi ghosts).
  */
-import { sliceUnits } from "./spec.js";
 
 export const SPACING = Object.freeze({
   neuron: 0.32, // passo tra neuroni sull'asse y
@@ -345,9 +344,6 @@ export function boxOf(layout, net, ids) {
   }
   return Number.isFinite(min[0]) ? { min, max } : null;
 }
-
-/** Unità di una fetta di profondità: per comodità dei collegamenti e dei test. */
-export const sliceSize = sliceUnits;
 
 /**
  * @typedef {ReturnType<typeof computeLayout>} NetworkLayout

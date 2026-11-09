@@ -167,12 +167,3 @@ export function onlyHalfRounding(c, dtypeA, dtypeB) {
   const HALF = 2 ** -11;
   return c.rows.every((r) => r.maxAbsDiff <= Math.max(HALF * Math.max(r.normA, r.normB), 6.2e-5) && r.relChange <= 2 * HALF);
 }
-
-/**
- * Riga di riepilogo della tabella: quanti tensori e pesi si sono confrontati e il cambio totale
- * (‖A − B‖ / ‖B‖ di tutti i pesi abbinati messi in fila, come i gruppi di gpt/recording.py).
- */
-export function totalsText(c) {
-  const t = c.totals;
-  return { tensors: c.rows.length, params: c.matchedParams, relChange: t.relChange, cosine: t.cosine, diffNorm: t.diffNorm };
-}

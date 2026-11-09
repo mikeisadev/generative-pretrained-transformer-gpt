@@ -298,9 +298,11 @@ test("rete: Whisper riceve il log-Mel vero del brano e la codifica di posizione 
     for (let i = 0; i < WHISPER_TEXT.length; i++) for (let j = 0; j < WHISPER_TEXT.length; j++) assert.equal(valueAt(tok, i, j), i === j ? 1 : 0);
     assert.equal(tok.valueLabel, "(token d'esempio)", "il valore dice che è un esempio");
   }
-  // lo stesso testo della scena: il modulo di soli dati che la scena di Whisper importa e riesporta
+  // lo stesso testo della scena: il modulo di soli dati che la scena di Whisper e la rete importano (lo stesso
+  // array congelato, non una copia scritta a mano)
   const { WHISPER_TOKENS } = await import("../js/tabs/audio/whisperTokens.js");
-  assert.deepEqual([...WHISPER_TOKENS], [...WHISPER_TEXT]);
+  assert.equal(WHISPER_TEXT, WHISPER_TOKENS);
+  assert.ok(Object.isFrozen(WHISPER_TEXT));
   assert.match(await source("../js/tabs/audio/sceneWhisper.js"), /import \{ WHISPER_TOKENS \} from "\.\/whisperTokens\.js";/);
   const w = whisperWindow(lab, STYLES[0]);
   assert.deepEqual(w.channels, [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352]);

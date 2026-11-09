@@ -45,6 +45,7 @@ import { el, fillTemplate, fmt, sleep } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
 import { installStepKeys } from "../../core/stepKeys.js";
 import { LODController } from "../../core/lod.js";
+import { avoidRectVariants, fitInFreeRect } from "../../core/neuralNet/framing.js";
 import { BRAIN_PANE_ID } from "../../core/repLinks.js";
 import { installRepresentations } from "../../core/representations.js";
 import { parseHash } from "../../core/search.js";
@@ -230,10 +231,47 @@ export async function createTab(root, app) {
     return frameWhole(id === "blocks" ? GRID_BOX : MACRO_BOX);
   }
 
-  /** Inquadra tutta la griglia (o tutta la Panoramica) di fronte. */
+  /**
+   * Inquadra tutta la griglia (o tutta la Panoramica) di fronte, nella parte dello stage libera dai comandi:
+   * la griglia 4 × 4 riempie lo stage e il pad della navigazione, in basso a destra, copriva la scheda
+   * «Modelli 3D» (a 1280 × 800 quasi tutta). Vale anche per "Centra".
+   */
   function frameWhole(box, { duration } = {}) {
     compass?.hide();
-    return director.focus(box, { showFrame: false, margin: 1.02, direction: FRONT, duration }); // undefined = durata predefinita
+    director.hideFrame();
+    const { position, target } = poseInFreeRect(box, 1.02);
+    return director.flyTo(position, target, duration); // undefined = durata predefinita
+  }
+
+  /**
+   * Posa di fronte (FRONT) che fa entrare `box` nella parte libera dello stage dove viene più grande: sotto
+   * zoom e selettore, sopra il pad o alla sua sinistra (avoidRectVariants), fuori dai pannelli a destra.
+   * Il centro del box va al centro di quella parte: la camera si sposta nel suo piano (fitInFreeRect, puro).
+   */
+  function poseInFreeRect(box, margin) {
+    const stageBox = stage.getBoundingClientRect();
+    const W = Math.max(1, stage.clientWidth);
+    const H = Math.max(1, stage.clientHeight);
+    const rel = (node) => {
+      const r = node.getBoundingClientRect();
+      return { x0: r.left - stageBox.left, y0: r.top - stageBox.top, x1: r.right - stageBox.left, y1: r.bottom - stageBox.top };
+    };
+    const shown = (node) => node.checkVisibility?.({ visibilityProperty: true }) ?? Boolean(node.offsetParent);
+    let top = 0;
+    for (const node of stage.querySelectorAll(":scope > :is(.lod-switch, .rep-switch)")) if (shown(node)) top = Math.max(top, rel(node).y1);
+    const covered = host.coveredRight();
+    const free = { x0: 0, y0: Math.min(top, H / 3), x1: W - covered, y1: H };
+    const pad = stage.querySelector(":scope > .nav-pad");
+    const rects = pad && shown(pad) && pad.offsetWidth ? avoidRectVariants(free, rel(pad)) : [free];
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const tanV = Math.tan(THREE.MathUtils.degToRad(host.camera.fov) / 2);
+    const fit = fitInFreeRect({ halfW: size.x / 2, halfH: size.y / 2, depth: size.z, rects, W, H, covered, tanV, margin });
+    const right = new THREE.Vector3(0, 1, 0).cross(FRONT).normalize();
+    const up = new THREE.Vector3().crossVectors(FRONT, right);
+    const target = center.clone().addScaledVector(right, -fit.dx).addScaledVector(up, -fit.dy);
+    return { target, position: target.clone().addScaledVector(FRONT, fit.distance) };
   }
 
   /** La regione più vicina al punto guardato: con la navigazione libera, quella su cui sei arrivato. */
@@ -390,14 +428,10 @@ export async function createTab(root, app) {
   for (const make of [architectureActions, inferenceActions, trainingActions, reasoningActions, beyondActions]) for (const action of make(tab)) ui.player.register(action);
   const actionsList = el("div", { className: "mllm-actions" });
   paneActions.append(el("p", { className: "mllm-note" }, "Ogni azione inquadra la sua regione e sincronizza codice e grafici. Le animazioni con dati inventati lo dichiarano nella didascalia."), actionsList);
+  // la scheda dell'azione in corso si accende in tutti e due gli elenchi "Azioni" (questo e quello della vista
+  // completa, full/index.js): lo fa il player per ogni elenco disegnato con renderOverview
   ui.player.renderOverview(actionsList, { categories: CATEGORIES });
   ui.player.on("end", () => director.hideFrame());
-  // Le schede "Azioni" dei due sottotab: si accende quella dell'azione in corso (il player da solo
-  // tiene il conto di un solo elenco, l'ultimo disegnato).
-  ui.player.on("state", () => {
-    const id = ui.player.action?.id ?? null;
-    root.querySelectorAll(".mllm-actions .action-card").forEach((c) => c.classList.toggle("active", c.dataset.action === id));
-  });
   // Sul telefono la sidebar è un cassetto sopra la scena: un'azione avviata dal suo elenco (o con
   // "Avvia l'animazione" in un passo) partiva dietro il cassetto. Alla partenza di un'azione si chiude.
   let lastRun = null;
@@ -481,7 +515,8 @@ export async function createTab(root, app) {
     onReselect: () => closeRepresentation(),
     isBlocked: () => nav.modalOpen || Boolean(reps.stack?.nav.modalOpen),
   });
-  addHelpShortcut(nav);
+  // il tasto V del tab nell'aiuto della navigazione ("?"), nella sezione "Questo tab" del pad
+  nav.pad?.addShortcut({ keys: "V", text: "Vista d'insieme ↔ Architettura completa" });
 
   const capturePose = () => ({ position: host.camera.position.clone(), target: host.controls.target.clone() });
   const restorePose = (p) => {
@@ -526,9 +561,12 @@ export async function createTab(root, app) {
     sidebar.movePane(BRAIN_PANE, to === "full" ? "full-fonti" : "fonti");
   }
 
-  /** Grafici: solo le sezioni del sottotab attivo (quelle della vista completa hanno id "full-…"). */
+  /**
+   * Grafici: solo le sezioni del sottotab attivo (quelle della vista completa hanno id "full-…"). Nascoste dal
+   * pannello del nucleo: non occupano posto, non si disegnano e, tornando visibili, si ridisegnano.
+   */
   function swapCharts(to) {
-    for (const [id, section] of ui.charts.sections) section.root.hidden = id.startsWith("full-") !== (to === "full");
+    for (const id of ui.charts.sections.keys()) ui.charts.setSectionVisible(id, id.startsWith("full-") === (to === "full"));
   }
 
   /**
@@ -746,16 +784,6 @@ function isFullTarget(kind, id) {
   if (kind === "step") return FULL_STEP_IDS.has(id);
   if (kind === "action") return FULL_ACTION_IDS.has(id);
   return kind === "view" && (id === "full" || id.startsWith("full-"));
-}
-
-/**
- * Il tasto V del tab nell'aiuto della navigazione ("?"): una riga in fondo, se l'aiuto c'è. Il pad
- * del nucleo non ha un'API per le scorciatoie dei tab: si aggiunge una sezione alla sua griglia.
- */
-function addHelpShortcut(nav) {
-  const grid = nav.pad?.help?.querySelector(".nav-help-grid");
-  if (!grid) return;
-  grid.append(el("section", {}, el("h3", {}, "Questo tab"), el("dl", {}, el("dt", {}, "V"), el("dd", {}, "Vista d'insieme ↔ Architettura completa"))));
 }
 
 /**

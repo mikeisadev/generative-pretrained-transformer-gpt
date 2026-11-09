@@ -29,6 +29,7 @@
 import { SHARED_DIMENSION, UNKNOWN_DIMENSION } from "../../shared/rag/embedder.js";
 import { cosineSimilarity } from "../../shared/rag/similarity.js";
 import { tokenize } from "../../shared/rag/tokenizer.js";
+import { hnswCost } from "./hnswCost.js";
 
 /**
  * multilingual-e5-small (Microsoft), verificato su fonti ufficiali:
@@ -416,20 +417,19 @@ function databasePart({ kb, run, N, ex, dims, nonzero, chunks, cosine, chosen, e
 }
 
 /**
- * Quanto ha lavorato davvero l'indice HNSW del tab (come la didascalia dell'azione Ricerca). Con pochi
- * chunk non conviene, per due motivi diversi che il testo distingue: con il grafo didattico a più livelli
- * rilegge alcuni nodi a ogni livello (più distanze dei nodi visitati); con i valori di pgvector il grafo ha
- * un livello solo ed ef_search (40) supera i chunk, quindi legge tutto il grafo, un nodo una volta.
+ * Quanto ha lavorato davvero l'indice HNSW del tab (come la didascalia dell'azione Ricerca: gli stessi conti
+ * di hnswCost.js). Con pochi chunk non conviene, per due motivi diversi che il testo distingue: con il grafo
+ * didattico a più livelli rilegge alcuni nodi a ogni livello (più distanze dei nodi visitati); con i valori
+ * di pgvector il grafo ha un livello solo ed ef_search (40) supera i chunk, quindi legge tutto il grafo, un
+ * nodo una volta.
  * @param {{ comparisons: number, recall: number, frames?: { visited: number[] }[] }} run
  * @param {number} N chunk nel database
  * @param {number} [efSearch] ef_search dell'indice
  */
 export function hnswNote(run, N, efSearch) {
-  const n = run.comparisons;
+  const { comparisons: n, rereads } = hnswCost(run);
   if (n < N) return `L'indice HNSW del tab ha calcolato ${it(n)} distanze invece di ${it(N)} (recall ${it(run.recall * 100)}%): salta tra pochi nodi del grafo invece di leggerli tutti.`;
-  // nodi diversi visitati in tutta la ricerca (l'ultimo fotogramma di searchFrames li ha tutti)
-  const distinct = run.frames?.at(-1)?.visited?.length ?? n;
-  const why = n > distinct ? "rilegge alcuni nodi a ogni livello del grafo" : `${efSearch ? `con ef_search ${it(efSearch)} e ` : "con "}solo ${it(N)} chunk legge tutto il grafo`;
+  const why = rereads ? "rilegge alcuni nodi a ogni livello del grafo" : `${efSearch ? `con ef_search ${it(efSearch)} e ` : "con "}solo ${it(N)} chunk legge tutto il grafo`;
   return `L'indice HNSW del tab ha calcolato ${it(n)} distanze, la ricerca esatta ${it(N)}: con così pochi chunk l'indice non conviene (${why}). Il vantaggio arriva con migliaia di vettori, come misurano i Grafici del tab.`;
 }
 

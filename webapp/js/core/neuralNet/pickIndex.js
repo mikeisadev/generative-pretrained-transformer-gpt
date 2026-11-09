@@ -10,6 +10,7 @@
  *   const index = new ScreenIndex();
  *   index.build(positions, count, matrix, width, height, { pickRadius: (i) => r, pxPerUnit });
  *   index.query(x, y) → indice dell'unità o -1
+ *   hoverUnit(label, unit, sectionIdOf) → l'unità da raccontare al passaggio del mouse (anche sotto un titolo) o -1
  */
 export class ScreenIndex {
   constructor() {
@@ -130,4 +131,22 @@ export class ScreenIndex {
   invalidate() {
     this.valid = false;
   }
+}
+
+/**
+ * L'unità da raccontare nell'etichetta al passaggio del mouse (o -1), quando sotto il puntatore c'è anche un
+ * titolo cliccabile. Il titolo di una sezione è più largo della sua colonna: di lato, con le sezioni strette e
+ * vicine (le parti di una rete lunga, le lastre da lontano), passa sopra i neuroni delle sezioni accanto più
+ * alte, che lì non davano nessuna etichetta (Audio a 1280 px: il titolo «Forma d'onda» copriva il 40% della
+ * colonna di «Spettro del frame»). Su quei neuroni l'etichetta al passaggio ora c'è; il clic resta del titolo,
+ * che è disegnato sopra (chi lo mostra lo dice nell'etichetta). Sopra i neuroni della sua sezione, fuori dai
+ * neuroni e con i titoli dei gruppi, dei "× N" e dei token resta tutto come prima: niente etichetta.
+ * @param {{ref?: {kind?: string, id?: string}}|null} label l'etichetta sotto il punto (LabelLayer.hit) o null
+ * @param {number} unit l'unità sotto il punto entro il suo raggio di presa (ScreenIndex.query) o -1
+ * @param {(unit: number) => string} sectionIdOf l'id della sezione di un'unità
+ * @returns {number}
+ */
+export function hoverUnit(label, unit, sectionIdOf) {
+  if (unit < 0 || !label) return unit;
+  return label.ref?.kind === "section" && sectionIdOf(unit) !== label.ref.id ? unit : -1;
 }

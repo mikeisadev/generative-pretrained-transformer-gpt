@@ -19,6 +19,7 @@
 import { el } from "../dom.js";
 import { glossarySearchIndex, glossaryTerm } from "../glossary.js";
 import { progress } from "../progress.js";
+import { withRepKeywords } from "../repLinks.js";
 import { KINDS, excerpt, formatHash, groupResults, highlightRanges, prepareEntry, queryTokens, search } from "../search.js";
 import { copyLink } from "./share.js";
 
@@ -129,7 +130,8 @@ export class SearchPalette {
       for (const { tab, items } of loaded) {
         for (const item of items) {
           if (!item || typeof item.title !== "string" || item.id === undefined || !VALID_KINDS.has(item.kind)) continue;
-          entries.push({ ...item, id: String(item.id), tab: tab.id, group: tab.id });
+          // view:rete e view:cervello: anche i nomi dei comandi comuni delle due viste (repLinks.js)
+          entries.push({ ...item, id: String(item.id), keywords: withRepKeywords(item), tab: tab.id, group: tab.id });
         }
       }
       for (const item of glossarySearchIndex()) entries.push({ ...item, tab: GLOSSARY_GROUP, group: GLOSSARY_GROUP });

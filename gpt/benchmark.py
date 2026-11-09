@@ -81,6 +81,7 @@ import inspect
 import json
 import math
 import platform
+import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -431,16 +432,21 @@ def build_model(weights: RunWeights) -> GPTLanguageModel:
         config = GPTConfig(**weights.config)
     except TypeError as error:
         raise ValueError(f"la config del run non va bene per GPTConfig del codice attuale: {error}") from None
-    model = GPTLanguageModel(config)
-    state = model.state_dict()
-    expected = {n: tuple(t.shape) for n, t in state.items() if t.is_floating_point()}
+    # Prima le sole forme, sul device "meta" (nessuna memoria): la config viene da un file (weights.json o
+    # run.json, magari scaricato) e una sbagliata o enorme (n_embd 4096 accanto a pesi da 64) si scopre
+    # senza allocare. Prima il modello vero nasceva subito: 25 GB per quella config, o un RuntimeError.
+    with torch.device("meta"):
+        shapes = GPTLanguageModel(config).state_dict()
+    expected = {n: tuple(t.shape) for n, t in shapes.items() if t.is_floating_point()}
     got = {n: tuple(t.shape) for n, t in weights.tensors.items()}
     missing = [n for n in expected if n not in got]
     extra = [n for n in got if n not in expected]
     mismatched = [(n, got[n], expected[n]) for n in expected if n in got and got[n] != expected[n]]
     if missing or extra or mismatched:
         raise ArchitectureMismatch(missing, extra, mismatched)
-    model.load_state_dict({**state, **weights.tensors})  # stretto: tutto lo state_dict, i pesi del run sopra
+    model = GPTLanguageModel(config)  # ora le forme combaciano: il modello vero, grande quanto i pesi
+    # stretto: tutto lo state_dict, con i pesi del run sopra (i tensori interi restano quelli del codice)
+    model.load_state_dict({**model.state_dict(), **weights.tensors})
     return model.eval()
 
 
@@ -596,12 +602,22 @@ def benchmark_path(
         excerpt = read_excerpt(excerpt_path, validation)
     bench = benchmark_model(model, tokenizer, name=src.name, source=src.source, validation=validation,
                             excerpt=excerpt, history=src.history, weights=src.weights, settings=settings)
-    # Un run non ha tensori interi: build_model li lascia come li crea il codice, e lo si dice.
-    rebuilt = [n for n, t in model.state_dict().items() if not t.is_floating_point()]
-    if rebuilt:
-        bench["notes"].append(f"tensori interi o booleani che il run non contiene ({_few_names(rebuilt)}): "
-                              "misurati con il valore che dà loro il codice")
+    note = rebuilt_tensors_note(model)
+    if note:
+        bench["notes"].append(note)
     return bench
+
+
+def rebuilt_tensors_note(model: nn.Module) -> str | None:
+    """La nota sui tensori interi o booleani di un modello ricostruito da un run con ``build_model`` (None se
+    non ne ha): il run non li contiene (l'export li salta e li scrive in ``skipped``), quindi valgono quanto
+    li crea il codice. La aggiungono al benchmark ``benchmark_path`` e ``scripts/export_run.py --benchmark``.
+    """
+    rebuilt = [n for n, t in model.state_dict().items() if not t.is_floating_point()]
+    if not rebuilt:
+        return None
+    return (f"tensori interi o booleani che il run non contiene ({_few_names(rebuilt)}): "
+            "misurati con il valore che dà loro il codice")
 
 
 def load_benchmark(path: Path) -> dict[str, Any]:
@@ -793,6 +809,19 @@ def comparison_warnings(a: Mapping[str, Any], b: Mapping[str, Any]) -> list[tupl
     return out
 
 
+# Caratteri di controllo (C0 tranne a capo e tabulazione, DEL, C1) e controlli bidirezionali: i testi stampati nel
+# terminale vengono anche da file altrui (nome, note e testi generati di un benchmark.json, il vocabolario di un
+# run scaricato) e un ESC comanderebbe il terminale (colori, titolo della finestra, appunti con OSC 52), un "\r"
+# riscriverebbe la riga. Si stampano visibili, come escape.
+_TERMINAL_UNSAFE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
+def terminal_text(text: str) -> str:
+    """``text`` da stampare in un terminale: i caratteri di ``_TERMINAL_UNSAFE`` scritti come ``\\x1b``."""
+    return _TERMINAL_UNSAFE.sub(lambda m: f"\\x{ord(m.group()):02x}" if ord(m.group()) < 0x100
+                                else f"\\u{ord(m.group()):04x}", text)
+
+
 def format_summary(bench: Mapping[str, Any]) -> str:
     """Il benchmark di un run come testo da terminale, in italiano."""
     m, c, ref = bench["metrics"], bench.get("counts") or {}, bench.get("reference") or {}
@@ -838,7 +867,7 @@ def format_summary(bench: Mapping[str, Any]) -> str:
         lines.append("Greedy (sempre il carattere più probabile):")
         lines += _indent(gen["prompt"] + gen["greedy"])
     lines += [f"Nota: {n}" for n in bench.get("notes") or []]
-    return "\n".join(lines)
+    return terminal_text("\n".join(lines))  # nomi, note e testi possono venire da un benchmark.json altrui
 
 
 def format_comparison(a: Mapping[str, Any], b: Mapping[str, Any]) -> str:
@@ -885,7 +914,7 @@ def format_comparison(a: Mapping[str, Any], b: Mapping[str, Any]) -> str:
                   "A:", *_indent(ga["prompt"] + ga["sampled"]), "B:", *_indent(gb["prompt"] + gb["sampled"])]
         if (ga["prompt"], ga["seed"]) != (gb["prompt"], gb["seed"]):
             lines.append("Nota: prompt o seme diversi, i due testi non sono confrontabili")
-    return "\n".join(lines)
+    return terminal_text("\n".join(lines))  # nomi, note e testi possono venire da un benchmark.json altrui
 
 
 # --------------------------------------------------------------------------- interno

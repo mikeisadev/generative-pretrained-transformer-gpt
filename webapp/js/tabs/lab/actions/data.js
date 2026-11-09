@@ -178,8 +178,3 @@ export function logitsData(f) {
   const ce = crossEntropy(logits, next ?? 0);
   return { h, logits, probs: ce.probs, next, nextLoss: next === null ? null : ce.loss, nextP: next === null ? null : ce.p };
 }
-
-/** Le misure di un run "come il GPT del corso" per i testi: 4·C, head_size, ecc. */
-export function shapeWords(cfg) {
-  return { C: cfg.n_embd, H: cfg.n_head, hs: cfg.n_embd / cfg.n_head, L: cfg.n_layer, V: cfg.vocab_size, T: cfg.block_size, hidden: 4 * cfg.n_embd };
-}

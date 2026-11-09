@@ -1,13 +1,13 @@
 /**
- * Quanto ha lavorato davvero l'indice HNSW del tab in una ricerca (puro, niente three.js né DOM: lo usa
- * l'azione "Ricerca" e si prova in Node, tests/fidelity-fixes.test.mjs).
+ * Quanto ha lavorato davvero l'indice HNSW del tab in una ricerca (puro, niente three.js né DOM: lo usano
+ * l'azione "Ricerca" e `hnswNote` della rete neurale del tab, e si prova in Node, tests/fidelity-fixes.test.mjs).
  *
  * Con pochi chunk HNSW non conviene, ma per due motivi diversi, e la didascalia deve dire quello vero:
  * - con l'indice didattico (più livelli) calcola più distanze dei nodi diversi che visita: rilegge alcuni
  *   nodi a ogni livello;
  * - con i valori di pgvector (m 16, ef_search 40) il grafo di poche decine di chunk ha un livello solo ed
  *   ef_search supera i chunk: legge tutto il grafo, ogni nodo una volta.
- * La stessa distinzione di `hnswNote` in tabs/rag/network.js (rete neurale del tab).
+ * `hnswNote` in tabs/rag/network.js (rete neurale del tab) fa la stessa distinzione con questi conti.
  */
 
 /**

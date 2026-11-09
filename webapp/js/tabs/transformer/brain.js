@@ -316,7 +316,7 @@ export const brainSpec = {
           year: 2013,
           venue: "Cerebral Cortex 23(8):1798-1810",
           url: "https://doi.org/10.1093/cercor/bhs154",
-          note: "Il dato di 25.000-30.000 spine per piramidale degli strati 2/3 umani e' riportato da Eyal et al. 2018 citando questo lavoro.",
+          note: "Il dato di 25.000-30.000 spine per piramidale degli strati 2/3 umani è riportato da Eyal et al. 2018 citando questo lavoro.",
         },
         {
           id: "hassabis2017",
@@ -470,7 +470,7 @@ export const brainSpec = {
           year: 1992,
           venue: "Scientific American 267(3):60-67",
           url: "https://doi.org/10.1038/scientificamerican0992-60",
-          note: "Articolo divulgativo: e' la fonte del motto «fire together, wire together», non Hebb.",
+          note: "Articolo divulgativo: è la fonte del motto «fire together, wire together», non Hebb.",
         },
         {
           id: "corso",
@@ -928,7 +928,7 @@ export const brainSpec = {
       year: 2013,
       venue: "Cerebral Cortex 23(8):1798-1810",
       url: "https://doi.org/10.1093/cercor/bhs154",
-      note: "Il dato di 25.000-30.000 spine per piramidale degli strati 2/3 umani e' riportato da Eyal et al. 2018 citando questo lavoro.",
+      note: "Il dato di 25.000-30.000 spine per piramidale degli strati 2/3 umani è riportato da Eyal et al. 2018 citando questo lavoro.",
     },
     {
       id: "hassabis2017",
@@ -1042,7 +1042,7 @@ export const brainSpec = {
       year: 1992,
       venue: "Scientific American 267(3):60-67",
       url: "https://doi.org/10.1038/scientificamerican0992-60",
-      note: "Articolo divulgativo: e' la fonte del motto «fire together, wire together», non Hebb.",
+      note: "Articolo divulgativo: è la fonte del motto «fire together, wire together», non Hebb.",
     },
     {
       id: "corso",

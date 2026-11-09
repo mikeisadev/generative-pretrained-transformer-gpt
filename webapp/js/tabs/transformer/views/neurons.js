@@ -20,6 +20,7 @@
 import * as THREE from "three";
 import { el, fmt } from "../../../core/dom.js";
 import { VocabularyError } from "../../../engine/gpt.js";
+import { shownChar } from "../../../shared/weights/display.js";
 import { setBaseOpacity } from "../lod.js";
 import { NeuronScene, HEAD_COLORS } from "./neuronScene.js";
 import { buildEdges, buildNeuronLayout, explainNeuron, neuronValues, parameterBreakdown, ROLE } from "./neuronModel.js";
@@ -39,7 +40,6 @@ const REFERENCE_ASPECT = 0.76;
 const FRACTIONS = [0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1];
 const DEFAULT_FRACTION = 3; // 2%
 const FRONT = new THREE.Vector3(0.04, 0.1, 1).normalize(); // quasi di fronte: le colonne restano dritte
-const shownChar = (c) => (c === " " ? "␣" : c === "\n" ? "↵" : c);
 const pctText = (f) => `${(f * 100).toLocaleString("it-IT", { maximumFractionDigits: 1 })}%`;
 
 /** Link diretti della vista → disposizione: view:neuroni apre "A righe" (come sempre), view:neuroni-profondita l'orizzontale. */
@@ -604,7 +604,14 @@ export function installNeuronsView(tab) {
 
   async function setDepthFraction(f) {
     state.depthFraction = f;
-    if (depthShown()) await rebuildDepth(`Ricostruisco la rete con i pesi più forti (${pctText(f)} di ogni matrice)…`);
+    if (!depthShown()) return;
+    const data = { engine: state.engine, trace: state.trace, fraction: f };
+    if (state.depth.needsRebuild(data)) return rebuildDepth(`Ricostruisco la rete con i pesi più forti (${pctText(f)} di ogni matrice)…`);
+    // una quota già costruita è setSliceDensity (pochi ms): subito, senza «Ricostruisco…» né l'attesa di un
+    // frame per un messaggio che non sarebbe vero; una ricostruzione in attesa è superata da questa richiesta
+    state.rebuildSeq++;
+    state.depth.update(data);
+    afterDepthBuild();
   }
 
   /** Esce dalla rete orizzontale: libera la scena (GPU), rimette codice e comandi della vista a righe. */

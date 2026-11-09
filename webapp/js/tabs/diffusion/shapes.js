@@ -3,6 +3,7 @@
  * Ogni funzione crea materiali PROPRI: il LOD sfuma l'opacità per materiale.
  */
 import * as THREE from "three";
+import { instancedBounds } from "../../core/director.js";
 import { label } from "../../core/visuals.js";
 import { DynamicLabel } from "./textures.js";
 
@@ -59,28 +60,9 @@ export function instancedBoxes(items, { opacity = 1 } = {}) {
   mesh.instanceColor.needsUpdate = true;
   mesh.computeBoundingSphere();
   mesh.userData.items = items;
-  // Il calcolo dei bounding box della regia (meshBounds) non conosce le istanze: lo escludiamo
-  // e aggiungiamo un "proxy" invisibile grande quanto l'insieme delle scatole.
-  mesh.userData.noBounds = true;
-  const bounds = new THREE.Box3();
-  for (const it of items) {
-    bounds.expandByPoint(new THREE.Vector3(it.x - it.sx / 2, it.y - it.sy / 2, (it.z ?? 0) - it.sz / 2));
-    bounds.expandByPoint(new THREE.Vector3(it.x + it.sx / 2, it.y + it.sy / 2, (it.z ?? 0) + it.sz / 2));
-  }
-  mesh.add(boundsProxy(bounds));
+  // I riquadri di inquadratura contano tutte le istanze (meshBounds del nucleo e framingBox qui sotto, con
+  // instancedBounds): niente mesh invisibile grande quanto l'insieme delle scatole.
   return mesh;
-}
-
-/** Mesh invisibile che occupa `box3`: serve solo alla regia per inquadrare gruppi "speciali". */
-export function boundsProxy(box3) {
-  const size = box3.getSize(new THREE.Vector3());
-  const proxy = new THREE.Mesh(
-    new THREE.BoxGeometry(Math.max(size.x, 0.01), Math.max(size.y, 0.01), Math.max(size.z, 0.01)),
-    new THREE.MeshBasicMaterial({ visible: false }),
-  );
-  box3.getCenter(proxy.position);
-  proxy.raycast = () => {};
-  return proxy;
 }
 
 /** Ricolora le istanze: color(i, item) → numero esadecimale. Nessuna allocazione. */
@@ -122,8 +104,9 @@ export function placeLabel(parent, text, x, y, z = 0, options = {}) {
 }
 
 /**
- * Riquadro da inquadrare: mesh (anche i proxy delle istanze) E etichette sprite, così i titoli
- * non restano tagliati fuori. Ignora ciò che è marcato userData.noBounds (linee lunghe, istanze).
+ * Riquadro da inquadrare: mesh (di un InstancedMesh tutte le istanze, come meshBounds del nucleo) E
+ * etichette sprite, così i titoli non restano tagliati fuori. Ignora ciò che è marcato userData.noBounds
+ * (linee lunghe, cornici).
  */
 export function framingBox(object) {
   const box = new THREE.Box3();
@@ -137,7 +120,12 @@ export function framingBox(object) {
       box.expandByPoint(p.clone().addScaledVector(s, 0.5)).expandByPoint(p.addScaledVector(s, -0.5));
       return;
     }
-    if (!child.isMesh || child.isInstancedMesh) return;
+    if (!child.isMesh) return;
+    if (child.isInstancedMesh) {
+      const local = instancedBounds(child);
+      if (!local.isEmpty()) box.union(tmp.copy(local).applyMatrix4(child.matrixWorld));
+      return;
+    }
     if (!child.geometry.boundingBox) child.geometry.computeBoundingBox();
     box.union(tmp.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld));
   });

@@ -24,7 +24,12 @@ function wrapLines(ctx, text, maxWidth) {
   return lines;
 }
 
-function roundRect(ctx, x, y, w, h, r) {
+/**
+ * Il percorso di un rettangolo con gli angoli arrotondati sul canvas 2D (poi fill() o stroke()). Una sola copia per
+ * le etichette e le schede disegnate su canvas (rete neurale del nucleo, Laboratorio, RAG, Contesto del Transformer):
+ * prima ce n'erano sei copie uguali.
+ */
+export function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);

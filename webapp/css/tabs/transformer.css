@@ -172,9 +172,12 @@
   .tab-root[data-tab="transformer"]:has(.code-panel:not([hidden])) .tf-numbers-bar { max-width: calc(100% - min(560px, 42vw) - 44px); }
   .tab-root[data-tab="transformer"]:has(.charts-panel.open) { --tf-numbers-top: 100px; }
   .tab-root[data-tab="transformer"]:has(.charts-panel.open) .tf-numbers-bar { max-width: calc(100% - 490px); }
-  /* grafici aperti e codice visibile (resta al suo posto, in parte sotto i grafici): vale il limite più stretto;
-     una barra andata a capo è larga quanto il suo limite, non quanto la fila più lunga */
-  .tab-root[data-tab="transformer"]:has(.code-panel:not([hidden])):has(.charts-panel.open) .tf-numbers-bar { max-width: min(calc(100% - min(560px, 42vw) - 44px), calc(100% - 490px)); }
+  /* grafici aperti e codice visibile: il codice si aggancia in fondo alla colonna dei grafici (core.css,
+     CodePanel.followCharts) e a destra della barra resta solo quella colonna: vale il limite dei grafici */
+  .tab-root[data-tab="transformer"]:has(.code-panel:not([hidden])):has(.charts-panel.open) .tf-numbers-bar { max-width: calc(100% - 490px); }
+  /* i suggerimenti della navigazione restano sotto la barra anche con i grafici aperti: la regola del nucleo
+     per i grafici aperti (nav.css, più specifica di quella sopra) li metteva alla sua altezza, sopra la barra */
+  .tab-root[data-tab="transformer"].tf-numbers-on:has(.charts-panel.open) .nav-hud { top: max(calc(var(--tf-numbers-top, 56px) + var(--tf-numbers-h, 34px) + 10px), var(--rep-safe-top, 0px)); }
 }
 @media (min-width: 901px) and (max-width: 1280px) {
   .tf-numbers-bar .tf-arrange-label { display: none; }

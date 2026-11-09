@@ -12,8 +12,11 @@
  *   m.cell(3, 5)        → "peso dall'ingresso 5 all'uscita 3: quanto la dimensione 5 di x (dopo ln1) conta per la key"
  */
 
-/** Come si scrive un carattere del vocabolario in un'etichetta (spazio e a capo resterebbero invisibili). */
-export const shownChar = (c) => (c === " " ? "␣" : c === "\n" ? "↵" : c === "\t" ? "⇥" : String(c ?? ""));
+// Come si scrive un carattere del vocabolario: la regola condivisa (shared/weights/display.js), riesportata qui
+// per chi la importava da questo modulo.
+import { shownChar } from "../../../shared/weights/display.js";
+
+export { shownChar };
 
 const INT = new Intl.NumberFormat("it-IT", { useGrouping: "always", maximumFractionDigits: 0 });
 const n = (v) => INT.format(v);

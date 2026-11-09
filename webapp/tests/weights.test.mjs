@@ -37,7 +37,7 @@ import { buildModuleTree, findNode, pythonPath, walkTree } from "../js/shared/we
 import { parseModuleSource, splitComment } from "../js/shared/weights/pythonSource.js";
 import { WeightRun, engineCompatibility, fingerprint, inferGptConfig, loadBuiltinRun, runsFromFiles, snapshotBracket, snapshotEntry } from "../js/shared/weights/run.js";
 import { parseSafetensors, safetensorsInfo } from "../js/shared/weights/safetensors.js";
-import { histogram, percentiles, range, tensorStats } from "../js/shared/weights/stats.js";
+import { histogram, l2Norm, percentiles, range, tensorStats } from "../js/shared/weights/stats.js";
 import { RunStore, deserializeRun, serializeRun } from "../js/shared/weights/store.js";
 import { WeightsFormatError, canonicalName, checkLayout, naturalCompare } from "../js/shared/weights/validate.js";
 
@@ -216,6 +216,42 @@ test("run.json e benchmark.json: campi semplici, il resto nel JSON originale", (
   throwsFormat(() => parseRunInfo("ciao"), /oggetto JSON/);
   const bench = parseBenchmark({ val_loss: 1.82, perplexity: 6.17, text: "ciao", metrics: { top1: 0.45 } });
   assert.deepEqual(bench.metrics, { val_loss: 1.82, perplexity: 6.17, top1: 0.45 });
+});
+
+test("run.json: i controlli bidirezionali escono da nome, descrizione, data e sorgente; i run validi non cambiano", async () => {
+  const CONTROLS = ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"];
+  // un run valido resta identico: accenti, «», emoji, cifre, spazi ai bordi, arabo ed ebraico con i segni
+  // impliciti (U+200E, U+200F, U+061C), zero-width joiner, a capo nella descrizione
+  const valid = {
+    name: "  GPT «più» grande 🚀 — v2 ",
+    description: "Prova con\nGELU: \u05e9\u05dc\u05d5\u05dd\u200f e \u0645\u0631\u062d\u0628\u0627\u061c, 👩\u200d🔬 \u200e(LTR)",
+    created: "2026-11-09T10:15:00+00:00",
+    source: "scripts/export_run.py",
+  };
+  const kept = parseRunInfo(valid);
+  for (const key of Object.keys(valid)) assert.equal(kept[key], valid[key], key);
+  // ogni controllo, in ogni campo: tolto, il resto uguale (il caso del revisore: «… \u202egnp.exe»)
+  for (const c of CONTROLS) {
+    const info = parseRunInfo({ name: `SDPA «strano» ${c}gnp.exe`, description: `${c}a${c}b`, created: `2026${c}-11-09`, source: `gpt/${c}train.py` });
+    assert.equal(info.name, "SDPA «strano» gnp.exe", `U+${c.codePointAt(0).toString(16)}`);
+    assert.equal(info.description, "ab");
+    assert.equal(info.created, "2026-11-09");
+    assert.equal(info.source, "gpt/train.py");
+  }
+  // un nome fatto solo di controlli (o di spazi) non è un nome: vale come assente
+  assert.equal(parseRunInfo({ name: CONTROLS.join("") }).name, null);
+  assert.equal(parseRunInfo({ name: " \u202e " }).name, null);
+  assert.equal(parseRunInfo({ description: "" }).description, null);
+  // le note restano com'erano: ognuna si mostra da sola e deve coincidere con quella di trace.json
+  assert.deepEqual(parseRunInfo({ notes: ["storia del training: \u202egnp.exe\u202c dopo"] }).notes, ["storia del training: \u202egnp.exe\u202c dopo"]);
+  // nel run caricato: il nome pulito, e senza un nome vero quello della cartella
+  const small = synthetic();
+  const load = (dir, info) => runsFromFiles([fileLike(`${dir}/weights.json`, JSON.stringify(small.manifest)), fileLike(`${dir}/weights.f32.bin`, small.bytes), fileLike(`${dir}/run.json`, JSON.stringify(info))]);
+  let { runs } = await load("strano", { name: "Run \u202egnp.exe", description: "\u2067descrizione" });
+  assert.equal(runs[0].name, "Run gnp.exe");
+  assert.equal(runs[0].description, "descrizione");
+  ({ runs } = await load("cartella-del-run", { name: "\u202e\u202c" }));
+  assert.equal(runs[0].name, "cartella-del-run");
 });
 
 // ---------------------------------------------------------------- safetensors
@@ -1318,4 +1354,40 @@ test("NumericMatrix: un altro step riscrive solo le celle cambiate e non ricaric
   assert.equal(canvas.draws, draws + 2);
   m.dispose();
   group.dispose();
+});
+
+// ---------------------------------------------------------------- caratteri del vocabolario (revisione finale)
+
+test("shownChar: una regola sola per Laboratorio e Transformer; i caratteri invisibili di un vocabolario si vedono", async () => {
+  const { shownChar } = await import("../js/shared/weights/display.js");
+  const lab = await import("../js/tabs/lab/inspect/meaning.js");
+  const numbers = await import("../js/tabs/transformer/views/numbersModel.js");
+  const depth = await import("../js/tabs/transformer/views/neuronDepthSpec.js");
+  const shared = await import("../js/shared/gpt/depthSpec.js");
+  // prima: quattro copie, due senza la tabulazione; ora la stessa funzione riesportata dove la si importava
+  for (const m of [lab, numbers, depth, shared]) assert.equal(m.shownChar, shownChar);
+  // il vocabolario del corso (65 caratteri di Tiny Shakespeare) si scrive come prima
+  const course = ["\n", " ", "!", "$", "&", "'", ",", "-", ".", "3", ":", ";", "?", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"];
+  assert.deepEqual(course.map(shownChar), ["↵", "␣", ...course.slice(2)]);
+  assert.equal(shownChar("\t"), "⇥");
+  assert.equal(shownChar(null), "");
+  assert.equal(shownChar(undefined), "");
+  assert.equal(shownChar("é"), "é");
+  // un run caricato ha il SUO vocabolario: un token invisibile o bidirezionale diventa leggibile (e non rovescia
+  // la frase «il carattere «…»» in cui finisce)
+  assert.equal(shownChar("\u202e"), "U+202E");
+  assert.equal(shownChar("\u2066"), "U+2066");
+  assert.equal(shownChar("\u200b"), "U+200B");
+  assert.equal(shownChar("\u0000"), "U+0000");
+  assert.equal(shownChar("\u0085"), "U+0085");
+  assert.equal(shownChar("a\u202eb"), "aU+202Eb");
+});
+
+test("l2Norm: radice della somma dei quadrati in float64, i valori non finiti non contano (API documentata, prima senza test)", () => {
+  assert.equal(l2Norm(Float32Array.of(3, 4)), 5);
+  assert.equal(l2Norm(Float32Array.of(3, NaN, 4, Infinity, -Infinity)), 5);
+  assert.equal(l2Norm(new Float32Array(0)), 0);
+  // 10^6 valori 0,1 (in float32): la somma in float64 non perde cifre come una somma in float32
+  const many = new Float32Array(1_000_000).fill(0.1);
+  assert.ok(Math.abs(l2Norm(many) - Math.sqrt(1e6 * Math.fround(0.1) ** 2)) < 1e-9);
 });

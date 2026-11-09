@@ -405,3 +405,92 @@ test("store: quota insufficiente secondo il browser → niente scrittura, si dic
   const flaky = new RunStore({ indexedDB: fakeIndexedDB(), keyRange, storage: { estimate: async () => Promise.reject(new Error("no")) } });
   assert.equal((await flaky.save(run)).ok, true);
 });
+
+// ---------------------------------------------------------------- controlli bidirezionali (revisione finale)
+
+const BIDI = ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"];
+const hasBidi = (text) => /[\u202a-\u202e\u2066-\u2069]/.test(String(text));
+
+test("bidi: un tensore con un controllo bidirezionale nel nome si rifiuta (safetensors e weights.json), con il carattere scritto in chiaro", () => {
+  // prima: accettato, e il nome rovesciava le frasi che lo citano (motivi del motore JS, scheda, didascalie)
+  for (const c of BIDI) {
+    const name = `blocks.0.${c}thgiew`;
+    const st = safetensors({ [name]: { dtype: "F32", shape: [1], data_offsets: [0, 4] } }, f32(1));
+    assert.throws(() => parseSafetensors(st, { file: "x.safetensors" }), (e) => e instanceof WeightsFormatError && /direzione del testo/.test(e.message) && e.message.includes(`\\u${c.codePointAt(0).toString(16)}`) && !hasBidi(e.message));
+    const { manifest } = synthetic();
+    const bad = { ...manifest, params: manifest.params.map((p, i) => (i === 0 ? { ...p, name } : p)) };
+    throwsFormat(() => parseWeightsManifest(bad), /direzione del testo/);
+  }
+  // i nomi normali (anche con lettere non latine e segni impliciti U+200E/U+200F) restano validi
+  const ok = parseSafetensors(safetensors({ "ψ.\u200fweight": { dtype: "F32", shape: [1], data_offsets: [0, 4] } }, f32(1)));
+  assert.deepEqual([...ok.tensors.keys()], ["ψ.\u200fweight"]);
+});
+
+test("bidi: nomi di cartelle e file, percorsi negli avvisi, negli errori e tra gli ignorati escono senza controlli", async () => {
+  const { manifest, bytes } = synthetic();
+  for (const c of BIDI) {
+    // la cartella dà il nome al run (senza run.json): prima restava com'era e rovesciava «Caricato «…»: …»
+    const dir = `esperimento ${c}gnp.exe`;
+    const { runs, errors, ignored } = await runsFromFiles([
+      fileLike(`${dir}/weights.json`, JSON.stringify(manifest)),
+      fileLike(`${dir}/weights.f32.bin`, bytes),
+      fileLike(`${dir}/note ${c}txt.md`, "x"),
+      fileLike(`rotto ${c}x/weights.json`, "{non è json"),
+    ]);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].name, "esperimento gnp.exe");
+    assert.ok(runs[0].meta.files.every((f) => !hasBidi(f)), runs[0].meta.files.join());
+    assert.equal(errors.length, 1);
+    assert.ok(!hasBidi(errors[0].run) && !hasBidi(errors[0].message), JSON.stringify(errors[0]));
+    assert.match(errors[0].message, /rotto x\/weights\.json: non è un JSON valido/);
+    assert.ok(ignored.length === 1 && !hasBidi(ignored[0].path), JSON.stringify(ignored));
+    // un safetensors con il nome strano: il run prende il nome del file pulito
+    const st = safetensors({ w: { dtype: "F32", shape: [1], data_offsets: [0, 4] } }, f32(1));
+    const named = await runsFromFiles([fileLike(`a.safetensors`, st), fileLike(`b${c}cod.safetensors`, st)]);
+    assert.deepEqual(named.runs.map((r) => r.name).sort(), ["a", "bcod"]);
+  }
+  // una cartella fatta solo di controlli: il nome di riserva
+  const only = await runsFromFiles([fileLike(`\u202e\u2066/weights.json`, JSON.stringify(manifest)), fileLike(`\u202e\u2066/weights.f32.bin`, bytes)]);
+  assert.equal(only.runs[0].name, "Run caricato 1");
+  // le shard mancanti: l'avviso cita il nome pulito
+  const shard = safetensors({ w: { dtype: "F32", shape: [1], data_offsets: [0, 4] } }, f32(1));
+  const { runs } = recognizeFiles([fileLike(`m${BIDI[4]}x-00001-of-00002.safetensors`, shard)]);
+  assert.ok(runs[0].warnings.length === 1 && !hasBidi(runs[0].warnings[0]), runs[0].warnings[0]);
+});
+
+test("bidi: config e classi di run.json, run salvati da una versione precedente", async () => {
+  const { manifest, bytes } = synthetic();
+  const info = { name: "R", config: { ...SMALL, attivazione: "\u202eULEG", "\u202en_embd": 999 }, modules: null };
+  const { runs } = await runsFromFiles([fileLike("r/weights.json", JSON.stringify(manifest)), fileLike("r/weights.f32.bin", bytes), fileLike("r/run.json", JSON.stringify(info))]);
+  // il valore si pulisce; la chiave con un controllo non è di GPTConfig e si salta (pulita coprirebbe n_embd)
+  assert.equal(runs[0].config.attivazione, "ULEG");
+  assert.equal(runs[0].config.n_embd, SMALL.n_embd);
+  assert.ok(!Object.keys(runs[0].config).some(hasBidi));
+  assert.equal(runs[0].compatibleWithEngine, true, "la chiave strana non rovina la compatibilità");
+  // un run salvato prima di questa versione, con il nome e un percorso non puliti: si mostrano puliti
+  const { record, blobs } = await serializeRun(runs[0]);
+  const old = { ...record, name: `vecchio ${BIDI[4]}gnp.exe`, description: `${BIDI[6]}d`, meta: { ...record.meta, warnings: [`avviso ${BIDI[2]}x`], files: [`r${BIDI[4]}/weights.json`] } };
+  const back = deserializeRun(old, blobs[0].data, async () => null);
+  assert.equal(back.name, "vecchio gnp.exe");
+  assert.equal(back.description, "d");
+  assert.deepEqual(back.meta.warnings, ["avviso x"]);
+  assert.deepEqual(back.meta.files, ["r/weights.json"]);
+  assert.equal(deserializeRun({ ...record, name: BIDI.join("") }, blobs[0].data, async () => null).name, "Run salvato");
+  const idb = fakeIndexedDB();
+  const store = new RunStore({ indexedDB: idb, keyRange, storage: null });
+  assert.equal((await store.save(runs[0])).ok, true);
+  idb.stores.get("runs").set(runs[0].id, old);
+  assert.equal((await store.list())[0].name, "vecchio gnp.exe");
+});
+
+test("lettura: un file che il browser non legge più (spostato, cancellato, permessi) → errore in italiano con il file", async () => {
+  // prima: il messaggio del browser in inglese, «The requested file could not be read, typically due to permission…»
+  const unreadable = (path, name) => ({ ...fileLike(path, "{}"), text: async () => Promise.reject(Object.assign(new Error("The requested file could not be read, typically due to permission problems"), { name })), arrayBuffer: async () => Promise.reject(Object.assign(new Error("gone"), { name })) });
+  await rejectsFormat(readJsonFile(unreadable("run/run.json", "NotReadableError")), /^run\/run\.json: il browser non riesce a leggerlo .*sceglilo di nuovo$/);
+  await rejectsFormat(readBinaryFile(unreadable("run/weights.f32.bin", "NotFoundError")), /run\/weights\.f32\.bin: il file non c'è più/);
+  await rejectsFormat(readBinaryFile(unreadable("x.bin", "constructor")), /x\.bin: lettura non riuscita \(gone\)/);
+  const { manifest, bytes } = synthetic();
+  const { runs, errors } = await runsFromFiles([fileLike("run/weights.json", JSON.stringify(manifest)), { ...fileLike("run/weights.f32.bin", bytes), arrayBuffer: async () => Promise.reject(Object.assign(new Error("could not be read"), { name: "NotReadableError" })) }]);
+  assert.equal(runs.length, 0);
+  assert.match(errors[0].message, /^run\/weights\.f32\.bin: il browser non riesce a leggerlo/);
+});

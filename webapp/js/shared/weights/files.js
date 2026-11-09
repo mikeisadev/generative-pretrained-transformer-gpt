@@ -17,7 +17,7 @@
  * - una cartella con sottocartelle che sono run (es. `runs/a/`, `runs/b/`) dà più run.
  */
 
-import { WeightsFormatError, megabytes, withLimits } from "./validate.js";
+import { WeightsFormatError, megabytes, stripBidiControls, withLimits, withoutBidiControls } from "./validate.js";
 
 const SNAPSHOT = /^snap_(\d+)\.f16\.bin$/;
 const SHARD = /^(.+)-(\d{5})-of-(\d{5})\.safetensors$/;
@@ -46,8 +46,12 @@ const dirOf = (path) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/"
 const baseOf = (path) => path.slice(path.lastIndexOf("/") + 1);
 const parentOf = (dir) => (dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : dir === "" ? null : "");
 
+/**
+ * `name` è il nome da mostrare (cartella o file): niente controlli bidirezionali (vedi validate.js), che
+ * rovescerebbero le frasi del Laboratorio; uno fatto solo di quelli vale null (il run prende un nome di riserva).
+ */
 function emptyGroup(key, dir, name) {
-  return { key, dir, name, manifest: null, binaries: [], safetensors: [], trace: null, snapshots: [], runInfo: null, benchmark: null, bytes: 0, warnings: [], errors: [] };
+  return { key, dir, name: withoutBidiControls(name), manifest: null, binaries: [], safetensors: [], trace: null, snapshots: [], runInfo: null, benchmark: null, bytes: 0, warnings: [], errors: [] };
 }
 
 /**
@@ -134,7 +138,7 @@ export function recognizeFiles(files, { limits } = {}) {
         return g;
       })();
       // Un solo insieme di pesi: il run prende il nome della cartella; più insiemi: quello del file.
-      if (group && (!group.name || sets.length > 1)) group.name = set.name;
+      if (group && (!group.name || sets.length > 1)) group.name = withoutBidiControls(set.name);
       target.safetensors.push(...set.entries.map(pick));
       if (set.shard) {
         const have = new Set(set.entries.map((e) => e.index));
@@ -182,10 +186,15 @@ export function recognizeFiles(files, { limits } = {}) {
     }
   }
   runs.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  // percorsi e nomi del disco dello studente finiscono nelle frasi del Laboratorio: senza controlli bidirezionali
+  for (const g of runs) {
+    g.warnings = g.warnings.map(stripBidiControls);
+    g.errors = g.errors.map(stripBidiControls);
+  }
   if (totalBytes > lim.maxTotalBytes) {
     throw new WeightsFormatError(null, `i file selezionati pesano ${megabytes(totalBytes)}: il limite per un caricamento è ${megabytes(lim.maxTotalBytes)}`);
   }
-  return { runs, ignored, totalBytes };
+  return { runs, ignored: ignored.map((i) => ({ path: stripBidiControls(i.path), reason: stripBidiControls(i.reason) })), totalBytes };
 }
 
 const pick = (e) => ({ file: e.file, path: e.path, size: e.size });
@@ -195,7 +204,7 @@ export async function readJsonFile(entry, { limits } = {}) {
   const lim = withLimits(limits);
   const { file, path } = normalizeEntry(entry);
   if (Number(file.size) > lim.maxJsonBytes) throw new WeightsFormatError(path, `${megabytes(file.size)}: troppo grande per un JSON (limite ${megabytes(lim.maxJsonBytes)})`);
-  const text = await file.text();
+  const text = await read(() => file.text(), path);
   try {
     return JSON.parse(text);
   } catch (error) {
@@ -208,7 +217,29 @@ export async function readBinaryFile(entry, { limits } = {}) {
   const lim = withLimits(limits);
   const { file, path } = normalizeEntry(entry);
   if (Number(file.size) > lim.maxBinaryBytes) throw new WeightsFormatError(path, `${megabytes(file.size)}: oltre il limite di ${megabytes(lim.maxBinaryBytes)}`);
-  return file.arrayBuffer();
+  return read(() => file.arrayBuffer(), path);
+}
+
+/**
+ * Errori del browser leggendo un file (DOMException, in inglese: «The requested file could not be read…»), detti
+ * in italiano con il file e che cosa fare. Succede se il file si sposta, si cancella o perde i permessi tra la
+ * scelta e la lettura (anche uno snapshot letto più tardi, quando lo studente cambia step).
+ */
+const READ_ERRORS = Object.freeze({
+  NotReadableError: "il browser non riesce a leggerlo (spostato, cancellato o senza permessi dopo la scelta): sceglilo di nuovo",
+  NotFoundError: "il file non c'è più (spostato o cancellato dopo la scelta): sceglilo di nuovo",
+  SecurityError: "il browser non permette di leggerlo",
+  AbortError: "lettura interrotta",
+});
+
+async function read(fn, path) {
+  try {
+    return await fn();
+  } catch (error) {
+    const name = error?.name;
+    const why = typeof name === "string" && Object.hasOwn(READ_ERRORS, name) ? READ_ERRORS[name] : `lettura non riuscita (${error?.message ?? error})`;
+    throw new WeightsFormatError(path, why);
+  }
 }
 
 function normalizeEntry(entry) {

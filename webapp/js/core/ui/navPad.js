@@ -369,6 +369,17 @@ export class NavPad {
         added.disconnect();
         sized.disconnect();
       });
+    } else {
+      // Ordine di Tab nella scena di un tab: i comandi in alto (☰, zoom, selettore delle rappresentazioni,
+      // pulsanti del tab) entrano nello stage dopo la navigazione, e il selettore ci rientra quando cambia
+      // posto. Suggerimento e pad restano gli ultimi figli, così Tab arriva prima a quei comandi e poi ai
+      // 15 pulsanti del pad (nel RAG, dall'inizio della pagina al selettore: 24 pressioni di Tab, non 41).
+      // Cambia solo l'ordine nel DOM: sono posizionati in assoluto, con il loro z-index. Solo a ogni figlio
+      // nuovo dello stage, mai per frame.
+      const last = new MutationObserver(() => this.keepLast());
+      last.observe(this.stage, { childList: true });
+      this.keepLast();
+      sub(() => last.disconnect());
     }
 
     const onNarrow = () => {
@@ -408,6 +419,19 @@ export class NavPad {
     this.root.classList.remove("has-nav-pad", "nav-caption-squeezed");
     this.root.style.removeProperty("--nav-caption-right");
     this.root.style.removeProperty("--nav-caption-bottom");
+  }
+
+  /**
+   * Suggerimento e pad in fondo allo stage (l'ordine di Tab, vedi wire). Spostare un elemento nel DOM gli
+   * toglie il focus: se l'aveva un loro pulsante, torna lì.
+   */
+  keepLast() {
+    const { stage, hud, pad } = this;
+    if (stage.lastElementChild === pad && pad.previousElementSibling === hud) return;
+    const focused = document.activeElement;
+    const ours = focused && (hud.contains(focused) || pad.contains(focused));
+    stage.append(hud, pad);
+    if (ours && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
 
   // ---------------------------------------------------------------- stato

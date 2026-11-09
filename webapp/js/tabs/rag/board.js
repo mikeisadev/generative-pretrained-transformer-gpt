@@ -9,6 +9,7 @@
  * intervallo di caratteri (un token, una riga tolta dalla pulizia) è solo questione di colonne.
  */
 import * as THREE from "three";
+import { roundRect } from "../../core/diagram.js";
 
 export const MONO = '"JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace';
 export const SANS = "Inter, system-ui, sans-serif";
@@ -81,15 +82,8 @@ export class Board {
   }
 }
 
-export function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
+// roundRect: una sola copia, in core/diagram.js (riesportata qui per stationsAnswer.js e stationsStore.js)
+export { roundRect };
 
 /** Sfondo di un pannello con bordo e titolo opzionale; restituisce la y da cui scrivere. */
 export function panel(ctx, W, H, { title = "", subtitle = "", border = "#334155", fill = "rgba(11,18,32,0.96)", accent = "#7dd3fc" } = {}) {

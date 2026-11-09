@@ -9,6 +9,7 @@
  * colpiscono con il raycaster e stanno fuori dalle inquadrature automatiche (userData.noBounds).
  */
 import * as THREE from "three";
+import { roundRect } from "../../../core/diagram.js";
 import { NumericMatrix } from "../../../core/matrixNumbers.js";
 import { CELL } from "../scene/layout.js";
 import { LabelAtlas, disposeLabelMesh, labelMesh } from "../scene/labels.js";
@@ -65,15 +66,6 @@ export function textPlane(text, { color = "#e2e8f0", mono = false, createCanvas 
   return mesh;
 }
 
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
 
 /** Contorno di un rettangolo (x0, x1, y0, y1) come LineLoop. */
 function rectLoop(color, opacity = 1) {

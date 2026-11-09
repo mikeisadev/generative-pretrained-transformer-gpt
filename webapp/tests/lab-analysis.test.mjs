@@ -4,14 +4,16 @@
 // identici, testo greedy uguale), lettura dei benchmark (anche rotti), serie dei grafici dalla traccia
 // vera e da tracce rotte, confronti pronti, prossimo carattere su un prompt, voci della ricerca.
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { missingRuns, runDir } from "./runFixtures.mjs";
+
 import { GPTEngine, expectedParameters } from "../js/engine/gpt.js";
 import { loadBuiltinRun, runsFromFiles } from "../js/shared/weights/run.js";
-import { BENCH_LIMITS, METRIC_ROWS, comparisonRows, comparisonWarnings, environmentText, readBenchmark, referenceAt } from "../js/tabs/lab/analysis/benchmarkModel.js";
+import { BENCH_LIMITS, METRIC_ROWS, comparisonRows, comparisonWarnings, environmentText, greedyRequest, readBenchmark, referenceAt } from "../js/tabs/lab/analysis/benchmarkModel.js";
 import { COLUMNS, DEFAULT_SORT, compareAB, differenceMap, matchSummary, nextSort, onlyHalfRounding, sortRows } from "../js/tabs/lab/analysis/compareModel.js";
 import { createComparison } from "../js/tabs/lab/analysis/comparison.js";
 import { DIFF_LABEL, createDiffMode } from "../js/tabs/lab/analysis/diffMode.js";
@@ -50,9 +52,8 @@ const builtin = await loadBuiltinRun({ baseUrl: DATA_DIR, loadJson, loadBuffer }
 const builtinJson = await loadJson(`${DATA_DIR}benchmark/builtin.json`);
 const excerptText = await readFile(`${DATA_DIR}benchmark/val_excerpt.txt`, "utf8");
 
-/** I run esportati dal Python in questo round (facoltativi: i test che li usano si saltano se mancano). */
-const PY_RUNS = "/tmp/claude-0/-home-user-generative-pretrained-transformer-gpt/f3c7aefd-3f8d-51c4-8dc8-31c9c2f5b2c5/scratchpad/py-runs/";
-const RUN_DIRS = { ffn3: `${PY_RUNS}runs/ffn3`, gelu: `${PY_RUNS}copia/runs/gpt-con-gelu` };
+/** Run esportati dal Python (facoltativi, fuori dal repository: vedi runFixtures.mjs e LAB_RUNS_DIR). */
+const RUN_DIRS = { ffn3: runDir("ffn3"), gelu: runDir("gelu") };
 
 function fileLike(path, bytes) {
   return { name: path.split("/").pop(), size: bytes.byteLength, webkitRelativePath: path, text: async () => new TextDecoder().decode(bytes), arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
@@ -200,7 +201,7 @@ test("float16 contro float32: pesi finali e snapshot dello step 5.000 sono gli s
   assert.equal(onlyHalfRounding(c, "float32", "float32"), false, "senza un lato float16 non è arrotondamento");
 });
 
-test("confronto con un'architettura diversa (FFN 3C esportata dal Python): si confronta ciò che si può e si dice il resto", { skip: !existsSync(RUN_DIRS.ffn3) && "manca il run esportato ffn3" }, async () => {
+test("confronto con un'architettura diversa (FFN 3C esportata dal Python): si confronta ciò che si può e si dice il resto", { skip: missingRuns("ffn3") }, async () => {
   const { runs } = await runsFromFiles(await folderFiles(RUN_DIRS.ffn3), { defaultVocab: builtin.vocab });
   const c = compareAB(runs[0], builtin);
   assert.equal(c.shapeMismatch.length, 12); // net.0.weight, net.0.bias, net.2.weight di 4 blocchi
@@ -292,6 +293,24 @@ test("controllo di coerenza: ✓ entro 1e-5 e conteggi identici, ≈ entro le to
   const noCounts = checkConsistency(browser(), { loss: 2, entropy: 1, bpc: 2 / Math.LN2 });
   assert.equal(noCounts.verdict, "ok");
   assert.equal(noCounts.rows.find((r) => r.id === "top1").level, "info");
+});
+
+test("benchmark nel browser: la continuazione greedy si ricalcola al più fin dove si legge quella del Python", () => {
+  // scripts/benchmark.py --tokens 5000: il file ha 5.000 caratteri greedy, readBenchmark ne legge BENCH_LIMITS.text
+  const long = "ab".repeat(2500);
+  const bench = readBenchmark({ metrics: { loss: 2 }, generation: { prompt: "ROMEO:\n", max_new_tokens: 5000, greedy: long } });
+  const req = greedyRequest(bench.generation);
+  assert.deepEqual(req, { prompt: "ROMEO:\n", tokens: BENCH_LIMITS.text });
+  // prima: il browser generava 5.000 caratteri contro i 4.000 letti → «diverso dal carattere 4.001», ✗ senza motivo
+  const python = { loss: 2, entropy: 1, bpc: 2 / Math.LN2 };
+  const browser = { predictions: 10, windows: 2, loss: 2, entropy: 1, bpc: 2 / Math.LN2, top1: 5, top5: 8, bits: null };
+  const same = checkConsistency(browser, python, { greedy: long.slice(0, req.tokens), pythonGreedy: referenceAt(bench).greedy });
+  assert.equal(same.rows.find((r) => r.id === "greedy").level, "ok");
+  assert.equal(checkConsistency(browser, python, { greedy: long, pythonGreedy: referenceAt(bench).greedy }).verdict, "bad", "il caso di prima");
+  // un max_new_tokens enorme scritto nel file non accende un calcolo di ore; senza generation: i valori di sempre
+  assert.equal(greedyRequest(readBenchmark({ metrics: { loss: 2 }, generation: { max_new_tokens: 2 ** 31 } }).generation).tokens, BENCH_LIMITS.text);
+  assert.deepEqual(greedyRequest(readBenchmark(builtinJson).generation), { prompt: builtinJson.generation.prompt, tokens: builtinJson.generation.max_new_tokens });
+  assert.deepEqual(greedyRequest(null), { prompt: "ROMEO:\n", tokens: 200 });
 });
 
 // ---------------------------------------------------------------- benchmark.json
@@ -402,7 +421,7 @@ test("avvisi di confrontabilità (come comparison_warnings): protocollo, testo, 
   assert.deepEqual(comparisonWarnings(base, readBenchmark(null)), []);
 });
 
-test("benchmark.json di un run esportato dal Python (GELU, non eseguibile dal motore): letto come quello del corso", { skip: !existsSync(RUN_DIRS.gelu) && "manca il run esportato gpt-con-gelu" }, async () => {
+test("benchmark.json di un run esportato dal Python (GELU, non eseguibile dal motore): letto come quello del corso", { skip: missingRuns("gelu") }, async () => {
   const { runs } = await runsFromFiles(await folderFiles(RUN_DIRS.gelu), { defaultVocab: builtin.vocab });
   const run = runs[0];
   assert.equal(run.compatibleWithEngine, false);

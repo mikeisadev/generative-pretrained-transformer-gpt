@@ -24,7 +24,7 @@ import { assertSameLayout } from "../../engine/weights.js";
 import { readBinaryFile, readJsonFile, recognizeFiles } from "./files.js";
 import { decodeSnapshot, decodeWeights, parseBenchmark, parseRunInfo, parseTrace, parseWeightsManifest, tensorsFromLayout } from "./formats.js";
 import { parseSafetensors, safetensorsInfo } from "./safetensors.js";
-import { WeightsFormatError, canonicalName, checkVocab, cleanConfig, naturalCompare, withLimits } from "./validate.js";
+import { WeightsFormatError, canonicalName, checkVocab, cleanConfig, naturalCompare, stripBidiControls, withLimits } from "./validate.js";
 
 export const BUILTIN_RUN_ID = "builtin:gpt-corso";
 const CONFIG_KEYS = ["vocab_size", "block_size", "n_embd", "n_head", "n_layer"];
@@ -470,7 +470,8 @@ export async function runsFromFiles(files, { limits, defaultVocab = null } = {})
   const runs = [];
   const errors = [];
   for (const group of recognized.runs) {
-    const label = group.name ?? group.key;
+    // il nome del gruppo è già pulito (files.js); la chiave è un percorso del disco: va nelle frasi dello stato
+    const label = group.name ?? stripBidiControls(group.key);
     if (group.errors.length) {
       errors.push({ run: label, message: group.errors.join("; ") });
       continue;
@@ -478,7 +479,7 @@ export async function runsFromFiles(files, { limits, defaultVocab = null } = {})
     try {
       runs.push(await runFromGroup(group, { limits: lim, defaultVocab, index: runs.length + 1 }));
     } catch (error) {
-      errors.push({ run: label, message: error.message });
+      errors.push({ run: label, message: stripBidiControls(error?.message ?? error) });
     }
   }
   return { runs, errors, ignored: recognized.ignored };
@@ -597,7 +598,8 @@ async function runFromGroup(group, { limits, defaultVocab, index }) {
     benchmark,
     info,
     defaultVocab,
-    meta: { warnings, files, formats, created: info?.created ?? null, origin: info?.source ?? null, notes: info?.notes ?? [] },
+    // files: percorsi del disco, solo da mostrare ("caricato da file (…)" nella scheda): senza controlli bidirezionali
+    meta: { warnings, files: files.map(stripBidiControls), formats, created: info?.created ?? null, origin: info?.source ?? null, notes: info?.notes ?? [] },
   });
 }
 

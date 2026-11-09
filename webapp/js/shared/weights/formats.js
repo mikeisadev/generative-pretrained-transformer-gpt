@@ -24,9 +24,11 @@ import {
   cleanConfig,
   isPlainObject,
   withLimits,
+  withoutBidiControls,
 } from "./validate.js";
 
-export { LIMITS, WeightsFormatError, canonicalName } from "./validate.js";
+// withoutBidiControls sta in validate.js (la usano anche i nomi dei file e dei run salvati): riesportata qui
+export { LIMITS, WeightsFormatError, canonicalName, stripBidiControls, withoutBidiControls } from "./validate.js";
 export { parseSafetensors, safetensorsInfo, SAFETENSORS_DTYPES } from "./safetensors.js";
 export { recognizeFiles, readJsonFile, readBinaryFile, filePath } from "./files.js";
 
@@ -149,6 +151,9 @@ export function decodeSnapshot(data, totalParams, { file = "snapshot" } = {}) {
   }
 }
 
+/** Note di run.json lette al più (vedi parseRunInfo). */
+export const MAX_RUN_NOTES = 2000;
+
 /** Stringa semplice di lunghezza limitata (o null): i testi dei file finiscono nell'interfaccia. */
 function text(value, max = 2000) {
   return typeof value === "string" ? value.slice(0, max) : null;
@@ -159,16 +164,25 @@ function text(value, max = 2000) {
  * `name`, `description`, `created` (o `date`), `source`, `config`, `vocab`, `notes` (stringa o
  * lista di stringhe), `modules` (albero con le forme, tenuto così com'è), `engine_compatible`
  * (false = "il calcolo è diverso dal GPT del corso anche se le forme coincidono").
+ *
+ * Nome, descrizione, data e sorgente finiscono dentro le frasi dell'interfaccia (targhetta della scena,
+ * didascalia, stato del caricamento, Confronto, Benchmark, avvisi): escono qui, una volta sola, senza i
+ * controlli bidirezionali (withoutBidiControls). Le note no: ognuna si mostra da sola, in un elemento suo, e
+ * deve restare uguale alla nota di trace.json da cui è copiata (runNotes di tabs/lab/runs/describe.js le
+ * confronta per non mostrarle due volte).
  */
 export function parseRunInfo(json, { file = "run.json" } = {}) {
   if (!isPlainObject(json)) throw new WeightsFormatError(file, "run.json deve essere un oggetto JSON");
-  const notes = Array.isArray(json.notes) ? json.notes.filter((n) => typeof n === "string").map((n) => n.slice(0, 2000)) : text(json.notes) ? [text(json.notes)] : [];
+  // al più MAX_RUN_NOTES note: un run.json da 64 MB con milioni di voci "" non deve fermare la pagina (la scheda
+  // ne mostra 12, runNotes di tabs/lab/runs/describe.js ne legge al più 2.000)
+  const notes = Array.isArray(json.notes) ? json.notes.slice(0, MAX_RUN_NOTES).filter((n) => typeof n === "string").map((n) => n.slice(0, 2000)) : text(json.notes) ? [text(json.notes)] : [];
   const config = cleanConfig(json.config, `${file} (config)`);
+  const phrase = (value, max) => withoutBidiControls(text(value, max));
   return {
-    name: text(json.name, 200),
-    description: text(json.description),
-    created: text(json.created ?? json.date ?? json.created_at, 100),
-    source: text(json.source, 500),
+    name: phrase(json.name, 200),
+    description: phrase(json.description),
+    created: phrase(json.created ?? json.date ?? json.created_at, 100),
+    source: phrase(json.source, 500),
     config,
     vocab: checkVocab(json.vocab, `${file} (vocab)`, config?.vocab_size ?? null),
     notes,

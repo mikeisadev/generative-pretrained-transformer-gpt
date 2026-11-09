@@ -286,18 +286,4 @@ export function mergeMeshes(meshes, extra = []) {
   return out;
 }
 
-/** Box [min, max] di una lista di punti. */
-export function boundsOf(positions) {
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  for (let i = 0; i < positions.length; i += 3) {
-    for (let a = 0; a < 3; a++) {
-      const v = positions[i + a];
-      if (v < min[a]) min[a] = v;
-      if (v > max[a]) max[a] = v;
-    }
-  }
-  return { min, max };
-}
-
 export const vec = { sub, cross, dot, len, scale, norm };

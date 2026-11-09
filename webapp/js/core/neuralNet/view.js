@@ -26,6 +26,7 @@ import { NetworkCard } from "./card.js";
 import { avoidRect, avoidRectVariants, partIndexAt, readableHeight, walkParts } from "./framing.js";
 import { attentionSource } from "./honesty.js";
 import { buildNetworkModel } from "./model.js";
+import { hoverUnit } from "./pickIndex.js";
 import { PATTERNS, linkSummary } from "./roles.js";
 import { NetworkScene } from "./scene.js";
 import { describeSpecError } from "./spec.js";
@@ -686,13 +687,17 @@ export function createNetworkView(ctx) {
     if (director.flying) return hideTip();
     const { x, y } = state.pointer;
     const rect = canvas.getBoundingClientRect();
-    const labelHit = scene.labels?.hit(x - rect.left, y - rect.top);
-    canvas.style.cursor = labelHit ? "pointer" : "";
+    const label = scene.labels?.hit(x - rect.left, y - rect.top) ?? null;
+    canvas.style.cursor = label ? "pointer" : "";
     const t0 = performance.now();
-    const u = labelHit ? -1 : scene.pick(x, y, camera, rect);
+    // sotto un titolo di sezione si cerca lo stesso il neurone: se è di un'altra sezione, il titolo lo copriva
+    const picked = label && label.ref?.kind !== "section" ? -1 : scene.pick(x, y, camera, rect);
     stats.pickMs = ema(stats.pickMs, performance.now() - t0);
+    const { net, layout } = scene.model;
+    const u = hoverUnit(label, picked, (unit) => net.sections[layout.sectionOf[unit]].id);
     if (u < 0) return hideTip();
-    showTip(scene.describe(u), x, y);
+    // il clic resta del titolo disegnato sopra: l'etichetta lo dice, per non far credere che scelga questa sezione
+    showTip(scene.describe(u), x, y, label ? `Clic qui: sceglie «${label.text}», il titolo disegnato sopra` : null);
     canvas.style.cursor = "pointer";
   }
 
@@ -715,8 +720,11 @@ export function createNetworkView(ctx) {
     }
   }
 
-  /** Etichetta al passaggio del mouse: sezione, indice, posizione in profondità, valore. x, y: coordinate client. */
-  function showTip(info, clientX, clientY) {
+  /**
+   * Etichetta al passaggio del mouse: sezione, indice, posizione in profondità, valore. x, y: coordinate client;
+   * `note`: una riga in fondo (es. che cosa sceglie il clic in quel punto), testo semplice.
+   */
+  function showTip(info, clientX, clientY, note = null) {
     const s = info.section;
     const lines = [];
     let what;
@@ -741,6 +749,7 @@ export function createNetworkView(ctx) {
       el("span", {}, what),
       ...lines.map((l) => el("span", {}, l)),
       el("span", { className: "nn-tip-value" }, `valore ${value}${s.valueLabel ? ` ${s.valueLabel}` : ""}${info.simulated ? " · simulato" : ""}`),
+      note ? el("span", {}, note) : "",
     );
     tip.hidden = false;
     // vicino al puntatore (in basso a destra, mai sotto il dito), ma dentro il livello

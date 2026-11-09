@@ -74,6 +74,7 @@ import dataclasses
 import hashlib
 import json
 import math
+import os
 import pickle
 import re
 import shutil
@@ -97,6 +98,7 @@ from gpt.export import (
     WEIGHTS_BINARY,
     WEIGHTS_FORMAT_VERSION,
     WEIGHTS_MANIFEST,
+    display_path,
     export_weights,
     parameter_layout,
     parameters_to_bytes,
@@ -125,6 +127,10 @@ _VOCAB_KEYS = ("chars", "vocab")
 _POSITIVE_INT_KEYS = ("vocab_size", "block_size", "n_embd", "n_head", "n_layer")
 _SNAPSHOT_NAME = re.compile(r"^snap_\d{5,}\.f16\.bin$")
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+# Controlli bidirezionali espliciti (U+202A–U+202E, U+2066–U+2069): il browser rifiuta un tensore che li ha
+# nel nome (checkName di webapp/js/shared/weights/validate.js), perché rovescerebbero le frasi che lo
+# citano. Si rifiutano già qui, così l'export non scrive un run che il Laboratorio non carica.
+_BIDI_CONTROLS = re.compile("[\u202a-\u202e\u2066-\u2069]")
 # Un surrogato UTF-16 spaiato ("\ud800" scritto in un JSON, o un byte non UTF-8 di un argomento della riga
 # di comando) è un str valido ma non si scrive in UTF-8: write_text fallirebbe alla fine dell'export, con
 # pesi e storia già scritti e run.json vuoto. Nei testi che finiscono in run.json diventa "�" (U+FFFD),
@@ -452,7 +458,8 @@ def export_run(
         training_dir: cartella con ``trace.json`` e gli snapshot (``scripts/record_training.py --out``),
             copiata in ``training/``. Le note del trace (``notes``: che cosa la registrazione ha adattato
             all'architettura) finiscono anche in ``run.json``, dopo quelle dell'autore, con il prefisso
-            ``"storia del training: "`` (``training_notes``).
+            ``"storia del training: "`` (``training_notes``). Se è già la ``training/`` di ``out_dir``
+            (riesportare un run sul posto, con ``overwrite``) la storia resta dov'è, intatta.
         benchmark: il risultato di ``gpt.benchmark`` (diventa ``benchmark.json``).
         engine_compatible: ``False`` se il calcolo è diverso da quello del GPT del corso anche con
             le stesse forme (es. GELU invece di ReLU); ``None`` (predefinito) lascia decidere al browser.
@@ -469,11 +476,15 @@ def export_run(
     if benchmark is not None:
         benchmark_text = json.dumps(benchmark, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     export_notes = [*weights.notes, *_benchmark_notes(benchmark, weights)]
-    export_notes += _prepare_folder(out_dir, overwrite)
+    # Riesportare un run sul posto (--trace runs/x/training --out runs/x --force): la storia è già nella
+    # cartella. Prima _prepare_folder ne cancellava trace.json e gli snapshot e poi la copia non li trovava
+    # più: si perdevano la storia e il run. Ora resta dov'è e si controlla soltanto.
+    in_place = history is not None and _same_folder(history.directory, out_dir / TRAINING_DIR)
+    export_notes += _prepare_folder(out_dir, overwrite, keep_training=in_place)
 
     module = _TensorModule(weights)
     if history is not None:
-        export_notes += _copy_history(history, out_dir / TRAINING_DIR, module)
+        export_notes += _copy_history(history, out_dir / TRAINING_DIR, module, copy=not in_place)
     # La stessa funzione dei dati della web app: weights.json punta a training/trace.json se c'è.
     vocab = types.SimpleNamespace(chars=weights.vocab)  # export_weights legge solo tokenizer.chars
     source = _well_formed(weights.source)  # il percorso del checkpoint: anche un nome di file non UTF-8
@@ -561,16 +572,8 @@ def readable_json(value: Any, level: int = 0) -> str:
 # --------------------------------------------------------------------------- percorsi e nomi
 
 
-def display_path(path: Path) -> str:
-    """Percorso da scrivere nei JSON: relativo al progetto se ci sta dentro.
-
-    Fuori dal progetto si tengono solo le ultime due parti: nei file condivisi non deve finire la
-    cartella personale di nessuno (es. /Users/<nome>/...).
-    """
-    resolved = Path(path).resolve()
-    if resolved.is_relative_to(PROJECT_ROOT):
-        return resolved.relative_to(PROJECT_ROOT).as_posix()
-    return "…/" + "/".join(resolved.parts[-2:])
+# display_path (il percorso da scrivere nei JSON, senza la cartella personale di nessuno) sta in
+# gpt/export.py, che lo usa anche per model.json; importato sopra, resta anche gpt.runs.display_path.
 
 
 def slugify(name: str) -> str:
@@ -662,7 +665,8 @@ def _not_exportable(value: Any) -> str | None:
 def _check_tensor_name(name: Any) -> None:
     if not isinstance(name, str) or not name:
         raise ValueError(f"nome di tensore non valido: {name!r}")
-    if len(name) > MAX_TENSOR_NAME_CHARS or _CONTROL_CHARS.search(name) or "" in name.split("."):
+    if (len(name) > MAX_TENSOR_NAME_CHARS or _CONTROL_CHARS.search(name) or _BIDI_CONTROLS.search(name)
+            or "" in name.split(".")):
         raise ValueError(f"nome di tensore non valido: {name[:80]!r} (troppo lungo, caratteri di controllo "
                          "o punti vuoti)")
 
@@ -759,8 +763,12 @@ def _one_line(text: str) -> str:
     return " ".join(_well_formed(_CONTROL_CHARS.sub(" ", text)).split())
 
 
-def _prepare_folder(out_dir: Path, overwrite: bool) -> list[str]:
-    """Crea la cartella o, con ``overwrite``, toglie solo i file scritti da un export precedente."""
+def _prepare_folder(out_dir: Path, overwrite: bool, *, keep_training: bool = False) -> list[str]:
+    """Crea la cartella o, con ``overwrite``, toglie solo i file scritti da un export precedente.
+
+    ``keep_training``: la ``training/`` della cartella è la storia che si sta esportando (riesportazione sul
+    posto): non si tocca.
+    """
     if not out_dir.exists():
         out_dir.mkdir(parents=True)
         return []
@@ -778,14 +786,15 @@ def _prepare_folder(out_dir: Path, overwrite: bool) -> list[str]:
         raise ValueError(f"{training} è un collegamento simbolico: per sicurezza non si cancella niente lì")
     # Solo i nomi fissi che l'export scrive: mai un file indicato da un JSON della cartella.
     managed = [out_dir / n for n in (RUN_FILE, WEIGHTS_MANIFEST, WEIGHTS_BINARY, BENCHMARK_FILE)]
-    if training.is_dir():
+    clear_training = training.is_dir() and not keep_training
+    if clear_training:
         managed += [training / TRAINING_TRACE, *training.glob("snap_*.f16.bin")]
     for file in managed:
         if file.is_file() or file.is_symlink():
             file.unlink()
-    if training.is_dir() and not any(training.iterdir()):
+    if clear_training and not any(training.iterdir()):
         training.rmdir()
-    leftovers = sorted(p.name for p in out_dir.iterdir())
+    leftovers = sorted(p.name for p in out_dir.iterdir() if not (keep_training and p.name == TRAINING_DIR))
     if leftovers:
         return [f"nella cartella restano altri file non del run: {', '.join(leftovers[:5])}"]
     return []
@@ -799,12 +808,18 @@ def _benchmark_notes(benchmark: Mapping[str, Any] | None, weights: RunWeights) -
     return []
 
 
-def _copy_history(history: TrainingHistory, dest: Path, module: _TensorModule) -> list[str]:
-    """Copia trace.json e gli snapshot presenti; controlla che la storia sia di QUESTI pesi."""
-    dest.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(history.directory / TRAINING_TRACE, dest / TRAINING_TRACE)
-    for entry in history.snapshots:
-        shutil.copyfile(history.directory / entry["file"], dest / entry["file"])
+def _copy_history(
+    history: TrainingHistory, dest: Path, module: _TensorModule, *, copy: bool = True
+) -> list[str]:
+    """Copia trace.json e gli snapshot presenti; controlla che la storia sia di QUESTI pesi.
+
+    ``copy=False``: la storia è già in ``dest`` (riesportazione sul posto): si controlla soltanto.
+    """
+    if copy:
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(history.directory / TRAINING_TRACE, dest / TRAINING_TRACE)
+        for entry in history.snapshots:
+            shutil.copyfile(history.directory / entry["file"], dest / entry["file"])
     notes = []
     if history.missing:
         steps = ", ".join(map(str, history.missing))
@@ -857,6 +872,17 @@ def _check_layout(params: Any, total: Any, where: str) -> tuple[list[dict[str, A
 def _tensor_from_flat(flat: np.ndarray, p: Mapping[str, Any]) -> torch.Tensor:
     values = flat[p["offset"] : p["offset"] + p["numel"]].reshape(p["shape"])
     return torch.from_numpy(values.copy())  # copia: il tensore non deve dipendere dal buffer del file
+
+
+def _same_folder(a: Path, b: Path) -> bool:
+    """``a`` e ``b`` sono la stessa cartella, anche scritta in un altro modo (``..``, collegamenti simbolici,
+    maiuscole su un disco che non le distingue)?"""
+    if a.resolve() == b.resolve():
+        return True
+    try:
+        return a.is_dir() and b.is_dir() and os.path.samefile(a, b)
+    except OSError:
+        return False
 
 
 def _file_beside(folder: Path, name: Any, where: Path) -> Path:

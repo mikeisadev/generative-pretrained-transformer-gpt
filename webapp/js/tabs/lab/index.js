@@ -47,12 +47,7 @@ export async function createTab(root, app) {
   tab.panes.modello = ui.sidebar.addPane({ id: "modello", title: "Modello", hint: "I moduli del GPT come nel codice Python, lo step del training e come leggere la scena." });
   tab.panes.tensore = ui.sidebar.addPane({ id: "tensore", title: "Tensore", hint: "I numeri veri del tensore scelto: tabella, statistiche, istogramma." });
   tab.panes.run = ui.sidebar.addPane({ id: "run", title: "Run", hint: "Il GPT del corso e i run che carichi: cartelle esportate dal Python, file, trascinamento." });
-  // i pannelli condividono lo scorrimento della sidebar: cambiando pannello si riparte dall'alto
-  let paneShown = ui.sidebar.current;
-  ui.sidebar.onSelect((id) => {
-    if (id !== paneShown) ui.sidebar.body.scrollTop = 0;
-    paneShown = id;
-  });
+  // lo scorrimento della sidebar non si tocca qui: il nucleo lo ricorda per pannello (core/ui/sidebar.js)
   tab.scene = installScene(tab);
   tab.model = createModelPane(tab.panes.modello, tab);
   tab.inspector = createInspector(tab.panes.tensore, tab);
@@ -76,6 +71,16 @@ export async function createTab(root, app) {
     const installed = install(tab);
     if (installed?.dispose) tab.disposers.push(() => installed.dispose());
   }
+
+  // Run grandi caricati: gli snapshot decodificati degli step lasciati non servono più (un run da 4,8 M di pesi
+  // ne tiene 19 MB per step) e si liberano, oltre SNAPSHOT_BUDGET (LabState.releaseSnapshots): a pesi nuovi
+  // pronti, cambiando run o step di B, chiudendo un'azione. Mai con un'azione aperta: «I pesi durante il
+  // training» li legge tutti prima di partire, per non fermarsi a ogni passo.
+  const releaseSnapshots = () => {
+    if (!ui.player?.action) state.releaseSnapshots();
+  };
+  for (const type of ["weights", "runB", "stepB"]) tab.disposers.push(state.on(type, releaseSnapshots));
+  if (ui.player) tab.disposers.push(ui.player.on("state", releaseSnapshots));
 
   // rappresentazioni: Rete neurale del run A (renderer del nucleo) e Cervello (pannello + 3D)
   const network = createNetworkSource(tab);
@@ -107,16 +112,14 @@ export async function createTab(root, app) {
 }
 
 /**
- * Il salvataggio nel browser, se c'è. In un iframe in sandbox o in certe navigazioni private anche solo
- * leggere `indexedDB` lancia SecurityError (il costruttore di RunStore lo legge): senza questo try il tab
- * non si apriva affatto. Senza store i run restano in memoria e il pannello Run lo dice.
+ * Il salvataggio nel browser, se c'è. RunStore non lancia mai: dove il browser vieta IndexedDB (SecurityError
+ * in un iframe in sandbox o in certe navigazioni private) o non lo offre, `available` è false. Allora niente
+ * store: il pannello Run spegne «Ricordali in questo browser» e dice che i run restano finché la pagina è
+ * aperta, invece di offrire un salvataggio che fallirebbe.
  */
 function createStore() {
-  try {
-    return new RunStore();
-  } catch {
-    return null;
-  }
+  const store = new RunStore();
+  return store.available ? store : null;
 }
 
 /** Il pannello "Fonti" (stile condiviso .sources-list di core.css). */

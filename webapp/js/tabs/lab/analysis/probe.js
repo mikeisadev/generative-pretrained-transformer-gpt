@@ -70,8 +70,3 @@ export function logitPairs(a, b) {
   if (!a?.ok || !b?.ok || a.logits.length !== b.logits.length) return [];
   return Array.from(a.logits, (x, id) => ({ x, y: b.logits[id], label: shownChar(a.vocab[id]) }));
 }
-
-/** Testo di una voce: «e» 23,4% (logit 3,12). */
-export function topText(t, formatPct, formatNum) {
-  return `«${shownChar(t.char)}» ${formatPct(t.prob)} · logit ${formatNum(t.logit, 3)}`;
-}

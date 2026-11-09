@@ -35,6 +35,7 @@ import { CODEC } from "./codec.js";
 import { melFilterbank, WHISPER } from "./dsp.js";
 import { formatPercent } from "./lab.js";
 import { SAMPLE_RATE } from "./song.js";
+import { WHISPER_TOKENS } from "./whisperTokens.js";
 
 // ------------------------------------------------------------------------------------------ costanti
 
@@ -102,11 +103,11 @@ const EC_STEPS = 2 * EC_FRAMES;
 const EC_VOICES = 16;
 
 /**
- * Il testo d'uscita di Whisper: lo stesso esempio della scena (WHISPER_TOKENS di sceneWhisper.js, che
- * importa three.js e quindi qui non si può importare; un test controlla che siano uguali). I primi quattro
- * sono i token speciali veri del formato, le parole sono un esempio.
+ * Il testo d'uscita di Whisper: lo stesso esempio della scena, dal modulo di soli dati che la scena di Whisper
+ * importa (whisperTokens.js: niente three.js, quindi anche qui e nei test in Node). I primi quattro sono i
+ * token speciali veri del formato, le parole sono un esempio. Nome di prima, per chi lo importa da qui.
  */
-export const WHISPER_TEXT = Object.freeze(["<|startoftranscript|>", "<|it|>", "<|transcribe|>", "<|notimestamps|>", " Ciao", " a", " tutti", "<|endoftext|>"]);
+export const WHISPER_TEXT = WHISPER_TOKENS;
 
 const frameMs = (lab, t) => Math.round((t * 1000) / lab.frameRate);
 const hz = (f) => (f >= 1000 ? `${fmt(f / 1000, 1)} kHz` : `${Math.round(f)} Hz`);

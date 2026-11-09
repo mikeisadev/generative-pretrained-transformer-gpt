@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BRAIN_PANE_ID, REP_IDS, REP_LINKS, repOfLink } from "../js/core/repLinks.js";
+import { BRAIN_PANE_ID, REP_IDS, REP_LINKS, REP_SEARCH_KEYWORDS, repOfLink, withRepKeywords } from "../js/core/repLinks.js";
 import { VARIANTS, candidateRows, freeIntervals, placeSwitch } from "../js/core/ui/repSwitch.js";
 
 const SIZES = { full: 322, icons: 104, menu: 48, height: 36 };
@@ -190,4 +190,15 @@ test("repLinks: id delle rappresentazioni, link diretti e pannello Cervello impo
   assert.equal(repOfLink({ kind: "view", id: "toString" }), null, "niente chiavi del prototipo");
   assert.equal(repOfLink({ kind: "step", id: "rete" }), null);
   assert.equal(repOfLink(), null);
+});
+
+test("repLinks: la ricerca trova le viste Rete neurale e Cervello anche con i nomi dei loro comandi", () => {
+  const rete = withRepKeywords({ kind: "view", id: "rete", keywords: ["rete neurale"] });
+  assert.equal(rete[0], "rete neurale", "le parole del tab restano per prime");
+  for (const word of ["guarda lo spessore", "tutta la rete", "scala e onestà"]) assert.ok(rete.includes(word), word);
+  assert.ok(withRepKeywords({ kind: "view", id: "cervello" }).includes("anima impulsi"), "anche senza parole del tab");
+  assert.deepEqual(withRepKeywords({ kind: "step", id: "rete", keywords: ["x"] }), ["x"], "solo le viste");
+  assert.equal(withRepKeywords({ kind: "view", id: "pesi" }), undefined, "le altre viste restano come sono");
+  assert.equal(withRepKeywords({ kind: "view", id: "constructor" }), undefined, "niente chiavi del prototipo");
+  assert.ok(Object.isFrozen(REP_SEARCH_KEYWORDS.rete) && Object.isFrozen(REP_SEARCH_KEYWORDS.cervello));
 });

@@ -3,8 +3,9 @@
  * nucleo (js/core/neuralNet/, formato networkSpec in ARCHITECTURE.md). Logica pura (niente DOM, niente
  * three.js): le specifiche si provano in Node.
  *
- * - Run compatibile con il motore JS: buildDepthSpec del tab Transformer (views/neuronDepthSpec.js, in sola
- *   lettura) con la traccia vera del motore su un prompt d'esempio, con i pesi del run allo step scelto:
+ * - Run compatibile con il motore JS: buildDepthSpec (js/shared/gpt/depthSpec.js, la stessa rete della vista
+ *   "Orizzontale con profondità" del Transformer) con la traccia vera del motore su un prompt d'esempio, con i
+ *   pesi del run allo step scelto:
  *   ogni sfera è un neurone con il valore calcolato, ogni arco di attention il peso vero.
  * - Altri run (FFN più larga, GELU dichiarata, moduli nuovi…): una specifica di SOLA STRUTTURA ricavata dai
  *   nomi e dalle forme dei pesi, con i pesi veri delle nn.Linear sui collegamenti; le attivazioni non si
@@ -13,7 +14,7 @@
  *
  * createNetworkSource(tab) collega la specifica al selettore delle rappresentazioni (vedi in fondo).
  */
-import { ATTENTION_SLABS, buildDepthSpec, depthSections, shownChar } from "../transformer/views/neuronDepthSpec.js";
+import { ATTENTION_SLABS, buildDepthSpec, depthSections, shownChar } from "../../shared/gpt/depthSpec.js";
 
 /** Il prompt d'esempio: l'inizio del prompt del benchmark ("ROMEO:\n", scripts/benchmark.py) e una battuta di Romeo. */
 export const NETWORK_PROMPT = "ROMEO:\nBut, soft!";

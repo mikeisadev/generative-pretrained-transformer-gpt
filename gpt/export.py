@@ -423,10 +423,32 @@ def build_spec(net: GPTLanguageModel, tokenizer: data.CharTokenizer, source: str
     }
 
 
-def _display_path(path: Path) -> str:
-    """Percorso relativo alla radice del progetto: nei JSON committati non finisce la home di nessuno."""
-    resolved = path.resolve()
-    return resolved.relative_to(PROJECT_ROOT).as_posix() if resolved.is_relative_to(PROJECT_ROOT) else path.as_posix()
+def display_path(path: Path) -> str:
+    """Percorso da scrivere nei JSON (model.json, weights.json, run.json): relativo al progetto, se ci sta.
+
+    Fuori dal progetto resta il nome del file, con la cartella che lo contiene solo se non può essere quella
+    personale: nei file condivisi o committati non deve finire il nome di nessuno. ``/home/mario/gpt.pt`` e
+    ``C:\\Users\\mario\\gpt.pt`` → ``"…/gpt.pt"``; ``/home/mario/esperimenti/gpt.pt`` →
+    ``"…/esperimenti/gpt.pt"``. (Prima: model.json scriveva il percorso assoluto, run.json
+    ``"…/mario/gpt.pt"`` per un file nella home.)
+    """
+    resolved = Path(path).resolve()
+    if resolved.is_relative_to(PROJECT_ROOT):
+        return resolved.relative_to(PROJECT_ROOT).as_posix()
+    # la cartella si tiene a partire dal terzo livello (/home/<nome>/<cartella>) e se non è la home
+    keep_parent = len(resolved.parts) >= 5 and not _is_home(resolved.parent)
+    return "…/" + "/".join(resolved.parts[-2:] if keep_parent else resolved.parts[-1:])
+
+
+def _is_home(folder: Path) -> bool:
+    try:
+        return folder == Path.home().resolve()
+    except (RuntimeError, OSError):  # HOME non definita: resta la regola della profondità
+        return False
+
+
+# Il nome di prima (privato): per chi lo importava.
+_display_path = display_path
 
 
 def export(checkpoint: Path | None, out: Path = WEBAPP_DATA) -> dict[str, Any]:
@@ -437,7 +459,7 @@ def export(checkpoint: Path | None, out: Path = WEBAPP_DATA) -> dict[str, Any]:
     """
     if checkpoint is not None and checkpoint.exists():
         net, tokenizer = training.load_checkpoint(checkpoint)
-        spec = build_spec(net, tokenizer, source=_display_path(checkpoint), trained=True)
+        spec = build_spec(net, tokenizer, source=display_path(checkpoint), trained=True)
     else:
         torch.manual_seed(1337)
         tokenizer = data.CharTokenizer.from_text(data.load_text())

@@ -27,7 +27,9 @@ from gpt.benchmark import (
     build_model,
     format_int,
     read_excerpt,
+    rebuilt_tensors_note,
     run_tokenizer,
+    terminal_text,
     validation_text,
 )
 from gpt.data import CharTokenizer, load_text
@@ -84,6 +86,10 @@ def main() -> int:
             benchmark = benchmark_model(model, tokenizer, name=args.name, source=weights.source,
                                         validation=validation, excerpt=excerpt, history=history,
                                         weights=weights, settings=BenchmarkSettings(threads=args.threads))
+            # come benchmark_path: i tensori interi del modello ricostruito sono quelli del codice, e lo si dice
+            note = rebuilt_tensors_note(model)
+            if note:
+                benchmark["notes"].append(note)
 
         info = export_run(
             weights,
@@ -109,26 +115,31 @@ def main() -> int:
 
 
 def print_summary(info: dict, out: Path, benchmark: dict | None) -> None:
+    # config, note e nomi dei tensori vengono dal checkpoint (magari scaricato): niente caratteri di controllo
+    # nel terminale (un ESC lo comanderebbe), ogni riga passa da terminal_text
+    def say(text: str) -> None:
+        print(terminal_text(text))
+
     megabytes = 4 * info["total_params"] / 1e6
-    print(f'Run "{info["name"]}" esportato in {out}')
-    print(f"  pesi: {format_int(info['total_params'])} valori in {info['tensor_count']} tensori "
-          f"({megabytes:.2f} MB in float32)")
+    say(f'Run "{info["name"]}" esportato in {out}')
+    say(f"  pesi: {format_int(info['total_params'])} valori in {info['tensor_count']} tensori "
+        f"({megabytes:.2f} MB in float32)")
     config = info.get("config")
     described = ", ".join(f"{k}={v}" for k, v in config.items()) if config else "assente nel checkpoint"
-    print(f"  config: {described}")
+    say(f"  config: {described}")
     training = info.get("training")
     if training:
         steps = training["snapshots"]
         span = f"step {steps[0]} … {steps[-1]}" if steps else "nessuno snapshot"
-        print(f"  storia del training: {len(steps)} snapshot ({span}), "
-              f"val loss finale {training['val_loss']}")
+        say(f"  storia del training: {len(steps)} snapshot ({span}), "
+            f"val loss finale {training['val_loss']}")
     if benchmark:
         m = benchmark["metrics"]
-        print(f"  benchmark: loss {m['loss']:.4f} · top-1 {100 * m['top1']:.2f}% · "
-              f"top-5 {100 * m['top5']:.2f}% (validation completa, {format_int(m['predictions'])} caratteri)")
+        say(f"  benchmark: loss {m['loss']:.4f} · top-1 {100 * m['top1']:.2f}% · "
+            f"top-5 {100 * m['top5']:.2f}% (validation completa, {format_int(m['predictions'])} caratteri)")
     for note in info["notes"]:
-        print(f"  nota: {note}")
-    print(f'Nella web app: tab "Laboratorio pesi", carica la cartella {out}')
+        say(f"  nota: {note}")
+    say(f'Nella web app: tab "Laboratorio pesi", carica la cartella {out}')
 
 
 if __name__ == "__main__":

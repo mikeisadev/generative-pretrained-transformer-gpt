@@ -11,7 +11,7 @@ import { el } from "../../../core/dom.js";
 import { CAPABILITY_FACTS, HOW_OBTAINED, LANDSCAPE, NAME_CHECK, RESEARCH_DATE } from "./research.js";
 import { FULL_LEVELS, FULL_SECTIONS } from "./catalog.js";
 import { enumerateCheckpoint } from "./tensors.js";
-import { addOnTotal, anchorsOf, formatCount, formatGB, formatLayers, formatShare, layerList, paramTotals } from "./model.js";
+import { addOnTotal, anchorsOf, formatCount, formatGB, formatShare, layerList, paramTotals } from "./model.js";
 import { DTYPE_COLORS } from "./sceneMacro.js";
 import { MODELS } from "./models/index.js";
 
@@ -262,6 +262,3 @@ export function renderSources() {
     },
   };
 }
-
-/** Riga di layer per una didascalia: "layer 2-7". */
-export const layersText = (numbers) => `layer ${formatLayers(numbers)}`;

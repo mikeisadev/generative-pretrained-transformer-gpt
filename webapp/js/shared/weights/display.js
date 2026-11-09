@@ -10,6 +10,8 @@
  * - Contrasto: testo chiaro o scuro scelto con il rapporto di contrasto WCAG sul colore vero
  *   della cella (una cella arancione satura vuole il testo scuro, una quasi nera il testo chiaro).
  * - Finestre: solo le celle visibili, con un tetto, a una risoluzione scelta tra pochi gradini.
+ *
+ * In fondo, `shownChar`: come si scrive un carattere del vocabolario (righe e colonne delle tabelle, etichette).
  */
 
 export const MINUS = "−";
@@ -252,4 +254,29 @@ export function canvasCellSize({ cellH, aspect = 1, pixelRatio = 1, rows, cols, 
     pw = Math.max(8, Math.floor(pw * scale));
   }
   return { pw, ph };
+}
+
+// ---------------------------------------------------------------- caratteri del vocabolario
+
+/**
+ * Caratteri invisibili o che cambiano la direzione del testo: controlli C0 e C1, DEL, trattino morbido, spazi e
+ * segni a larghezza zero (U+200B–U+200F, U+2060–U+206F, U+FEFF, U+180E), U+061C, separatori di riga e di
+ * paragrafo (U+2028, U+2029) e i controlli bidirezionali (U+202A–U+202E, U+2066–U+2069).
+ */
+// eslint-disable-next-line no-control-regex
+const INVISIBLE = /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+
+/**
+ * Come si scrive un token del vocabolario in un'etichetta, una tabella o una frase: lo spazio «␣», l'a capo «↵»,
+ * la tabulazione «⇥» (resterebbero invisibili); un altro carattere invisibile (INVISIBLE) come «U+202E». Il
+ * vocabolario di un run caricato viene dai file dello studente: un U+202E nella frase «il carattere «…»» la
+ * rovescerebbe. Gli altri caratteri restano come sono; null o undefined → "". Una sola regola per il Laboratorio
+ * e per il Transformer (prima quattro copie, non tutte con la tabulazione).
+ * @param {string|null|undefined} c
+ */
+export function shownChar(c) {
+  if (c === " ") return "␣";
+  if (c === "\n") return "↵";
+  if (c === "\t") return "⇥";
+  return String(c ?? "").replace(INVISIBLE, (ch) => `U+${ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`);
 }

@@ -43,7 +43,7 @@ export function presets({ runA, courseId, stepsOf, entries = [], nameOf = (id) =
       out.push({
         id: "fasi",
         title: `Step ${fmt(last)} contro step ${fmt(early)}`,
-        text: `${name}: che cosa cambia tra l'inizio del training (B, step ${fmt(early)}) e la fine (A, step ${fmt(last)}).`,
+        text: `${name}: che cosa cambia tra una fase iniziale del training (B, step ${fmt(early)}) e la fine (A, step ${fmt(last)}).`,
         a: { run: historyRun, step: last },
         b: { run: historyRun, step: early },
       });

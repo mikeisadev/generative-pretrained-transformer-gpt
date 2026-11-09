@@ -4,10 +4,12 @@
 // stato (transizioni ed eventi, step agganciati, cache, motore), link diretti, caricamenti rotti,
 // specifiche della rete neurale e del cervello, indice della ricerca.
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { missingRuns, runDir } from "./runFixtures.mjs";
 
 import { normalizeBrainSpec } from "../js/core/brain/spec.js";
 import { buildNetworkModel } from "../js/core/neuralNet/model.js";
@@ -24,7 +26,7 @@ import { CELL, VECTOR_STRETCH, classesFromRunInfo, codeLine, coveredBy, hitTest,
 import { packShelves } from "../js/tabs/lab/scene/pack.js";
 import { roleOf } from "../js/tabs/lab/scene/roles.js";
 import { searchIndex } from "../js/tabs/lab/search.js";
-import { COURSE_RUN_ID, LabState } from "../js/tabs/lab/state.js";
+import { COURSE_RUN_ID, LabState, SNAPSHOT_BUDGET } from "../js/tabs/lab/state.js";
 import { snapStep, sliderModel, stepLabel } from "../js/tabs/lab/steps.js";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -38,9 +40,8 @@ const fsLoaders = { baseUrl: DATA_DIR, loadJson, loadBuffer };
 const spec = await loadJson(`${DATA_DIR}model.json`);
 const builtin = await loadBuiltinRun(fsLoaders);
 
-/** I run esportati dal Python nel lavoro su questo round (facoltativi: i test che li usano si saltano se mancano). */
-const PY_RUNS = "/tmp/claude-0/-home-user-generative-pretrained-transformer-gpt/f3c7aefd-3f8d-51c4-8dc8-31c9c2f5b2c5/scratchpad/py-runs/";
-const RUN_DIRS = { gpt200: `${PY_RUNS}runs/gpt-200-step`, ffn3: `${PY_RUNS}runs/ffn3`, gelu: `${PY_RUNS}copia/runs/gpt-con-gelu` };
+/** Run esportati dal Python (facoltativi, fuori dal repository: vedi runFixtures.mjs e LAB_RUNS_DIR). */
+const RUN_DIRS = { gpt200: runDir("gpt200"), ffn3: runDir("ffn3"), gelu: runDir("gelu") };
 
 function fileLike(path, content) {
   const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content instanceof Uint8Array ? content : new Uint8Array(content);
@@ -242,7 +243,7 @@ test("architetture modificate costruite qui: più blocchi, FFN più larga, modul
   assert.equal(compatibilityText(wr[0]).ok, false);
 });
 
-test("run esportati dal Python (gpt-200-step, ffn3, gpt-con-gelu): albero, note, compatibilità", { skip: !existsSync(RUN_DIRS.gelu) || !existsSync(RUN_DIRS.ffn3) || !existsSync(RUN_DIRS.gpt200) }, async () => {
+test("run esportati dal Python (gpt-200-step, ffn3, gpt-con-gelu): albero, note, compatibilità", { skip: missingRuns("gpt200", "ffn3", "gelu") }, async () => {
   const load = async (dir) => {
     const { runs, errors } = await runsFromFiles(await folderFiles(dir), { defaultVocab: builtin.vocab });
     assert.deepEqual(errors, [], dir);
@@ -373,6 +374,44 @@ test("stato: le richieste superate non annunciano pesi vecchi; registro, salvata
   assert.match(r.reason, /forme diverse/);
   await assert.rejects(state.weightsAt(badRuns[0].id, 100), /non ha snapshot del training/);
   state.release(badRuns[0].id);
+});
+
+test("stato: nei run grandi gli snapshot degli step lasciati escono dalla memoria, quelli di A e B restano", async () => {
+  const state = new LabState({ loadBuiltin: () => loadBuiltinRun(fsLoaders), store: memoryStore() });
+  await state.init();
+  const run = state.builtin;
+  const loaded = () => run.snapshots.filter((s) => s.loaded).map((s) => s.step);
+  const cell = async (step) => (await state.weightsAt(COURSE_RUN_ID, step)).tensors.get("lm_head.weight").data[3];
+  await state.setStep(250);
+  const at250 = await cell(250);
+  await state.setStep(500);
+  // il GPT del corso è piccolo (11 snapshot = 9 MB decodificati): con il budget vero resta tutto in cache
+  assert.ok(run.steps.length * run.totalParams * 4 < SNAPSHOT_BUDGET);
+  assert.equal(state.releaseSnapshots(), 0);
+  assert.deepEqual(loaded(), [250, 500]);
+  // come se fosse grande (budget 0): resta lo snapshot mostrato; vista e motore dello step lasciato escono
+  await state.engineFor(COURSE_RUN_ID, 250);
+  const views = state.cacheInfo.views;
+  assert.equal(state.releaseSnapshots({ budget: 0 }), 1);
+  assert.deepEqual(loaded(), [500]);
+  assert.equal(state.cacheInfo.views, views - 1);
+  assert.equal(state.cacheInfo.engines, 0);
+  assert.equal(state.current.view.step, 500, "la vista di A resta quella di prima");
+  // B sullo stesso run, interpolato tra due snapshot: restano lo snapshot di A e i due attorno a B
+  await state.setInterpolate(true);
+  await state.setRunB(COURSE_RUN_ID, { step: 1250 });
+  await state.weightsAt(state.runB, state.stepB); // come il confronto
+  await state.setStep(3000);
+  state.releaseSnapshots({ budget: 0 });
+  assert.deepEqual(loaded(), [1000, 1500, 3000]);
+  assert.equal((await state.weightsAt(COURSE_RUN_ID, 1250)).source, "interpolated", "l'interpolazione è una copia: resta in cache");
+  // senza B e con i pesi finali in A non serve più nessuno snapshot; tornando a uno step il file si rilegge
+  await state.setRunB(null);
+  await state.setStep(null);
+  state.releaseSnapshots({ budget: 0 });
+  assert.deepEqual(loaded(), []);
+  assert.equal(await cell(250), at250, "gli stessi valori dal file riletto");
+  assert.deepEqual(loaded(), [250]);
 });
 
 test("stato: un run salvato che il browser non legge più dà un errore leggibile e lo stato resta", async () => {
@@ -595,4 +634,8 @@ test("albero: findNode e righe di run.json per i moduli che il codice del corso 
   assert.equal(classes.get("blocks.0"), "Block");
   assert.equal(classesFromRunInfo(null).size, 0);
   assert.equal(classesFromRunInfo({ path: "x", class: 5 }).size, 0);
+  // run.json è un file dello studente: la classe va nelle etichette, senza controlli bidirezionali (prima restavano)
+  const strange = classesFromRunInfo({ path: "", class: "GPT\u202eledoM", children: [{ path: "a", class: "\u2066\u202e" }] });
+  assert.equal(strange.get(""), "GPTledoM");
+  assert.equal(strange.has("a"), false, "una classe fatta solo di controlli non c'è");
 });

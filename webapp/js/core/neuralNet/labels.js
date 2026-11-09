@@ -17,6 +17,7 @@
  * Tutto questo si ricalcola solo quando la camera si muove (update), mai a riposo.
  */
 import * as THREE from "three";
+import { roundRect } from "../diagram.js";
 import { labelMaterial } from "./shaders.js";
 
 const FONT = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif";
@@ -298,12 +299,3 @@ export function shelfPack(regions, maxWidth) {
   return { width: Math.min(maxWidth, Math.max(16, width)), height: Math.max(16, y + shelf + GAP) };
 }
 
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}

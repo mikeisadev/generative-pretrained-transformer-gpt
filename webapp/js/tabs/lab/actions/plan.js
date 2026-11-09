@@ -10,14 +10,12 @@
  * camera; una cella è CELL = 0,04; i vettori sono stirati ×3 sul lato sottile (VECTOR_STRETCH).
  */
 import { padPlacement } from "../../../core/navMath.js";
-import { CELL, VECTOR_STRETCH } from "../scene/layout.js";
+import { CELL } from "../scene/layout.js";
 
 /** Spazio tra un peso e la sua attivazione temporanea: lascia libera l'etichetta "weight (16, 64)" (0,105). */
 export const LABEL_CLEARANCE = 0.13;
 /** Spazio tra due carte vicine. */
 export const CARD_GAP = 0.05;
-/** Il lato sottile dei vettori della scena (bias, γ, β: stirati ×3). */
-export const VECTOR_SIDE = CELL * VECTOR_STRETCH;
 /**
  * Il lato sottile delle carte-vettore temporanee (x, i prodotti, le uscite): ×2, più sottili dei vettori
  * della scena. Da vicino conta: una finestra di numeri leggibili è alta poche celle.
@@ -45,12 +43,6 @@ export function cardRect({ x0, y1, rows, cols, cellW = CELL, cellH = CELL }) {
 export function rowAbove(m, { level = 0, rows = 1, cellH = TEMP_SIDE, gap = LABEL_CLEARANCE } = {}) {
   const y0 = m.y1 + gap + level * (rows * cellH + CARD_GAP);
   return cardRect({ x0: m.x0, y1: y0 + rows * cellH, rows, cols: m.cols, cellW: m.cellW ?? CELL, cellH });
-}
-
-/** Come rowAbove, ma sotto la matrice (i risultati che scendono, es. l'uscita di una LayerNorm). */
-export function rowBelow(m, { level = 0, rows = 1, cellH = TEMP_SIDE, gap = CARD_GAP * 2 } = {}) {
-  const y1 = m.y0 - gap - level * (rows * cellH + CARD_GAP);
-  return cardRect({ x0: m.x0, y1, rows, cols: m.cols, cellW: m.cellW ?? CELL, cellH });
 }
 
 /**

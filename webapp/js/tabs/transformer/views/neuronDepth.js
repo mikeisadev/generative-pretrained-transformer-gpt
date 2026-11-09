@@ -31,7 +31,7 @@ import { buildNetworkModel } from "../../../core/neuralNet/model.js";
 import { HEAD_COLORS } from "../../../core/neuralNet/roles.js";
 import { NetworkScene } from "../../../core/neuralNet/scene.js";
 import { DEPTH_DIRECTIONS, framePose } from "./neuronDepthCamera.js";
-import { DEPTH_FRACTIONS, buildDepthSpec, depthNote, sectionTitle, sliceCounts, unitDescription, weightOrders } from "./neuronDepthSpec.js";
+import { buildDepthSpec, depthBuildPlan, depthNote, sectionTitle, sliceCounts, unitDescription, weightOrders } from "./neuronDepthSpec.js";
 
 export { sectionTitle };
 
@@ -42,7 +42,6 @@ const TOUCH_TIP_MS = 2600;
 /** Si gira attorno alla rete fin quasi di fianco e dall'alto, mai da dietro (il flusso si leggerebbe al contrario). */
 const ORBIT = { turn: 85, tilt: 82, minDistance: 0.5 };
 const FLIGHT = 1.1;
-const MAX_FRACTION = Math.max(...DEPTH_FRACTIONS); // la quota con cui si ricostruisce una volta sola (vedi build)
 /** Comandi DOM sopra il canvas del tab che le etichette della rete lasciano liberi (vedi coveredRects). */
 const STAGE_OBSTACLES = ":scope > .tf-neuron-bar, :scope > .sidebar-toggle, :scope > .rep-switch, :scope > .stage-toolbar, :scope > .nav-pad, :scope > .nav-hud > :not([hidden]), :scope > .player-bar";
 const ROOT_OBSTACLES = ":scope > .caption, :scope > .charts-fab, :scope > .charts-panel.open, :scope > .code-panel";
@@ -101,19 +100,13 @@ export class DepthLayout {
 
   // ---------------------------------------------------------------- modello e scena
   /**
-   * Modello puro per questo prompt e questi pesi: riusato se non è cambiato niente e se ha abbastanza pesi
-   * della fetta per la quota chiesta (la quota mostrata la sceglie applyFraction). Con lo stesso prompt e
-   * una quota più alta si ricostruisce con la quota massima, così i cambi seguenti non ricostruiscono più;
-   * con un prompt nuovo si torna alla quota chiesta (costruzione più rapida). Con un solo token i pesi
-   * della fetta non sono "sulla fetta" (stanno tra i collegamenti normali): lì si costruisce con la quota.
+   * Modello puro per questo prompt e questi pesi, se serve (regola in depthBuildPlan: riusato se non è
+   * cambiato niente e se ha abbastanza pesi della fetta per la quota chiesta; la quota mostrata la sceglie
+   * applyFraction). → true se ha costruito.
    */
   build(engine, trace, fraction) {
-    const wkey = weightsKey(engine);
-    const key = wkey === null ? null : `${wkey}|${trace.ids.join(",")}`;
-    const same = key !== null && key === this.modelKey && this.model !== null;
-    const scalable = trace.T > 1;
-    if (same && (scalable ? fraction <= this.builtFraction : fraction === this.builtFraction)) return false;
-    const buildFraction = same && scalable ? Math.max(MAX_FRACTION, fraction) : fraction;
+    const { rebuild, key, wkey, buildFraction } = this.buildPlan(engine, trace, fraction);
+    if (!rebuild) return false;
     const t0 = performance.now();
     const param = (name) => engine.paramViews.get(name).data;
     if (wkey === null || wkey !== this.ordersKey) {
@@ -131,6 +124,26 @@ export class DepthLayout {
     this.stats.modelMs = performance.now() - t1;
     this.stats.builds++;
     return true;
+  }
+
+  /**
+   * Che cosa farebbe build() con questi dati, senza farlo: `rebuild` (serve un modello nuovo), le chiavi e la
+   * quota con cui costruirebbe (depthBuildPlan, logica pura testata).
+   */
+  buildPlan(engine, trace, fraction) {
+    const wkey = weightsKey(engine);
+    const key = wkey === null ? null : `${wkey}|${trace.ids.join(",")}`;
+    const plan = depthBuildPlan({ key, builtKey: this.model ? this.modelKey : undefined, builtFraction: this.builtFraction, T: trace.T, fraction });
+    return { rebuild: plan.rebuild, key, wkey, buildFraction: plan.fraction };
+  }
+
+  /**
+   * true se update() con questi dati ricostruirebbe la scena (prompt o pesi nuovi, una quota oltre quella
+   * costruita); false se gli basta setSliceDensity (pochi ms). La vista lo chiede prima di scrivere
+   * «Ricostruisco la rete…» e di aspettare un frame perché il messaggio si veda.
+   */
+  needsRebuild({ engine, trace, fraction }) {
+    return this.active && this.buildPlan(engine, trace, fraction).rebuild;
   }
 
   /** Crea la NetworkScene dal modello e la mette nella scena del tab, con lo stato visibile di prima. */

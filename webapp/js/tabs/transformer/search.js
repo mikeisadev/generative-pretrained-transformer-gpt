@@ -136,7 +136,7 @@ const views = [
     id: "numeri.training",
     title: "I pesi che nascono durante il training",
     text: "Gli 11 snapshot veri del training su Tiny Shakespeare, dallo step 0 (numeri casuali) allo step 5000: heatmap e numeri cambiano davanti a te. Anche con la stima lineare tra due snapshot, dichiarata come tale.",
-    keywords: ["snapshot", "pesi durante il training", "evoluzione dei pesi", "inizializzazione", "pesi casuali", "float16", "interpolazione", "Tiny Shakespeare", "nascita dei pesi"],
+    keywords: ["snapshot", "pesi durante il training", "evoluzione dei pesi", "inizializzazione", "pesi casuali", "float16", "interpolazione", "Tiny Shakespeare", "nascita dei pesi", "guarda i pesi nascere"],
   },
   {
     id: "rete",
@@ -154,7 +154,7 @@ const views = [
     id: "neuroni",
     title: "Vista Rete neurale",
     text: "Tutti i neuroni e le connessioni del modello; clic su un neurone per vedere il suo calcolo.",
-    keywords: ["neuroni", "rete neurale", "neural network", "connessioni", "attivazioni", "MLP"],
+    keywords: ["neuroni", "rete neurale", "a righe", "neural network", "connessioni", "attivazioni", "MLP"],
   },
   {
     id: "neuroni-profondita",

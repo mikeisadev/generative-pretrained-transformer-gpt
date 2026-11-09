@@ -257,11 +257,21 @@ function exportGuide() {
         { className: "lab-cmd" },
         el("h4", { className: "lab-h4" }, s.title),
         el("p", { className: "hint" }, s.note),
-        el("div", { className: "lab-cmd-row" }, el("code", {}, s.command), el("button", { type: "button", className: "lab-small", onclick: () => copyText(s.command).then(() => showToast("Comando copiato.")), ariaLabel: `Copia il comando: ${s.title}` }, "Copia")),
+        el("div", { className: "lab-cmd-row" }, el("code", {}, s.command), el("button", { type: "button", className: "lab-small", onclick: () => copyCommand(s.command), ariaLabel: `Copia il comando: ${s.title}` }, "Copia")),
       ),
     ),
     el("p", { className: "hint" }, "I run esportati stanno in runs/, che git ignora. Formati e regole: README, sezione «Esportare un run e confrontarlo nel Laboratorio pesi»."),
   );
+}
+
+/**
+ * «Copia» di un comando. copyText dice se ci è riuscito (appunti vietati, pagina non sicura): prima il messaggio era
+ * sempre «Comando copiato.», anche quando negli appunti non c'era niente; ora, se non riesce, il comando da copiare a mano.
+ */
+async function copyCommand(command) {
+  const ok = await copyText(command);
+  showToast(ok ? "Comando copiato." : `Non riesco a copiarlo: selezionalo e copialo a mano (${command})`, { duration: ok ? 2200 : 6000 });
+  return ok;
 }
 
 /** I limiti della libreria sono in multipli di 1024: "1 GB", "64 MB", "1,5 GB". */

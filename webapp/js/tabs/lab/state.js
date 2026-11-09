@@ -18,7 +18,7 @@
  * sapere chi altro ascolta, e ogni transizione si prova in Node.
  */
 
-import { BUILTIN_RUN_ID } from "../../shared/weights/run.js";
+import { BUILTIN_RUN_ID, snapshotBracket } from "../../shared/weights/run.js";
 import { snapStep } from "./steps.js";
 
 export const COURSE_RUN_ID = BUILTIN_RUN_ID;
@@ -44,6 +44,14 @@ export const EVENTS = Object.freeze([
 
 const MiB = 1024 * 1024;
 const INT = new Intl.NumberFormat("it-IT", { useGrouping: "always", maximumFractionDigits: 0 });
+
+/**
+ * Un run è "grande" se i suoi snapshot, decodificati tutti (float32), superano questi byte: allora quelli
+ * degli step lasciati si liberano (releaseSnapshots). Il GPT del corso ne pesa 9 MB (11 × 0,84 MB) e resta in
+ * cache: tornare a uno step, il confronto e «I pesi durante il training» restano immediati. Un run da 4,8 M di
+ * pesi con 11 snapshot ne terrebbe 210 MB.
+ */
+export const SNAPSHOT_BUDGET = 64 * MiB;
 
 /**
  * Riepilogo leggero di una voce del registro, per i pannelli (niente pesi).
@@ -435,7 +443,7 @@ export class LabState {
     const key = `${id}|${target ?? "finali"}`;
     const hit = this._touch(this._views, key);
     if (hit) return hit.promise;
-    const entry = { runId: id, bytes: 0, promise: null };
+    const entry = { runId: id, step: target, bytes: 0, promise: null };
     entry.promise = (async () => {
       if (target === null) {
         const first = run.tensors.values().next().value;
@@ -464,7 +472,7 @@ export class LabState {
     const key = `${id}|${v.step ?? "finali"}`;
     const hit = this._touch(this._engines, key);
     if (hit) return hit.promise;
-    const entry = { runId: id, promise: null };
+    const entry = { runId: id, step: v.step, promise: null };
     entry.promise = Promise.resolve().then(() => {
       const engine = run.createEngine();
       if (v.source !== "final") engine.setWeights(run.engineFlat(v.tensors));
@@ -479,6 +487,29 @@ export class LabState {
   /** Libera le viste dei pesi e i motori di un run (resta nel registro: riaprirlo li ricrea). */
   release(id) {
     for (const map of [this._views, this._engines]) for (const [key, e] of [...map]) if (e.runId === id) map.delete(key);
+  }
+
+  /**
+   * Run grandi (snapshot decodificati oltre `budget` byte in tutto, SNAPSHOT_BUDGET): toglie dalla memoria gli
+   * snapshot degli step che non servono più, cioè tutti tranne quelli dello step di A e di B (con
+   * l'interpolazione, i due snapshot attorno). Escono dalla cache anche le viste e i motori di quegli step: li
+   * tengono vivi (una vista di uno snapshot è una finestra sui suoi valori, un motore tiene la sua vista).
+   * Restano i pesi finali e le interpolazioni (sono copie, con il loro budget). Chi tiene già un riferimento lo
+   * conserva; tornando a uno step il file si rilegge. → quanti snapshot ha tolto.
+   */
+  releaseSnapshots({ budget = SNAPSHOT_BUDGET } = {}) {
+    let dropped = 0;
+    for (const e of this._entries.values()) {
+      const run = e.run;
+      const steps = run?.steps ?? [];
+      if (!steps.length || steps.length * run.totalParams * 4 <= budget) continue;
+      const keep = new Set([...(e.id === this.runA ? stepsUsed(steps, this.step) : []), ...(e.id === this.runB ? stepsUsed(steps, this.stepB) : [])]);
+      const snapshotSteps = new Set(steps);
+      const stale = (x) => x.runId === e.id && snapshotSteps.has(x.step) && !keep.has(x.step);
+      for (const map of [this._views, this._engines]) for (const [key, x] of [...map]) if (stale(x)) map.delete(key);
+      dropped += run.unloadSnapshots({ keep });
+    }
+    return dropped;
   }
 
   /** Memoria delle cache (per i test e la console): viste, interpolazioni in byte, motori. */
@@ -572,6 +603,14 @@ function info(e) {
     summary: run ? run.summary() : e.summary,
     error: e.error,
   };
+}
+
+/** Gli snapshot che servono a mostrare `step` (null = pesi finali: nessuno): quello vero o i due attorno. */
+function stepsUsed(steps, step) {
+  if (step === null || step === undefined) return [];
+  const b = snapshotBracket(steps, step);
+  if (!b) return [];
+  return b.t === 0 ? [b.lo] : [b.lo, b.hi];
 }
 
 /** La vista dei pesi con la sua etichetta in italiano. */

@@ -9,7 +9,7 @@
  *   browser.compute("A");  browser.computeAll();  browser.cancel();  browser.render();
  */
 import { el } from "../../../core/dom.js";
-import { referenceAt } from "./benchmarkModel.js";
+import { greedyRequest, referenceAt } from "./benchmarkModel.js";
 import { BENCH } from "./content.js";
 import { fixed, int, num, pct, seconds, signedInt, signedNum } from "./format.js";
 import { checkConsistency } from "./protocol.js";
@@ -77,8 +77,7 @@ export function createBrowserBench(container, { tab, bench, charts, runner }) {
   async function runOne(id, step, { greedy = true, side, batch = false } = {}) {
     const p = await prepare(id, step);
     if (p.error) return { error: p.error };
-    const generation = p.data?.generation;
-    const wantGreedy = greedy ? { prompt: generation?.prompt ?? "ROMEO:\n", tokens: generation?.maxNewTokens ?? 200 } : null;
+    const wantGreedy = greedy ? greedyRequest(p.data?.generation) : null;
     job = { side, label: p.label, phase: "score", done: 0, total: 1, batch };
     renderProgress();
     const out = await runner.run({

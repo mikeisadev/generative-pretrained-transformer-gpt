@@ -12,6 +12,7 @@
  */
 import { pythonPath } from "../../../shared/weights/moduleTree.js";
 import { snapshotBracket } from "../../../shared/weights/run.js";
+import { shownChar } from "../../../shared/weights/display.js";
 
 // gli id della vista stanno nella registrazione leggera (numbers.js): una sola fonte
 export { BIRTH_VIEW_ID, NUMBERS_VIEW_ID } from "./numbers.js";
@@ -23,8 +24,9 @@ const INT = new Intl.NumberFormat("it-IT", { useGrouping: "always", maximumFract
 /** Gli step si scrivono senza separatore delle migliaia: sono nomi (max_iters 5000, snap_05000), non quantità. */
 const STEP = (n) => String(n);
 const pct = (t) => `${Math.round(t * 100)}%`;
-/** Spazio e a capo visibili: il GPT del corso lavora a caratteri e " " e "\n" sono token veri. */
-export const shownChar = (c) => (c === " " ? "␣" : c === "\n" ? "↵" : c === "\t" ? "⇥" : c);
+// Spazio e a capo visibili (il GPT del corso lavora a caratteri e " " e "\n" sono token veri): la regola condivisa
+// di shared/weights/display.js, riesportata qui per chi la importava da questo modulo.
+export { shownChar };
 
 // ---------------------------------------------------------------- sorgente dei pesi
 

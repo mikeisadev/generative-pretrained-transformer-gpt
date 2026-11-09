@@ -24,6 +24,7 @@
  */
 
 import { moduleSources, splitComment } from "../../../shared/weights/pythonSource.js";
+import { withoutBidiControls } from "../../../shared/weights/validate.js";
 import { roleOf } from "./roles.js";
 
 /** Lato di una cella nel mondo: lo stesso CELL di core/visuals.js (il test lo controlla). */
@@ -445,12 +446,17 @@ export function layoutModel(tree, { config = null, classes = null, snippets = nu
   return { root, nodes, params, boxes, bounds: { x0: root.x0, x1: root.x1, y0: root.y0, y1: root.y1, z1: Math.max(...boxes.map((b) => b.z)) }, total: tree.params, architecture: tree.architecture };
 }
 
-/** Le classi Python dell'albero di run.json (`modules`, scritto da scripts/export_run.py): percorso → classe. */
+/**
+ * Le classi Python dell'albero di run.json (`modules`, scritto da scripts/export_run.py): percorso → classe.
+ * run.json è un file dello studente: la classe finisce nelle etichette e nei titoli, quindi senza controlli
+ * bidirezionali (una con solo quelli non c'è).
+ */
 export function classesFromRunInfo(modules) {
   const out = new Map();
   const visit = (n, depth = 0) => {
     if (!n || typeof n !== "object" || depth > 64) return;
-    if (typeof n.path === "string" && typeof n.class === "string" && n.class) out.set(n.path, n.class.slice(0, 80));
+    const cls = typeof n.class === "string" ? withoutBidiControls(n.class.slice(0, 80)) : null;
+    if (typeof n.path === "string" && cls) out.set(n.path, cls);
     if (Array.isArray(n.children)) for (const c of n.children.slice(0, 4096)) visit(c, depth + 1);
   };
   visit(modules);
