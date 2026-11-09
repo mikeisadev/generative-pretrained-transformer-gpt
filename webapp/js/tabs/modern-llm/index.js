@@ -19,6 +19,8 @@
  *                     anche search.js, l'indice della ricerca globale, caricato senza la scena)
  *   regionCompass.js  "Dove sei": la regione su cui si trova chi passeggia nella scena
  *   subtabs.js        la barra dei sottotab; sceneClick.js il clic sulla scena (non trascinamento)
+ *   network.js, networkMechanisms.js, brain.js   rappresentazioni "Rete neurale" e "Cervello" del
+ *                     nucleo (soli dati, caricati alla prima apertura): valgono per tutto il tab
  *
  * Una sola scena per i due sottotab (un SceneHost, nessun contesto WebGL in più): cambiando
  * sottotab l'azione in corso si ferma, codice e didascalia si azzerano, ogni sottotab ricorda la sua
@@ -29,13 +31,21 @@
  * parete, né dentro gli schemi.
  * Link diretti e ricerca: goto({kind, id}) con
  *   step:<id del Percorso>, action:<id dell'azione>, view:macro|blocks|detail|<id di una regione>,
- *   view:overview | view:full | view:full-<…> | action:full-<…> | step:full-<…> (full/catalog.js).
+ *   view:overview | view:full | view:full-<…> | action:full-<…> | step:full-<…> (full/catalog.js),
+ *   view:rete | view:cervello (rappresentazioni del nucleo: reps.goto, prima di tutto il resto).
+ *
+ * Rappresentazioni e sottotab: il selettore "Architettura · Rete neurale · Cervello" vale per tutto il
+ * tab (la Rete neurale è il modello principale dell'architettura completa, anche dalla vista d'insieme).
+ * Con un livello alternativo aperto la barra dei sottotab resta visibile e usabile: scegliere un
+ * sottotab (o la scheda già attiva) chiude prima il livello; il pannello "Cervello" resta visibile nei due
+ * sottotab, sempre subito prima di "Fonti".
  */
 import * as THREE from "three";
 import { el, fillTemplate, fmt, sleep } from "../../core/dom.js";
 import { createTabLayout } from "../../core/layout.js";
 import { installStepKeys } from "../../core/stepKeys.js";
 import { LODController } from "../../core/lod.js";
+import { installRepresentations } from "../../core/representations.js";
 import { parseHash } from "../../core/search.js";
 import { Menu } from "../../core/ui/menu.js";
 import { ACTION_CATALOG, ACTION_IDS } from "./actionCatalog.js";
@@ -150,6 +160,8 @@ const PANE_PAIRS = [
   ["fonti", "full-fonti"],
 ];
 const OVERVIEW_PANES = ["percorso", "azioni", "viste", "modelli", "fonti"];
+/** Id del pannello "Cervello" creato da core/representations.js (comune ai due sottotab). */
+const BRAIN_PANE = "cervello";
 const FULL_STEP_IDS = new Set(FULL_PATH.flatMap((s) => s.children.map((c) => c.id)));
 
 export async function createTab(root, app) {
@@ -300,15 +312,34 @@ export async function createTab(root, app) {
   };
 
   // --- sidebar
+  const primaryModel = MODEL_BY_ID.get(PRIMARY_MODEL_ID);
   const panePath = sidebar.addPane({ id: "percorso", title: "Percorso" });
   const paneActions = sidebar.addPane({ id: "azioni", title: "Azioni", hint: "Animazioni passo per passo: in basso pausa, passo avanti/indietro e velocità. Le simulazioni sono dichiarate." });
   const paneViews = sidebar.addPane({ id: "viste", title: "Viste", hint: "Vai a un meccanismo o a uno dei livelli di zoom." });
   const paneModels = sidebar.addPane({ id: "modelli", title: "Modelli", hint: "Numeri dalle configurazioni e dai paper ufficiali dei modelli aperti." });
+  // Rappresentazioni del nucleo: selettore "Architettura · Rete neurale · Cervello" e pannello "Cervello",
+  // installati dopo i pannelli del tab e prima di "Fonti". Valgono per i due sottotab: la Rete neurale è
+  // sempre il modello principale dell'architettura completa (network.js lo dice nella scheda). Azioni, voli
+  // chiesti dallo studente e link diretti tornano da soli all'Architettura (ritorno automatico del nucleo);
+  // i cambi di sottotab e i passi del Percorso lo chiedono in modo esplicito (closeRepresentation).
+  const reps = installRepresentations(ui, {
+    tabId: "modern-llm",
+    app,
+    network: {
+      load: () => import("./network.js").then((m) => m.networkSpec),
+      description: `${primaryModel.name} neurone per neurone, da sinistra a destra: i ${primaryModel.config.layers} layer con le ripetizioni compresse. Girando la camera vedi i token del prompt: finestra locale, KV globale compressa e indexer, router ed esperti.`,
+    },
+    brain: {
+      load: () => import("./brain.js").then((m) => m.brainSpec),
+      description: "La dopamina e la scelta: le analogie tra gli LLM moderni e il cervello (esperti, KV cache, RL, ragionamento…), con i loro limiti e le fonti, e l'anello corteccia – gangli della base – talamo in 3D.",
+    },
+  });
+  /** Torna all'Architettura se un livello alternativo copre la scena (non aspetta: chi chiama prosegue). */
+  const closeRepresentation = () => reps.current !== "main" && void reps.show("main");
   const paneSources = sidebar.addPane({ id: "fonti", title: "Fonti", hint: "Paper, codice e configurazioni ufficiali da cui vengono numeri e formule." });
 
   // percorso: ogni sottopunto con un'azione ha il pulsante per avviarla; quelli su una regione anche
   // il collegamento all'architettura completa ("Dove sta in DeepSeek-V4.1-Flash")
-  const primaryModel = MODEL_BY_ID.get(PRIMARY_MODEL_ID);
   const steps = OVERVIEW_PATH.map((step) => ({
     ...step,
     children: step.children.map((item) => ({
@@ -331,6 +362,9 @@ export async function createTab(root, app) {
     tabId: "modern-llm",
     onSelect: (item) => {
       if (initial) return; // all'avvio si mostra la vista d'insieme, non la prima regione
+      // un passo si legge nella scena del tab: il volo che segue aspetta il codice del passo e potrebbe
+      // arrivare fuori dalla finestra del gesto, quindi il livello alternativo si chiude subito
+      closeRepresentation();
       if (item.code) tab.showCode(item.code);
       else tab.hideCode();
       if (item.focus) tab.focusRegion(item.focus);
@@ -431,8 +465,13 @@ export async function createTab(root, app) {
   /** Ritorno dopo un collegamento tra le due viste: { subtab, pose, regionId }. */
   let returnTo = null;
 
-  const bar = createSubtabs({ root, items: SUBTABS, current: "overview", onSelect: (id) => showSubtab(id), isBlocked: () => nav.modalOpen });
+  // Tasto V bloccato anche con l'aiuto della navigazione del livello alternativo aperto (è una finestra modale)
+  const bar = createSubtabs({ root, items: SUBTABS, current: "overview", onSelect: (id) => showSubtab(id), isBlocked: () => nav.modalOpen || Boolean(reps.stack?.nav.modalOpen) });
   addHelpShortcut(nav);
+  // Con un livello alternativo aperto la barra resta usabile (css/tabs/modern-llm.css): un clic sulla
+  // scheda GIÀ attiva non cambia sottotab (subtabs.js non chiama onSelect), ma deve mostrarne la scena.
+  // Per l'altra scheda ci pensa showSubtab; qui, dopo di lui, il livello è già chiuso e non succede niente.
+  bar.element.addEventListener("click", (e) => e.target.closest?.(".mllm-subtab") && closeRepresentation());
 
   const capturePose = () => ({ position: host.camera.position.clone(), target: host.controls.target.clone() });
   const restorePose = (p) => {
@@ -453,15 +492,31 @@ export async function createTab(root, app) {
     return fullLoading;
   }
 
-  /** Mostra solo i pannelli di un sottotab, restando sullo stesso tipo di pannello. */
+  /**
+   * Mostra solo i pannelli di un sottotab, restando sullo stesso tipo di pannello. "Cervello" (del nucleo)
+   * vale per tutti e due: resta visibile e, se era aperto, resta aperto.
+   */
   function swapPanes(to) {
     const current = sidebar.current;
     const pair = PANE_PAIRS.find(([a, b]) => a === current || b === current);
     const show = to === "full" ? full.panes : OVERVIEW_PANES;
     const hide = to === "full" ? OVERVIEW_PANES : full?.panes ?? [];
     for (const id of show) sidebar.setPaneHidden(id, false);
-    sidebar.select(pair ? pair[to === "full" ? 1 : 0] : show[0]);
+    placeBrainPane(to);
+    sidebar.select(current === BRAIN_PANE ? BRAIN_PANE : pair ? pair[to === "full" ? 1 : 0] : show[0]);
     for (const id of hide) sidebar.setPaneHidden(id, true);
+  }
+
+  /**
+   * La scheda "Cervello" subito prima delle "Fonti" del sottotab attivo. Il nucleo la crea una volta (prima di
+   * "Fonti" della vista d'insieme); i pannelli della vista completa arrivano dopo, al primo ingresso, e senza
+   * spostarla finirebbe in testa alla fila (prima di "Percorso"). La Sidebar non ha un'API per l'ordine:
+   * si sposta il pulsante nella sua barra (l'ordine dei pannelli nel corpo non si vede).
+   */
+  function placeBrainPane(to) {
+    const button = sidebar.nav.querySelector(`:scope > [data-pane="${BRAIN_PANE}"]`);
+    const before = sidebar.nav.querySelector(`:scope > [data-pane="${to === "full" ? "full-fonti" : "fonti"}"]`);
+    if (button && before && button.nextElementSibling !== before) sidebar.nav.insertBefore(button, before);
   }
 
   /** Grafici: solo le sezioni del sottotab attivo (quelle della vista completa hanno id "full-…"). */
@@ -474,6 +529,8 @@ export async function createTab(root, app) {
    * all'inquadratura iniziale); false quando chi chiama inquadra da sé (collegamenti, link diretti).
    */
   async function showSubtab(id, { restore = true } = {}) {
+    // la barra resta usabile sopra un livello alternativo: si torna prima alla scena del tab, poi si cambia
+    closeRepresentation();
     if (id === subtab) return true;
     const token = ++switching;
     bar.setCurrent(id);
@@ -609,6 +666,10 @@ export async function createTab(root, app) {
    * il guscio la chiama dopo activate(). → false se l'id non esiste (il guscio avvisa lo studente).
    */
   async function goto({ kind, id }) {
+    // view:rete e view:cervello mostrano la rappresentazione; per tutto il resto il livello aperto si chiude
+    // (si torna all'Architettura) e si prosegue come sempre: tutti gli id dei due sottotab restano validi
+    const shown = reps.goto({ kind, id });
+    if (shown) return shown;
     director.noteUserIntent(1500); // i voli che seguono sono chiesti dallo studente
     // Azioni e viste si guardano nella scena: sul telefono il cassetto della sidebar la coprirebbe.
     const showScene = (pane) => (NARROW.matches ? sidebar.toggleCollapsed(true) : sidebar.select(pane));

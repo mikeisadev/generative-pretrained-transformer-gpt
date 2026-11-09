@@ -82,7 +82,8 @@ const KIND_PLURAL = Object.freeze({ word: "radici", bigram: "coppie", char: "tri
 const KIND_ORDER = Object.freeze({ word: 0, bigram: 1, char: 2 });
 /** Prima dimensione libera per l'hashing: le precedenti sono riservate dall'embedder (comune, sconosciute). */
 const FIRST_HASHED = Math.max(SHARED_DIMENSION, UNKNOWN_DIMENSION) + 1;
-const it = (n, digits = 0) => Number(n).toLocaleString("it-IT", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+// come fmt di core/dom.js: separatore delle migliaia anche a 4 cifre ("4.096", non "4096"), uguale alla scheda del nucleo
+const it = (n, digits = 0) => Number(n).toLocaleString("it-IT", { useGrouping: "always", minimumFractionDigits: digits, maximumFractionDigits: digits });
 const quoted = (text, max = 90) => `«${text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text}»`;
 
 /**
@@ -217,11 +218,11 @@ export function buildRagNetworkSpec({ kb, run, origin = "panel" }) {
     // sopra di loro (nell'ordine opposto il titolo grande, piazzato per primo, spingeva su o nascondeva i piccoli).
     // Etichette corte: di lato, a rete intera, la parentesi della parte 2 è larga poche decine di pixel.
     groups: [
-      { label: "1 · Il nostro embedder", from: "emb.features", to: "emb.q", text: "Testo → feature → hashing → normalizzazione: un embedder a regole, senza una rete neurale, che simula text-embedding-3-small in modo dichiarato." },
-      { label: "2 · Database vettoriale", from: "db.chunks", to: "db.topk", text: "La ricerca di RagService.search: la domanda contro ogni chunk della tabella vector_store, poi topK e soglia come in PgVectorStore." },
+      { label: "1 · Embedder", from: "emb.features", to: "emb.q", text: "Testo → feature → hashing → normalizzazione: un embedder a regole, senza una rete neurale, che simula text-embedding-3-small in modo dichiarato." },
+      { label: "2 · Database", from: "db.chunks", to: "db.topk", text: "La ricerca di RagService.search: la domanda contro ogni chunk della tabella vector_store, poi topK e soglia come in PgVectorStore." },
       { label: "Valori veri", from: "emb.features", to: "db.topk", color: "#86efac", text: "Le parti 1 e 2 sono il tab vero: ogni numero è calcolato nel browser da js/shared/rag e dalla pipeline del tab (pipeline.js), per la domanda scritta nell'introduzione." },
-      { label: "3 · Encoder (E5 small)", from: "enc.tokens", to: "enc.vec", text: "Come un modello neurale trasforma la domanda in un vettore: token in fila, attention in entrambe le direzioni, media dei token." },
-      { label: "4 · LLM (Llama 3 8B)", from: "llm.prompt", to: "llm.next", text: "Il decoder che legge il prompt aumentato (domanda + chunk scelti) e scrive la risposta un token alla volta." },
+      { label: "3 · Encoder E5", from: "enc.tokens", to: "enc.vec", text: "Come un modello neurale trasforma la domanda in un vettore: token in fila, attention in entrambe le direzioni, media dei token." },
+      { label: "4 · LLM Llama 3", from: "llm.prompt", to: "llm.next", text: "Il decoder che legge il prompt aumentato (domanda + chunk scelti) e scrive la risposta un token alla volta." },
       { label: "Illustrativo: valori simulati", from: "enc.tokens", to: "llm.next", color: "#fcd34d", text: "Le parti 3 e 4 mostrano due modelli aperti come esempio, con i numeri dei loro config ufficiali. Le attivazioni sono simulate con un seme: servono a vedere i meccanismi, non sono calcoli veri." },
     ],
     sources: SOURCES,
@@ -266,7 +267,7 @@ function embedderPart({ ex, features, dims, nonzero, embedder }) {
         text: [
           "Il nostro embedder non legge la frase come un modello neurale: la spezza in pezzi riconoscibili, le feature. Radici delle parole («spes» per spesa e spese), coppie di radici vicine e trigrammi di caratteri, che riconoscono le varianti della stessa parola.",
           "Ogni feature ha un peso tf-idf: pesa di più se compare nella domanda e di rado nei documenti, come una parola sottolineata in un libro in cui quasi nessuno sottolinea.",
-          `Niente profondità: per questo embedder l'ordine delle parole non conta (tranne nelle coppie vicine), la domanda è un «sacchetto» di feature e le vedi in colonna.${unknown ? ` ${unknown === 1 ? "Una feature non compare" : `${unknown} feature non compaiono`} in nessun documento (mai vista).` : ""} Valori veri, calcolati nel browser.`,
+          `Niente profondità: per questo embedder l'ordine delle parole non conta (tranne nelle coppie vicine), la domanda è un «sacchetto» di feature e le vedi in colonna.${unknown ? ` ${unknown === 1 ? "Una feature non compare" : `${unknown} feature non compaiono`} in nessun documento: passandoci sopra leggi «(mai vista)».` : ""} Valori veri, calcolati nel browser.`,
         ].join("\n\n"),
       },
       {

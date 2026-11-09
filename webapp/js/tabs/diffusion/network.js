@@ -130,6 +130,59 @@ export function timestepValues(t = FIRST_T) {
   return Float32Array.from([...TIME_INDICES.map((i) => full[i]), ...TIME_INDICES.map((i) => full[half + i])]);
 }
 
+// ------------------------------------------------------------------------------------------ pesi illustrativi
+
+/**
+ * Le parole del prompt che nominano una zona dell'immagine del tab (indici in TEXT_TOKENS). Il mare non è
+ * nel prompt: lo colora il sole che tramonta, come il cielo.
+ */
+export const ZONE_WORDS = Object.freeze({ faro: 2, scogliera: 5, tramonto: 7 });
+
+/**
+ * Zona di un punto dell'immagine del tab (u, v in [0, 1], v dall'alto in basso): "faro" (tetto, lanterna e
+ * torre), "scogliera" o "tramonto" (cielo e mare). Le forme sono quelle di renderScene in imagery.js, che
+ * non le esporta: un test confronta le zone con i colori dell'immagine disegnata, così se la scena cambia
+ * il test se ne accorge.
+ */
+export function sceneZone(u, v) {
+  const towerX = 0.24;
+  const towerTop = 0.3;
+  const cliffTop = 0.585;
+  const dx = Math.abs(u - towerX);
+  const roof = (towerTop - 0.04 - v) / 0.045;
+  if (roof >= 0 && roof <= 1 && dx < 0.032 * (1 - roof)) return "faro";
+  if (v > towerTop - 0.04 && v <= towerTop && dx < 0.026) return "faro";
+  if (v > towerTop && v < cliffTop + 0.01 && dx < 0.022 + 0.01 * ((v - towerTop) / (cliffTop - towerTop))) return "faro";
+  const edge = 0.42 + 0.05 * Math.sin(v * 23) + (v - cliffTop) * 0.35;
+  const top = cliffTop + 0.015 * Math.sin(u * 40) + Math.max(0, u - 0.33) * 0.9;
+  return u < edge && v > top ? "scogliera" : "tramonto";
+}
+
+/**
+ * Pesi ILLUSTRATIVI della cross-attention verso una griglia side × side (1 head, [query][token], righe che
+ * sommano a 1): ogni posizione divide il peso tra le parole delle zone che copre, in proporzione all'area
+ * (samples × samples punti per cella). Scelti sulla scena del tab, non calcolati da un modello: in Stable
+ * Diffusion la mappa di una parola che nomina un oggetto si concentra davvero dove l'oggetto compare
+ * (Tang et al. 2022, DAAM), ma ogni posizione dà un po' di peso a tutti i 77 token. Perché non i pesi
+ * simulati del nucleo: quelli scelgono parole a caso (la fetta «faro» cadrebbe in posizioni a caso) e con 4
+ * archi per posizione la cross-attention diventa una tenda viola che copre la U-Net; così gli archi sono
+ * circa un terzo e ogni parola entra nella sua zona a ogni livello.
+ */
+export function crossAttentionMap(side, samples = 16) {
+  const T = TEXT_TOKENS.length;
+  const out = new Float32Array(side * side * T);
+  const share = 1 / (samples * samples);
+  for (let r = 0; r < side; r++) {
+    for (let c = 0; c < side; c++) {
+      const row = (r * side + c) * T;
+      for (let a = 0; a < samples; a++) {
+        for (let b = 0; b < samples; b++) out[row + ZONE_WORDS[sceneZone((c + (b + 0.5) / samples) / side, (r + (a + 0.5) / samples) / side)]] += share;
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Pesi "di struttura" dell'attention fattorizzata del video (1 head, query × chiave, righe che sommano a
  * 1; posizione = frame × 4 + patch, come nella griglia): spaziale = le posizioni dello stesso frame,
@@ -177,7 +230,7 @@ function textEncoder() {
     },
     {
       id: "txt_out", label: "Testo codificato", sub: `LayerNorm finale · ${SD.textTokens} × ${SD.textWidth}`, role: "norm", neurons: 12, depth: true, real: SD.textWidth,
-      text: `L'ultima LayerNorm dà ${SD.textTokens} vettori da ${SD.textWidth} numeri: è ciò che Stable Diffusion usa del testo (last_hidden_state). Si calcola una volta sola per immagine e poi resta fisso: la U-Net lo rilegge a ogni passo, in ogni cross-attention (gli archi lunghi che partono da qui). Il text encoder è congelato: non si addestra insieme alla U-Net.\n\nScegli una parola come fetta («faro», per esempio): restano accesi solo i suoi archi, e si vede in quali posizioni dell'immagine entra.`,
+      text: `L'ultima LayerNorm dà ${SD.textTokens} vettori da ${SD.textWidth} numeri: è ciò che Stable Diffusion usa del testo (last_hidden_state). Si calcola una volta sola per immagine e poi resta fisso: la U-Net lo rilegge a ogni passo, in ogni cross-attention (gli archi lunghi che partono da qui). Il text encoder è congelato: non si addestra insieme alla U-Net.\n\nScegli una parola come fetta («faro», per esempio): restano accesi solo i suoi archi, e si vede in quali posizioni dell'immagine entra a ogni livello della U-Net (archi illustrativi: vedi il blocco di attention).`,
     },
   ];
   const links = [
@@ -217,18 +270,18 @@ function resText(L, { decoder, entering }) {
 }
 
 /**
- * Head disegnate della cross-attention: una sola. Ogni posizione della griglia tiene fino a 4 chiavi per head,
- * quindi con due head gli archi dal testo (lunghi, sopra tutta la U-Net) diventerebbero una tenda che
- * nasconde la rete quando si gira la camera. La self-attention ne mostra due.
+ * Head disegnate della cross-attention: una sola, con i pesi illustrativi di crossAttentionMap. Con due
+ * head gli archi dal testo (lunghi, sopra tutta la U-Net) raddoppierebbero e coprirebbero la rete quando
+ * si gira la camera. La self-attention ne mostra due.
  */
 const CROSS_HEADS = 1;
 
 /** Testo del blocco di attention di un livello (self-attention + cross-attention + feed-forward). */
 function attentionText(L, { first }) {
   const positions = L.res * L.res;
-  if (!first) return `Lo stesso blocco del primo livello sulle ${thousands(positions)} posizioni di questo: self-attention tra le posizioni (gli archi ad ansa) e cross-attention verso i ${SD.textTokens} token del testo (gli archi lunghi da sinistra). Pesi simulati.`;
+  if (!first) return `Lo stesso blocco del primo livello sulle ${thousands(positions)} posizioni di questo: self-attention tra le posizioni (gli archi ad ansa, pesi simulati) e cross-attention verso i ${SD.textTokens} token del testo (gli archi lunghi da sinistra, schema illustrativo: ogni parola entra nella sua zona dell'immagine).`;
   const pairs = String(Math.round((positions * positions) / 1e5) / 10).replace(".", ",");
-  return `Il blocco transformer della U-Net (il blocco viola della scena), in tre passi.\n\nSelf-attention: ogni posizione guarda tutte le altre, senza maschera, perché un'immagine non ha un prima e un dopo; così due zone lontane si accordano, come i due occhi dello stesso viso. A ${L.res} × ${L.res} le posizioni sono ${thousands(positions)}: circa ${pairs} milioni di coppie per head (gli archi ad ansa).\n\nCross-attention: ogni posizione «chiede» ai ${SD.textTokens} vettori del testo quali parole la riguardano: la zona del cielo può dare peso a «tramonto», quella della torre a «faro». Query dall'immagine, key e value dal testo: gli archi lunghi che arrivano dal «Testo codificato» (qui una head sola, perché non coprano la rete).\n\nPoi un feed-forward (GEGLU) per ogni posizione. Pesi di attention simulati: le due head disegnate della self-attention seguono schemi fissi (la posizione accanto, la prima posizione); in un modello addestrato i pesi dipendono dal contenuto dell'immagine.`;
+  return `Il blocco transformer della U-Net (il blocco viola della scena), in tre passi.\n\nSelf-attention: ogni posizione guarda tutte le altre, senza maschera, perché un'immagine non ha un prima e un dopo; così due zone lontane si accordano, come i due occhi dello stesso viso. A ${L.res} × ${L.res} le posizioni sono ${thousands(positions)}: circa ${pairs} milioni di coppie per head (gli archi ad ansa).\n\nCross-attention: ogni posizione «chiede» ai ${SD.textTokens} vettori del testo quali parole la riguardano. Query dall'immagine, key e value dal testo: gli archi lunghi che arrivano dal «Testo codificato», una head sola. Gli archi sono uno schema illustrativo, non calcolato: ogni posizione guarda la parola della sua zona nell'immagine del tab (la torre «faro», la scogliera «scogliera», cielo e mare «tramonto»). In Stable Diffusion succede davvero che la mappa di una parola si concentri dove compare la cosa che nomina, ma ogni posizione dà un po' di peso a tutti i ${SD.textTokens} token, anche a «un», «su» e a <inizio>.\n\nPoi un feed-forward (GEGLU) per ogni posizione. La self-attention è simulata: le due head disegnate seguono schemi fissi (la posizione accanto, la prima posizione); in un modello addestrato i pesi dipendono dal contenuto dell'immagine.`;
 }
 
 /** ResNet block e blocco di attention di un livello, più la ripetizione (× 2 nell'encoder, × 3 nel decoder). */
@@ -246,7 +299,7 @@ function level(p, L, { decoder = false, entering = null } = {}) {
     links.push(
       { from: `${p}_res`, to: `${p}_attn`, pattern: "dense", density: 0.25, label: "GroupNorm e proiezione 1 × 1" },
       { within: `${p}_attn`, pattern: "attention" }, // nessuna maschera: tutte le posizioni con tutte
-      { from: "txt_out", to: `${p}_attn`, pattern: "attention", heads: CROSS_HEADS, label: "cross-attention al testo" }, // dai token alle posizioni
+      { from: "txt_out", to: `${p}_attn`, pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L.res)), label: "cross-attention al testo (schema illustrativo)" }, // dai token alle posizioni
     );
   }
   const ids = sections.map((s) => s.id);
@@ -314,14 +367,14 @@ function unet() {
   const mid = (o) => mapSection(L3, o);
   sections.push(
     mid({ id: "un_m_res1", label: "Centro: ResNet block", sub: mapSub(L3.res, L3.channels), role: "conv", text: "Il fondo della U: qui ogni posizione vede una zona grande dell'immagine e si decide la composizione d'insieme (dove sta il faro, dove il mare)." }),
-    mid({ id: "un_m_attn", label: "Centro: self- e cross-attention", sub: `${L3.res * L3.res} posizioni · ${SD.heads} head, qui 2 (cross: 1)`, role: "attention", heads: 2, text: "Anche al centro c'è un blocco di attention: le posizioni del fondo della U si guardano tra loro (self-attention) e interrogano il testo (cross-attention). Pesi simulati." }),
+    mid({ id: "un_m_attn", label: "Centro: self- e cross-attention", sub: `${L3.res * L3.res} posizioni · ${SD.heads} head, qui 2 (cross: 1)`, role: "attention", heads: 2, text: "Anche al centro c'è un blocco di attention: le posizioni del fondo della U si guardano tra loro (self-attention, pesi simulati) e interrogano il testo (cross-attention, schema illustrativo). Qui ogni posizione riassume un quarto dell'immagine, quindi divide il peso tra più parole." }),
     mid({ id: "un_m_res2", label: "Centro: ResNet block", sub: mapSub(L3.res, L3.channels), role: "conv", text: "Il secondo ResNet block del centro chiude il fondo della U: da qui si risale." }),
   );
   links.push(
     { from: previous, to: "un_m_res1", pattern: "conv", density: 0.2 },
     { from: "un_m_res1", to: "un_m_attn", pattern: "dense", density: 0.25, label: "GroupNorm e proiezione 1 × 1" },
     { within: "un_m_attn", pattern: "attention" },
-    { from: "txt_out", to: "un_m_attn", pattern: "attention", heads: CROSS_HEADS, label: "cross-attention al testo" },
+    { from: "txt_out", to: "un_m_attn", pattern: "attention", heads: CROSS_HEADS, weights: crossAttentionMap(side(L3.res)), label: "cross-attention al testo (schema illustrativo)" },
     { from: "un_m_attn", to: "un_m_res2", pattern: "conv", density: 0.2 },
   );
   resBlocks.push("un_m_res1", "un_m_res2");
@@ -365,16 +418,16 @@ function decoderToPixels() {
       text: `Lo scheduler non ha pesi: con la formula di DDIM toglie da z_t la parte di rumore prevista (l'arco che arriva da z_t, sopra tutta la U-Net) e calcola z_t−1, un po' più pulito. Poi z_t−1 torna all'ingresso della U-Net con un t più piccolo: con le impostazioni del tab ${GENERATION.steps} volte, e a ogni passo la U-Net gira due volte per la classifier-free guidance.\n\nCome un restauratore che ripassa lo stesso quadro: ogni passata toglie un po' di sporco. Dopo l'ultimo passo resta z_0, il latente pulito.`,
     },
     {
-      id: "vae_mid", label: "VAE decoder: ingresso e centro", sub: `4 → ${SD.vaeChannels} canali · ResNet · attention · ResNet · qui ${VAE_SHOWN}`, role: "attention", heads: 1, neurons: VAE_SHOWN, depth: latent, real: SD.vaeChannels,
-      text: `Il latente pulito z_0 viene diviso per 0,18215 (scale_factor: nel training lo si era moltiplicato per avere varianza circa 1) ed entra nel decoder del VAE, una rete separata, addestrata prima e congelata. Una convoluzione porta i 4 canali a ${SD.vaeChannels}; poi due ResNet block con in mezzo un'attention a una sola head tra tutte le posizioni. Pesi simulati.`,
+      id: "vae_mid", label: "VAE decoder: ingresso e centro", sub: `4 → ${SD.vaeChannels} canali · ResNet, attention, ResNet, 3 ResNet · qui ${VAE_SHOWN}`, role: "attention", heads: 1, neurons: VAE_SHOWN, depth: latent, real: SD.vaeChannels,
+      text: `Il latente pulito z_0 viene diviso per 0,18215 (scale_factor: nel training lo si era moltiplicato per avere varianza circa 1) ed entra nel decoder del VAE, una rete separata, addestrata prima e congelata. Una convoluzione porta i 4 canali a ${SD.vaeChannels}; poi due ResNet block con in mezzo un'attention a una sola head tra tutte le posizioni, e altri tre ResNet block, ancora a ${SD.latentSide} × ${SD.latentSide}. Pesi simulati.`,
     },
     {
       id: "vae_up", label: "VAE: upsample e 3 ResNet block", sub: `64 → 128 · ${SD.vaeChannels} canali · qui ${side(SD.latentSide)} → ${IMAGE_SIDE} · ${VAE_SHOWN}`, role: "conv", neurons: VAE_SHOWN, depth: IMAGE_DEPTH, real: SD.vaeChannels,
-      text: "La griglia raddoppia (copia 2 × 2 e convoluzione) e tre ResNet block «inventano» i dettagli che il latente aveva solo riassunto. Nel modello vero i raddoppi sono tre, 64 → 128 → 256 → 512, mentre i canali scendono 512 → 256 → 128: qui se ne disegna uno.",
+      text: "La griglia raddoppia (copia 2 × 2 e convoluzione) e tre ResNet block «inventano» i dettagli che il latente aveva solo riassunto. Nel modello vero i raddoppi sono tre, 64 → 128 → 256 → 512, ognuno seguito da tre ResNet block, mentre i canali scendono 512 → 256 → 128: qui se ne disegna uno.",
     },
     {
       id: "vae_out", label: "Immagine", sub: `512 × 512 × 3 (rosso, verde, blu) · qui ${IMAGE_SIDE} × ${IMAGE_SIDE}`, role: "output", neurons: 3, depth: IMAGE_DEPTH, activation: "signed", real: 3,
-      text: `Gli altri due raddoppi, una GroupNorm e una convoluzione 3 × 3 finale arrivano a 3 canali: rosso, verde e blu, con valori tra −1 e 1. Qui una sfera ogni ${512 / IMAGE_SIDE} × ${512 / IMAGE_SIDE} pixel.\n\nIl decoder del VAE si usa una volta sola, alla fine: per questo conviene far girare la diffusione nel latente, 48 volte più piccolo dei pixel (16.384 numeri contro 786.432).`,
+      text: `Gli altri due raddoppi, ognuno con i suoi tre ResNet block, poi GroupNorm, SiLU e una convoluzione 3 × 3 finale arrivano a 3 canali: rosso, verde e blu, con valori circa tra −1 e 1 (poi riportati a 0-255). Qui una sfera ogni ${512 / IMAGE_SIDE} × ${512 / IMAGE_SIDE} pixel.\n\nIl decoder del VAE si usa una volta sola, alla fine: per questo conviene far girare la diffusione nel latente, 48 volte più piccolo dei pixel (16.384 numeri contro 786.432).`,
     },
   ];
   const links = [
@@ -383,7 +436,7 @@ function decoderToPixels() {
     { from: "sch", to: "vae_mid", pattern: "conv", density: 0.05, label: "dopo l'ultimo passo: z_0" },
     { within: "vae_mid", pattern: "attention" },
     { from: "vae_mid", to: "vae_up", pattern: "up", density: 0.3 },
-    { from: "vae_up", to: "vae_out", pattern: "conv", density: 0.02, label: "altri due raddoppi e conv finale" },
+    { from: "vae_up", to: "vae_out", pattern: "conv", density: 0.02, label: "altri due raddoppi, ResNet block e conv finale" },
   ];
   return { sections, links };
 }
@@ -447,7 +500,9 @@ export const NETWORK_SOURCES = Object.freeze([
   { title: "Ronneberger, Fischer, Brox (2015), U-Net", url: "https://arxiv.org/abs/1505.04597", note: "L'architettura a U con le skip connection." },
   { title: "Ho et al. (2022), Video Diffusion Models", url: "https://arxiv.org/abs/2204.03458", note: "Attention spaziale seguita da attention temporale (fattorizzata)." },
   { title: "Wan 2.1: README (architettura)", url: "https://github.com/Wan-Video/Wan2.1/blob/9737cba9c1c3c4d04b33fcad41c111989865d315/README.md#2-video-diffusion-dit", note: "Diffusion transformer video: 30 layer (1,3B) o 40 (14B), testo T5 con cross-attention in ogni blocco." },
+  { title: "Wan 2.1: model.py (WanSelfAttention) e configurazioni", url: "https://github.com/Wan-Video/Wan2.1/blob/9737cba9c1c3c4d04b33fcad41c111989865d315/wan/modules/model.py#L105-L160", note: "Self-attention su tutti i token del video (F × H × W, con RoPE 3D); le configurazioni t2v_1_3B e t2v_14B hanno window_size (−1, −1), cioè nessuna finestra locale: attention completa." },
   { title: "HunyuanVideo (codice e report)", url: "https://github.com/Tencent/HunyuanVideo", note: "VAE 3D causale (4× tempo, 8× spazio, 16 canali) e Full Attention su tutti i token." },
+  { title: "Tang et al. (2022), What the DAAM: Interpreting Stable Diffusion Using Cross Attention", url: "https://arxiv.org/abs/2210.04885", note: "Le mappe di cross-attention di Stable Diffusion, parola per parola, si concentrano dove compare la cosa nominata (le mappe dei nomi segmentano gli oggetti): da qui l'idea dello schema illustrativo degli archi, che però non viene da un modello." },
 ]);
 
 // ------------------------------------------------------------------------------------------ specifica
@@ -457,9 +512,9 @@ export function buildDiffusionNetworkSpec() {
   const parts = [textEncoder(), unet(), decoderToPixels(), videoBlock()];
   return {
     title: "Rete neurale di Stable Diffusion 1.x e di un blocco video (ridotte)",
-    intro: "La pipeline del tab disegnata neurone per neurone, da sinistra a destra: il text encoder CLIP legge il prompt, la U-Net toglie il rumore dal latente, lo scheduler e il decoder del VAE arrivano ai pixel; in fondo, a parte, un blocco di un denoiser video.\n\nGira la camera («Guarda lo spessore»): nel testo l'attention collega ogni token ai precedenti, nella U-Net le convoluzioni guardano i vicini della griglia, la self-attention collega posizioni lontane e la cross-attention porta le parole del prompt dentro l'immagine; nel video l'attention lavora dentro i frame e tra i frame.",
-    scale: `1 sfera = 1 numero. U-Net: griglia divisa per ${GRID_DIVISOR} in ogni lato (64 × 64 → 8 × 8, 32 × 32 → 4 × 4, 16 × 16 → 2 × 2); il livello più piccolo (8 × 8) resta 2 × 2, quindi il terzo dimezzamento e il primo raddoppio non si vedono. 1 canale ogni ${CHANNEL_DIVISOR}: 1, 2, 4, 4 lastre invece di 320, 640, 1.280, 1.280 (proprio channel_mult [1, 2, 4, 4]); 2 delle 8 head (1 nella cross-attention); a ogni livello un ResNet block e un blocco di attention disegnati su 2 (encoder) o 3 (decoder). Testo: 10 dei 77 token, 12 dei 768 numeri, 4 delle 12 head, 1 dei 12 layer. VAE: 2 dei 512 canali, un raddoppio della griglia disegnato dei tre veri, immagine ${IMAGE_SIDE} × ${IMAGE_SIDE} invece di 512 × 512. Video: 16 token, pochi numeri per token, un blocco solo.`,
-    note: `Valori veri, calcolati qui con le funzioni del tab (math.js): il rumore iniziale z_T dell'azione «Generazione» (seed ${GENERATION.seed}) e i seni e coseni del passo t = ${FIRST_T}. Tutto il resto è una simulazione didattica con un seme: il denoiser del tab è simulato (nel browser non c'è una U-Net addestrata), e così attivazioni e pesi di attention. Nel blocco video gli archi mostrano la struttura vera dell'attention fattorizzata (chi può guardare chi) con pesi tutti uguali. Il Diffusion Transformer (vista «DiT» del tab) sostituirebbe la U-Net con blocchi transformer sulle patch del latente, come il blocco video senza il tempo.`,
+    intro: "La pipeline del tab disegnata neurone per neurone, da sinistra a destra: il text encoder CLIP legge il prompt, la U-Net toglie il rumore dal latente, lo scheduler e il decoder del VAE arrivano ai pixel; in fondo, a parte, un blocco di un denoiser video.\n\nGira la camera («Guarda lo spessore»): nel testo l'attention collega ogni token ai precedenti, nella U-Net le convoluzioni guardano i vicini della griglia, la self-attention collega posizioni lontane e la cross-attention porta le parole del prompt dentro l'immagine; nel video l'attention lavora dentro i frame e tra i frame. La fascia viola sopra la U-Net sono gli archi della cross-attention: scegli una parola in «Fetta» («faro», per esempio) e restano solo i suoi.",
+    scale: `1 sfera = 1 numero. U-Net: griglia divisa per ${GRID_DIVISOR} in ogni lato (64 × 64 → 8 × 8, 32 × 32 → 4 × 4, 16 × 16 → 2 × 2); il livello più piccolo (8 × 8) resta 2 × 2, quindi il terzo dimezzamento e il primo raddoppio non si vedono. 1 canale ogni ${CHANNEL_DIVISOR}: 1, 2, 4, 4 lastre invece di 320, 640, 1.280, 1.280 (proprio channel_mult [1, 2, 4, 4]); 2 delle 8 head (1 nella cross-attention); a ogni livello un ResNet block e un blocco di attention disegnati su 2 (encoder) o 3 (decoder), quindi una skip connection per livello invece di 12 e il passo t verso 10 ResNet block invece di 22. Testo: 10 dei 77 token, 12 dei 768 numeri (48 dei 3.072 nell'MLP), 4 delle 12 head, 1 dei 12 layer. VAE: 2 dei 512 canali, un raddoppio della griglia disegnato dei tre veri, immagine ${IMAGE_SIDE} × ${IMAGE_SIDE} invece di 512 × 512. Video: 16 token, pochi numeri per token, un blocco solo.`,
+    note: `Valori veri, calcolati qui con le funzioni del tab (math.js): il rumore iniziale z_T dell'azione «Generazione» (seed ${GENERATION.seed}) e i seni e coseni del passo t = ${FIRST_T}. Tutto il resto è una simulazione didattica con un seme: il denoiser del tab è simulato (nel browser non c'è una U-Net addestrata), e così attivazioni e pesi della self-attention. Gli archi della cross-attention sono uno schema illustrativo scelto sulla scena del tab, non calcolato: ogni posizione guarda la parola della sua zona (la torre «faro», la scogliera «scogliera», cielo e mare «tramonto»), divisa in proporzione all'area dove una posizione ne copre più d'una. Nel blocco video gli archi mostrano la struttura vera dell'attention fattorizzata (chi può guardare chi) con pesi tutti uguali. Il Diffusion Transformer (vista «DiT» del tab) sostituirebbe la U-Net con blocchi transformer sulle patch del latente, come il blocco video senza il tempo.`,
     seed: 23,
     axes: {
       x: "flusso (dal prompt e dal rumore fino all'immagine; nella U-Net e nel VAE una lastra per canale)",
@@ -470,13 +525,13 @@ export function buildDiffusionNetworkSpec() {
     sections: parts.flatMap((p) => p.sections),
     links: parts.flatMap((p) => p.links),
     groups: [
-      { label: "Text encoder CLIP ViT-L/14 (circa 123 milioni di parametri)", from: "txt_tokens", to: "txt_out", color: "#c4b5fd", text: "Legge il prompt una volta sola. È un transformer come il nostro GPT: 12 layer, 768 numeri per token, attention causale. Congelato: non si addestra con la U-Net." },
+      { label: "Text encoder CLIP", from: "txt_tokens", to: "txt_out", color: "#c4b5fd", text: "Il text encoder di CLIP ViT-L/14, circa 123 milioni di parametri. Legge il prompt una volta sola. È un transformer come il nostro GPT: 12 layer, 768 numeri per token, attention causale. Congelato: non si addestra con la U-Net." },
       { label: "U-Net: il denoiser (circa 860 milioni di parametri)", from: "un_zt", to: "un_eps", color: "#fcd34d", text: "Riceve il latente rumoroso z_t, il passo t e il testo; restituisce il rumore previsto, della stessa forma del latente. Gira a ogni passo del campionatore." },
       { label: "Encoder: la griglia si dimezza", from: "un_conv_in", to: "un_e3_x2", color: "#fdba74", text: "64 → 32 → 16 → 8 (qui 8 → 4 → 2 → 2) mentre i canali salgono 320 → 640 → 1.280: dai dettagli alla composizione." },
       { label: "Centro", from: "un_m_res1", to: "un_m_res2", color: "#fdba74", text: "ResNet block, attention e ResNet block a 8 × 8 (qui 2 × 2)." },
       { label: "Decoder: la griglia raddoppia", from: "un_d3_res", to: "un_eps", color: "#fdba74", text: "8 → 16 → 32 → 64 (qui 2 → 2 → 4 → 8). A ogni livello arrivano, con le skip connection, i canali dell'encoder della stessa risoluzione." },
       { label: "Scheduler e VAE decoder", from: "sch", to: "vae_out", color: "#7dd3fc", text: "Lo scheduler toglie il rumore previsto (a ogni passo); alla fine il decoder del VAE porta il latente ai pixel." },
-      { label: "Video: un blocco di un denoiser video", from: "vid_in", to: "vid_out", color: "#67e8f9", text: "Un modello a parte: token spazio-temporali (una riga per frame, una colonna per patch), attention spaziale e temporale." },
+      { label: "Video: un blocco a parte", from: "vid_in", to: "vid_out", color: "#67e8f9", text: "Un blocco di un denoiser video, un modello diverso dalla U-Net: token spazio-temporali (una riga per frame, una colonna per patch), attention spaziale e temporale." },
     ],
     sources: NETWORK_SOURCES.map((s) => ({ ...s })),
   };

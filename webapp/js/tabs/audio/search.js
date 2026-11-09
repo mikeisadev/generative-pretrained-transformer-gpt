@@ -75,4 +75,35 @@ const views = [
   ...LEVELS.map((l) => ({ id: l.id, kind: "view", title: `Zoom: ${l.label}`, text: l.text, keywords: ["zoom semantico", "livello", "level of detail", "LOD", "audio", "musica", l.label] })),
 ];
 
-export const searchIndex = [...steps, ...actions, ...views];
+// Rappresentazioni del nucleo (core/representations.js: REP_LINKS), stessi id in ogni tab: goto le apre
+// con reps.goto. Titoli con il nome del tab, perché ogni tab ha una "Rete neurale" e un "Cervello".
+const representations = [
+  {
+    id: "rete",
+    kind: "view",
+    title: "Rete neurale (Audio e musica)",
+    text: "Le reti del tab neurone per neurone, da sinistra a destra, con il tempo in profondità: EnCodec (convoluzioni con passo, quantizzazione residua, decoder), il codec del tab con i numeri veri (spettro, 4 codebook in cascata, voce scelta a ogni frame), MusicGen (4 codebook sfasati dal delay pattern, attention causale, cross-attention al testo) e Whisper (log-Mel vero, convoluzioni, attention bidirezionale nell'encoder, decoder causale con cross-attention).",
+    keywords: [
+      "rete neurale", "neural network", "neuroni", "rappresentazione", "profondità", "spessore", "3D", "frame", "tempo",
+      "EnCodec", "SoundStream", "codec neurale", "convoluzione", "convolution", "stride", "passo", "LSTM", "latente",
+      "RVQ", "residual vector quantization", "codebook", "voci del codebook", "residuo", "k-means", "token audio",
+      "MusicGen", "delay pattern", "attention causale", "cross-attention", "T5", "teste lineari",
+      "Whisper", "log-Mel", "attention bidirezionale", "encoder", "decoder", "codifica di posizione", "sinusoidi",
+    ],
+  },
+  {
+    id: "cervello",
+    kind: "view",
+    title: "Cervello (Audio e musica)",
+    text: "Le analogie tra l'audio e la via uditiva del cervello, ognuna con cosa hanno in comune, dove non regge e le fonti: dalla coclea (cellule ciliate, membrana basilare) al nervo acustico, al tronco encefalico, al talamo e alla corteccia uditiva fino all'area di Wernicke; la scala Mel e le bande critiche, la musica e la dopamina; il modello 3D con le regioni, i percorsi e il microcircuito di neuroni.",
+    keywords: [
+      "cervello", "brain", "neuroscienze", "analogie", "via uditiva", "orecchio", "udito", "coclea", "cellule ciliate",
+      "membrana basilare", "tonotopia", "nervo acustico", "ganglio spirale", "tronco encefalico", "nucleo cocleare",
+      "oliva superiore", "collicolo inferiore", "talamo", "genicolato mediale", "MGN", "radiazione uditiva",
+      "corteccia uditiva", "A1", "giro di Heschl", "giro temporale superiore", "Wernicke", "Broca", "fascicolo arcuato",
+      "bande critiche", "scala Mel", "codifica efficiente", "dopamina", "striato", "aspettativa musicale", "neuroprotesi",
+    ],
+  },
+];
+
+export const searchIndex = [...steps, ...actions, ...views, ...representations];

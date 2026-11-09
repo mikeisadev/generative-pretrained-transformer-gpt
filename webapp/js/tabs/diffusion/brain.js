@@ -8,8 +8,9 @@
  * kind "eccitatoria", strength "debole/metafora", fonti con doi): introduzione, 10 analogie con
  * "In comune", "Dove non regge", forza e fonti, il circuito (gerarchia visiva con feedback) senza il campo
  * descrittivo "layout", regioni, percorsi e marcatori. In più: i fatti globali che citano le fonti dei
- * conteggi del circuito, quattro dati verificati dei suoi tipi di neurone (neuron_types, con la loro
- * fonte) e le due fonti citate dall'introduzione.
+ * conteggi del circuito, 2 dati dei suoi tipi di neurone (neuron_types, con la loro fonte) e le due
+ * fonti citate dall'introduzione. Nessun numero che la verifica della ricerca segna "da ricontrollare", salvo
+ * quelli ricontrollati dopo (l'elenco e il perché sono nel generatore).
  *
  * Per rigenerarlo (dalla radice del repository):
  *   node <scratchpad>/reps-diffusion/gen_brain.mjs <scratchpad>/research/brain_data.json webapp/js/tabs/diffusion/brain.js
@@ -794,19 +795,6 @@ export const brainSpec = {
       }
     },
     {
-      "claim": "Coni per cellula gangliare",
-      "value": "Rapporto coni:gangliari da 2,9 a 7,5 nelle diverse retine.",
-      "source": {
-        "id": "curcio1990rgc",
-        "title": "Topography of ganglion cells in human retina",
-        "authors": "Christine A. Curcio, Kimberly A. Allen",
-        "year": 1990,
-        "venue": "Journal of Comparative Neurology 300(1):5-25",
-        "url": "https://doi.org/10.1002/cne.903000103",
-        "doi": "10.1002/cne.903000103"
-      }
-    },
-    {
       "claim": "Talamo (genicolato laterale): ingressi «driver» e «modulatori»",
       "value": "Gli ingressi dalla retina sono «driver», quelli di ritorno dallo strato 6 della corteccia sono soprattutto modulatori.",
       "source": {
@@ -817,19 +805,6 @@ export const brainSpec = {
         "venue": "PNAS 95(12):7121-7126",
         "url": "https://doi.org/10.1073/pnas.95.12.7121",
         "doi": "10.1073/pnas.95.12.7121"
-      }
-    },
-    {
-      "claim": "Neuroni di V1: dalla tensione agli impulsi",
-      "value": "Relazione soglia-lineare tra potenziale e frequenza: soglia ≈ −54,4 mV, guadagno ≈ 7,2 spike/s per mV (gatto, V1).",
-      "source": {
-        "id": "carandini2000",
-        "title": "Membrane potential and firing rate in cat primary visual cortex",
-        "authors": "Matteo Carandini, David Ferster",
-        "year": 2000,
-        "venue": "Journal of Neuroscience 20(1):470-484",
-        "url": "https://doi.org/10.1523/JNEUROSCI.20-01-00470.2000",
-        "doi": "10.1523/JNEUROSCI.20-01-00470.2000"
       }
     }
   ],

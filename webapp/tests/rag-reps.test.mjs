@@ -123,7 +123,7 @@ test("forme uguali ai numeri dichiarati: chunk, feature, dimensioni, token e mod
   const each = Math.floor(rest.length / run.results.length);
   assert.ok(each >= 2);
   run.results.forEach((r, i) => assert.deepEqual(rest.slice(i * each, (i + 1) * each), textTokens(r.text).slice(0, each)));
-  assert.match(by("llm.prompt").sub, new RegExp(`dei ${run.prompt.tokens.total.toLocaleString("it-IT")} token`));
+  assert.match(by("llm.prompt").sub, new RegExp(`dei ${run.prompt.tokens.total.toLocaleString("it-IT", { useGrouping: "always" })} token`));
   // le sezioni della stessa parte condividono la stessa profondità
   for (const id of SECTION_IDS.encoder.slice(0, 6)) assert.equal(by(id).depth.count, tokens.count, id);
   for (const id of SECTION_IDS.generator.slice(0, 6)) assert.equal(by(id).depth.count, prompt.count, id);
@@ -459,8 +459,10 @@ test("link: gli id delle voci di ricerca sono quelli di REP_LINKS del nucleo", a
 test("search.js: voci per la Rete neurale e il Cervello con parole chiave utili", () => {
   const rete = searchIndex.find((e) => e.kind === "view" && e.id === "rete");
   const cervello = searchIndex.find((e) => e.kind === "view" && e.id === "cervello");
-  assert.equal(rete.title, "Rete neurale (Database vettoriale (RAG))");
-  assert.equal(cervello.title, "Cervello (Database vettoriale (RAG))");
+  // titoli senza il nome del tab (la palette raggruppa già per tab: "Database vettoriale (RAG)") e senza
+  // parentesi annidate; il titolo della rete è quello della sua scheda
+  assert.equal(rete.title, "Rete neurale del RAG: dalla domanda alla risposta");
+  assert.equal(cervello.title, "Cervello: il RAG e la memoria");
   for (const k of ["feature hashing", "top-k", "attention bidirezionale", "mean pooling", "attention causale"]) assert.ok(rete.keywords.includes(k), k);
   for (const k of ["ippocampo", "corteccia entorinale", "giro dentato", "CA3"]) assert.ok(cervello.keywords.includes(k), k);
   // i livelli dello zoom (goto di sempre) ci sono ancora

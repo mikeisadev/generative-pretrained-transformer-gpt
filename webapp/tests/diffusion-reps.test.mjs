@@ -18,6 +18,7 @@ import { LINK_LIMITS } from "../js/core/neuralNet/links.js";
 import { LIMITS, normalizeSpec } from "../js/core/neuralNet/spec.js";
 import { prepareEntry, search } from "../js/core/search.js";
 import { brainSpec } from "../js/tabs/diffusion/brain.js";
+import { renderScene } from "../js/tabs/diffusion/imagery.js";
 import { fillGaussian, mulberry32, samplingTimesteps, timestepEmbedding } from "../js/tabs/diffusion/math.js";
 import {
   FIRST_T,
@@ -27,9 +28,12 @@ import {
   UNET_LEVELS,
   VIDEO_FRAMES,
   VIDEO_PATCHES,
+  ZONE_WORDS,
   buildDiffusionNetworkSpec,
+  crossAttentionMap,
   initialNoiseCrop,
   networkSpec,
+  sceneZone,
   timestepValues,
   videoAttentionMask,
 } from "../js/tabs/diffusion/network.js";
@@ -125,6 +129,65 @@ test("rete: attention causale nel testo, non causale nella U-Net, cross-attentio
   const crossTargets = linksOf("attention").filter((l) => !l.within).map((l) => l.to.id);
   assert.deepEqual(crossTargets, unetAttention, "nessun'altra sezione riceve il testo");
   assert.equal(self.vae_mid.heads, 1, "VAE: attention a una head");
+});
+
+test("rete: cross-attention illustrativa, ogni parola nella sua zona dell'immagine del tab (dichiarata)", () => {
+  // le zone di sceneZone sono quelle dell'immagine del tab (renderScene, imagery.js): scogliera = il suo viola
+  // scuro, faro = strisce bianche e rosse, lanterna gialla o tetto scuro; il resto è cielo e mare
+  const size = 128;
+  const img = renderScene(new Float32Array(size * size * 3), size);
+  const counts = { faro: 0, scogliera: 0, tramonto: 0 };
+  for (let j = 0; j < size; j++) {
+    for (let i = 0; i < size; i++) {
+      const zone = sceneZone((i + 0.5) / size, (j + 0.5) / size);
+      const [r, g, b] = [0, 1, 2].map((k) => (img[(j * size + i) * 3 + k] + 1) / 2);
+      const cliff = r > 0.14 && r < 0.23 && g < 0.13 && b < 0.18;
+      // strisce bianche e rosse (con l'ombreggiatura laterale), lanterna gialla, tetto scuro
+      const white = r > 0.4 && Math.abs(r - g) < 0.06 && Math.abs(g - b) < 0.06;
+      const red = r > 0.3 && r > 3 * g && Math.abs(g - b) < 0.02;
+      const tower = white || red || (r > 0.95 && g > 0.85) || (r < 0.13 && g < 0.11 && b < 0.15);
+      counts[zone]++;
+      if (zone === "scogliera") assert.ok(cliff, `scogliera senza il suo colore in (${i}, ${j})`);
+      else if (zone === "faro") assert.ok(tower, `faro senza i suoi colori in (${i}, ${j})`);
+      else assert.ok(!cliff, `colore della scogliera fuori dalla sua zona in (${i}, ${j})`);
+    }
+  }
+  assert.ok(counts.faro > 100 && counts.scogliera > 1000 && counts.tramonto > 8000, JSON.stringify(counts));
+  for (const [word, index] of Object.entries(ZONE_WORDS)) assert.equal(TEXT_TOKENS[index], word);
+  // pesi: righe che sommano a 1, solo le tre parole con una zona; al livello 8 × 8 «faro» sta nelle colonne
+  // della torre (u = 0,24), nella metà alta, e la scogliera in basso a sinistra
+  const T = TEXT_TOKENS.length;
+  for (const side of [8, 4, 2]) {
+    const w = crossAttentionMap(side);
+    assert.equal(w.length, side * side * T);
+    for (let q = 0; q < side * side; q++) {
+      let sum = 0;
+      for (let k = 0; k < T; k++) {
+        sum += w[q * T + k];
+        if (!Object.values(ZONE_WORDS).includes(k)) assert.equal(w[q * T + k], 0);
+      }
+      assert.ok(Math.abs(sum - 1) < 1e-5, `${side}: riga ${q}`);
+    }
+  }
+  const fine = crossAttentionMap(8);
+  const faroCells = [];
+  for (let q = 0; q < 64; q++) if (fine[q * T + ZONE_WORDS.faro] >= 0.04) faroCells.push([Math.floor(q / 8), q % 8]);
+  assert.ok(faroCells.length >= 4 && faroCells.every(([r, c]) => (c === 1 || c === 2) && r >= 1 && r <= 4), JSON.stringify(faroCells));
+  assert.ok(fine[(7 * 8 + 0) * T + ZONE_WORDS.scogliera] === 1 && fine[(0 * 8 + 7) * T + ZONE_WORDS.tramonto] === 1);
+  // nella specifica: ogni cross-attention porta i pesi della sua griglia ed è dichiarata illustrativa
+  for (const l of linksOf("attention").filter((x) => !x.within)) {
+    assert.deepEqual([...l.weights], [...crossAttentionMap(l.to.depth.cols)], l.to.id);
+    assert.match(l.label, /illustrativ/);
+  }
+  assert.match(sectionOf("un_e0_attn").text, /schema illustrativo, non calcolato/);
+  assert.match(net.note, /cross-attention sono uno schema illustrativo/);
+  assert.ok(net.sources.some((s) => /2210\.04885/.test(s.url)), "fonte del fenomeno (DAAM)");
+  // circa un terzo degli archi dei pesi simulati (4 chiavi per posizione): la U-Net non sparisce sotto la tenda
+  const { links } = buildNetworkModel(networkSpec);
+  let cross = 0;
+  for (let i = 0; i < links.arcs.count; i++) if (links.arcs.kind[i] === 1) cross++;
+  const positions = linksOf("attention").filter((l) => !l.within).reduce((n, l) => n + l.to.depth.count, 0);
+  assert.ok(cross >= positions && cross < 1.4 * positions, `archi di cross-attention ${cross} per ${positions} posizioni`);
 });
 
 test("rete: skip connection, griglia che si dimezza e raddoppia, broadcast del passo t", () => {

@@ -16,6 +16,7 @@
  */
 
 import { BUILTIN_RUN_ID } from "../../shared/weights/run.js";
+import { ANALYSIS_VIEWS } from "./analysis/search.js";
 
 /** Le viste del tab raggiungibili con view:<id> (oltre a rete e cervello del nucleo). */
 export const VIEW_IDS = Object.freeze({
@@ -26,6 +27,8 @@ export const VIEW_IDS = Object.freeze({
   esporta: "come esportare un run dal Python",
   step: "il cursore dello step del training",
   centro: "tutto il modello inquadrato (come C)",
+  // fase 2 (confronto, grafici, benchmark): viste registrate da analysis/index.js con tab.views.register
+  ...ANALYSIS_VIEWS,
 });
 
 /** Alias leggibili degli id dei run nei link (run:corso). */

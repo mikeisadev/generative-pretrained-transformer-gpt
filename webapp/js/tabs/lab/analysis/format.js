@@ -36,6 +36,21 @@ export function num(value, digits = 3) {
   return formatPrecise(rounded, digits);
 }
 
+/**
+ * Come `num`, ma con gli zeri finali (0,340 e non 0,34): in una colonna di tabella le cifre si allineano
+ * e nessun numero sembra meno preciso degli altri.
+ */
+export function sig(value, digits = 3) {
+  if (!isNumber(value) || !Number.isFinite(value) || value === 0) return num(value, digits);
+  const abs = Math.abs(value);
+  if (abs < 1e-3 || abs >= 1e7) return num(value, digits);
+  const rounded = Number(value.toPrecision(digits));
+  if (Math.abs(rounded) >= 10 ** digits) return num(value, digits);
+  const decimals = Math.max(0, digits - 1 - Math.floor(Math.log10(Math.abs(rounded))));
+  const text = Math.abs(rounded).toLocaleString("it-IT", { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: "always" });
+  return rounded < 0 ? MINUS + text : text;
+}
+
 /** Un numero con `decimals` decimali fissi ("1,8145"), per le metriche del benchmark. */
 export function fixed(value, decimals = 4) {
   if (!isNumber(value) || !Number.isFinite(value)) return "—";

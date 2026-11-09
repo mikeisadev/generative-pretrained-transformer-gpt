@@ -203,6 +203,20 @@
   .mllm-subtab { padding: 5px 8px; font-size: 12.5px; }
 }
 
+/* Rappresentazioni del nucleo (core/representations.js): con "Rete neurale" o "Cervello" aperti, reps.css
+   nasconde i comandi del tab che sono figli della radice (.rep-alt-active, visibility: hidden). La barra dei
+   sottotab invece resta visibile e usabile: sceglierne uno chiude prima il livello (index.js). Specificità
+   (0,5,0) contro (0,4,0) della regola del nucleo: non dipende dall'ordine dei fogli di stile. */
+.tab.tab-root[data-tab="modern-llm"].rep-alt-active > .mllm-subtabs { visibility: visible; }
+
+/* Il pannello "Cervello" del nucleo aggiunge una scheda alla sidebar: 6 nella vista d'insieme, 7 nella
+   completa (index.js la tiene subito prima di "Fonti"). Restano su una riga sola, come le 6 della vista
+   completa prima di lei: con "Cervello" e "Fonti" a capo la barra sembrava rotta. Misure a 1600, 1280, 1100
+   e 390 px: 358 e 364 px di schede nei 379 della barra. */
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) { gap: 2px; padding-left: 6px; padding-right: 6px; }
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) > button { padding: 6px 7px; font-size: 12.5px; }
+.tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]):has(> button[data-pane="full-pesi"]:not([hidden])) > button { padding: 6px 5px; font-size: 12px; }
+
 /* Pulsanti in fondo a un passo del Percorso: animazione e collegamento all'architettura completa */
 .mllm-step-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
 .mllm-step-buttons .mllm-run { margin: 0; }

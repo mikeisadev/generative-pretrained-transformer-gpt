@@ -8,6 +8,7 @@
  *   action:<id dell'azione>      (actionCatalog.js e full/catalog.js, stessi id di player.register)
  *   view:macro | blocks | detail (livelli dello zoom) e view:<id di una regione> (regionData.js)
  *   view:overview | full | full-<…>   sottotab e viste dell'architettura completa (full/catalog.js)
+ *   view:rete | cervello         rappresentazioni del nucleo (Rete neurale e Cervello, per tutto il tab)
  */
 import { ACTION_CATALOG } from "./actionCatalog.js";
 import { PATH } from "./content.js";
@@ -170,4 +171,30 @@ const fullMechanisms = REGIONS.map((r) => {
 const TERMS = ["Engram", "mHC", "CSA2", "lightning indexer", "DSpark", "KDA", "Kimi Delta Attention", "MXFP4", "safetensors", "KV cache compressa", "encoder-decoder causale", "LatentMoE", "AttnRes", "attention sink"];
 subtabs[1].keywords.push(...TERMS);
 
-export const searchIndex = [...steps, ...actions, ...levels, ...regions, ...subtabs, ...fullLevels, ...fullSections, ...fullModels, ...fullMechanisms];
+// --- rappresentazioni del nucleo (view:rete e view:cervello: reps.goto in index.js) ------------------
+// Testi scritti qui (non importati da network.js e brain.js): l'indice deve restare leggero.
+const representations = [
+  {
+    id: "rete",
+    kind: "view",
+    title: "Rete neurale (LLM moderni)",
+    text: `${primary.name} disegnato neurone per neurone, da sinistra a destra: tokenizer, embedding, le 4 corsie del residuo, i layer nell'ordine vero con le ripetizioni compresse in «× N», head, softmax e DSpark. In profondità i token del prompt: la finestra locale, la KV globale compressa (2 token → 1 voce) con l'indexer che sceglie le voci, l'attention causale, il router che manda ogni token ai suoi esperti. Valori illustrativi.`,
+    keywords: [
+      "rete neurale", "neural network", "neuroni", "rappresentazione", "profondità", "spessore", "MoE", "mixture of experts", "router", "esperti", "experts", "esperto condiviso",
+      "top-k", "KV", "KV cache", "KV latente", "KV globale", "compressione", "attention causale", "causal attention", "finestra", "sliding window", "indexer", "MQA",
+      "mHC", "residuo", "RMSNorm", "DeepSeek-V4.1-Flash", "token del prompt",
+    ],
+  },
+  {
+    id: "cervello",
+    kind: "view",
+    title: "Cervello (LLM moderni)",
+    text: "Le analogie tra gli LLM moderni e il cervello, ognuna con cosa hanno in comune, dove non regge e le fonti: esperti e specializzazione delle aree, KV cache e memoria di lavoro, RL e dopamina, ragionamento, RoPE e cellule di griglia, leggi di scala; il modello 3D con le regioni e l'anello corteccia, gangli della base e talamo con la dopamina.",
+    keywords: [
+      "cervello", "brain", "neuroscienze", "analogie", "dopamina", "errore di predizione", "ricompensa", "rinforzo", "gangli della base", "striato", "talamo", "VTA", "substantia nigra",
+      "corteccia prefrontale", "memoria di lavoro", "cellule di griglia", "ippocampo", "corteccia entorinale", "area di Broca", "Wernicke", "cervelletto", "rete multiple-demand", "selettività mista",
+    ],
+  },
+];
+
+export const searchIndex = [...steps, ...actions, ...levels, ...regions, ...subtabs, ...fullLevels, ...fullSections, ...fullModels, ...fullMechanisms, ...representations];

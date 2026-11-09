@@ -68,7 +68,7 @@ export const CHARTS = {
   groupsTitle: "Training per gruppo di pesi",
   groupsDesc: "Gli stessi gruppi di gpt/recording.py: attention (head + proj), feed-forward, le due LayerNorm di ogni blocco, embedding, ln_f, lm_head.",
   snapsTitle: "Metriche degli snapshot",
-  snapsDesc: "Misurate a ogni snapshot sullo stesso batch fisso di validation (64 sequenze, seme fisso): si possono confrontare tra step e tra run con lo stesso registratore.",
+  snapsDesc: "Misurate a ogni snapshot sullo stesso batch fisso di validation (sequenze scelte con un seme fisso da gpt/recording.py): si possono confrontare tra step e tra run con lo stesso registratore.",
   promptTitle: "Il prossimo carattere sul tuo prompt",
   promptDesc: "Calcolato ora dal motore JS con i pesi di A e di B (solo run che il motore sa eseguire). Il prompt si scrive nel pannello Confronto.",
   benchTitle: "Benchmark",
@@ -101,13 +101,18 @@ export const METRIC_HELP = {
   eval_tokens_per_s: "Previsioni al secondo durante la valutazione, sulla macchina del benchmark.",
 };
 
-/** Le fonti della fase 2 (gruppo aggiunto al pannello Fonti). */
+/**
+ * Le fonti della fase 2 (gruppo aggiunto al pannello Fonti): i dati veri della web app, da aprire, e le
+ * definizioni delle misure. Gli indirizzi relativi aprono i file serviti accanto alla pagina.
+ */
 export const ANALYSIS_SOURCES = {
   title: "Confronto, grafici e benchmark",
   items: [
-    { title: "Karpathy, «Building makemore Part 3»: activations, gradients, update ratio", url: "https://www.youtube.com/watch?v=P6sfmUTpUmc", note: "Il rapporto ‖Δw‖/‖w‖ per gruppo come termometro del training (attorno a 10⁻³ in scala log), lo stesso dei grafici per gruppo." },
-    { title: "Shannon (1951), Prediction and Entropy of Printed English", url: "https://doi.org/10.1002/j.1538-7305.1951.tb01366.x", note: "Bit per carattere ed entropia di un testo: le unità del benchmark." },
-    { title: "Jelinek et al. (1977), Perplexity: a measure of the difficulty of speech recognition tasks", url: "https://doi.org/10.1121/1.2016299", note: "La perplexity come «numero di scelte equiprobabili»." },
-    { title: "IEEE 754 e il formato float16", url: "https://en.wikipedia.org/wiki/Half-precision_floating-point_format", note: "Perché uno snapshot float16 differisce dai pesi float32 di circa 10⁻³: 11 bit di mantissa." },
+    { title: "Il benchmark del GPT del corso (data/benchmark/builtin.json)", url: "data/benchmark/builtin.json", note: "I numeri del Python con cui il browser si confronta: validation completa, estratto con i bit di sorpresa, testi generati, gli 11 snapshot (scripts/export_benchmark_data.py, protocollo di gpt/benchmark.py)." },
+    { title: "L'estratto della validation (data/benchmark/val_excerpt.txt)", url: "data/benchmark/val_excerpt.txt", note: "I 4.015 caratteri su cui il motore JS ricalcola il benchmark nel browser." },
+    { title: "La storia del training (data/training/trace.json)", url: "data/training/trace.json", note: "Loss, learning rate, gradienti, update ratio, deviazione standard dei pesi e metriche degli snapshot registrati da gpt/recording.py: i dati dei grafici." },
+    { title: "Wikipedia: Perplexity", url: "https://en.wikipedia.org/wiki/Perplexity", note: "Perplexity = e^loss: il numero di scelte equiprobabili tra cui il modello è come se esitasse." },
+    { title: "Wikipedia: Entropy (information theory)", url: "https://en.wikipedia.org/wiki/Entropy_(information_theory)", note: "Entropia e bit: le unità di «bit per carattere» e dell'entropia media della previsione." },
+    { title: "Wikipedia: Half-precision floating-point format", url: "https://en.wikipedia.org/wiki/Half-precision_floating-point_format", note: "Perché uno snapshot float16 differisce dai pesi float32 di circa un millesimo del loro valore: 11 bit di precisione." },
   ],
 };
