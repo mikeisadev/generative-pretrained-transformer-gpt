@@ -71,3 +71,78 @@
 @media (min-width: 901px) {
   .tab-root[data-tab="transformer"]:has(.charts-panel.open) .stage-toolbar { top: 56px; left: 10px; right: auto; }
 }
+
+/* ---------------------------------------------------------------- Rete neurale: disposizione "A righe" / "Orizzontale con profondità" */
+/* Interruttore (radiogroup): due voci con icona; nel riquadro della vista etichette intere, nello stage compatte */
+.tf-arrange { display: inline-flex; gap: 2px; padding: 3px; background: #0b1220; border: 1px solid #334155; border-radius: 10px; }
+.tf-arrange-option { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; font-size: 12.5px; line-height: 1.2; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 7px; white-space: nowrap; }
+.tf-arrange-option:hover { color: var(--text); border-color: #334155; }
+.tf-arrange-option.active { color: #e0f2fe; background: rgba(56, 189, 248, 0.16); border-color: var(--accent); }
+.tf-arrange-option:focus-visible, .tf-bar-btn:focus-visible { outline: 2px solid #e0f2fe; outline-offset: 1px; }
+.tf-arrange-icon { width: 16px; height: 13px; flex: none; fill: currentColor; opacity: 0.85; }
+.tf-arrange-short { display: none; }
+.tf-arrange-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 2px 0 10px; }
+.tf-arrange-caption { font-size: 12px; color: var(--muted); letter-spacing: 0.03em; text-transform: uppercase; }
+
+/* Barra dello stage, in alto a sinistra sotto ☰ e il selettore dello zoom (seconda fila): niente la copre */
+.tf-neuron-bar { position: absolute; top: 56px; left: 10px; z-index: 11; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: calc(100% - 20px); }
+.tf-neuron-bar[hidden], .tf-bar-tools[hidden] { display: none; }
+.tf-neuron-bar .tf-arrange { background: var(--panel); }
+.tf-bar-tools { display: flex; gap: 4px; padding: 3px; background: var(--panel); border: 1px solid #334155; border-radius: 10px; }
+.tf-bar-btn { padding: 4px 9px; font-size: 12.5px; line-height: 1.2; white-space: nowrap; background: #1e293b; }
+.tf-bar-primary { border-color: rgba(56, 189, 248, 0.6); }
+/* i chip della navigazione (in alto al centro) scendono sotto la barra */
+.tab-root[data-tab="transformer"].tf-neurons-on .nav-hud { top: 100px; }
+/* in profondità il livello di dettaglio è della rete stessa (lastre da lontano, sfere da vicino): lo zoom del tab non serve */
+.tab-root[data-tab="transformer"].tf-depth-on .lod-switch { visibility: hidden; }
+@media (min-width: 901px) {
+  /* Grafici aperti: la barra "Vista d'insieme · Flusso" scende nella seconda fila (regola sopra): la nostra va nella terza */
+  .tab-root[data-tab="transformer"]:has(.charts-panel.open) .tf-neuron-bar { top: 100px; max-width: calc(100% - 490px); }
+  .tab-root[data-tab="transformer"].tf-neurons-on:has(.charts-panel.open) .nav-hud { top: 144px; }
+}
+@media (min-width: 901px) and (max-width: 1280px) {
+  .tf-neuron-bar .tf-arrange-label { display: none; }
+  .tf-neuron-bar .tf-arrange-short { display: inline; }
+  /* con i grafici aperti la barra va a capo su due file: i chip della navigazione scendono sotto entrambe */
+  .tab-root[data-tab="transformer"].tf-neurons-on:has(.charts-panel.open) .nav-hud { top: 182px; }
+}
+/* Telefono: prima fila ☰ e barra del tab, seconda il selettore dello zoom, terza questa barra (etichette brevi);
+   in profondità il selettore dello zoom non serve e la barra prende la sua fila */
+@media (max-width: 900px) {
+  .tf-neuron-bar { top: 96px; }
+  .tf-neuron-bar .tf-arrange-label { display: none; }
+  .tf-neuron-bar .tf-arrange-short { display: inline; }
+  .tf-neuron-bar .tf-arrange-option, .tf-bar-btn { padding: 4px 7px; font-size: 12px; }
+  .tab:not(.sidebar-collapsed) .tf-neuron-bar { display: none; }
+  .tab-root[data-tab="transformer"].tf-neurons-on .nav-hud { top: 140px; }
+  /* in profondità il selettore dello zoom non c'è: la barra sale nella sua fila e lascia più scena alla rete */
+  .tab-root[data-tab="transformer"].tf-depth-on .tf-neuron-bar { top: 54px; }
+  .tab-root[data-tab="transformer"].tf-neurons-on.tf-depth-on .nav-hud { top: 98px; }
+}
+@media (max-width: 420px) {
+  .tf-neuron-bar .tf-arrange-icon { display: none; }
+}
+
+/* Etichetta del neurone sotto il puntatore (rete orizzontale) */
+.tf-depth-tip { position: absolute; z-index: 18; pointer-events: none; display: flex; flex-direction: column; gap: 1px; max-width: min(300px, calc(100% - 12px)); padding: 6px 9px; font-size: 12px; color: var(--muted); background: var(--panel-solid); border: 1px solid #334155; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45); }
+.tf-depth-tip[hidden] { display: none; }
+.tf-depth-tip strong { color: var(--text); font-size: 12.5px; }
+.tf-depth-value { color: #fde68a; font-variant-numeric: tabular-nums; }
+.tf-depth-head { display: inline-flex; align-items: center; gap: 5px; }
+.tf-depth-head i { width: 10px; height: 3px; border-radius: 2px; }
+.tf-depth-hint { margin-top: 3px; padding-top: 3px; border-top: 1px solid #334155; color: #a5f3fc; }
+/* scheda del neurone in profondità: dove sta nella rete orizzontale */
+.tf-card .tf-depth-where { margin: 4px 0 2px; padding: 3px 8px; font-size: 12px; color: var(--muted); background: rgba(103, 232, 249, 0.07); border-left: 2px solid #67e8f9; border-radius: 0 6px 6px 0; }
+.tf-card .tf-depth-where b { color: var(--text); font-weight: 600; }
+
+/* Riquadro della vista in profondità: assi, analogia, onestà, comandi, legenda */
+/* pezzi di una sola disposizione: [hidden] deve vincere sui display di .tf-row (flex) e .tf-legend (grid) */
+.tf-depth-intro[hidden], .tf-depth-controls[hidden], .tf-depth-legend[hidden], .tf-rows-intro[hidden], .tf-row[hidden], .tf-legend[hidden], .tf-start[hidden] { display: none; }
+.tf-axes { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; color: var(--muted); }
+.tf-axes b { display: inline-block; min-width: 1.2em; font-family: "JetBrains Mono", ui-monospace, monospace; }
+.tf-analogy { padding: 6px 10px; border-left: 3px solid #a3e635; background: rgba(163, 230, 53, 0.06); border-radius: 0 8px 8px 0; font-size: 13px; }
+.tf-honesty p { font-size: 12.5px; color: var(--muted); }
+.tf-depth-controls { display: grid; gap: 8px; }
+.tf-depth-controls .tf-row button { padding: 5px 9px; font-size: 12.5px; }
+.tf-depth-legend h4 { margin: 12px 0 4px; }
+.tf-positions button.tf-all { font-family: inherit; padding: 3px 8px; }

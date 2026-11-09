@@ -7,7 +7,7 @@
  *
  *   step    i passi del Percorso (stessi id del Menu, aperti con menu.reveal)
  *   action  le azioni animate (stessi id di player.register)
- *   view    le viste (Architettura, Pesi, Rete neurale, Contesto), i livelli dello zoom semantico
+ *   view    le viste (Architettura, Pesi, Rete neurale e la sua disposizione orizzontale, Contesto), i livelli dello zoom semantico
  *           (zoom.detail | zoom.blocks | zoom.macro) e i passi del percorso della vista Contesto
  *           (ctx.*, aperti nel loro menu dentro la vista)
  *
@@ -130,6 +130,12 @@ const views = [
     title: "Vista Rete neurale",
     text: "Tutti i neuroni e le connessioni del modello; clic su un neurone per vedere il suo calcolo.",
     keywords: ["neuroni", "rete neurale", "neural network", "connessioni", "attivazioni", "MLP"],
+  },
+  {
+    id: "neuroni-profondita",
+    title: "Rete neurale orizzontale con profondità",
+    text: "La rete vera e completa del GPT da sinistra a destra, con tutti i token del prompt in profondità: archi di attention tra i token con la maschera causale, connessioni residue, LayerNorm token per token e i pesi veri della fetta scelta. Gira la camera per vedere lo spessore.",
+    keywords: ["rete neurale orizzontale", "profondità", "spessore", "disposizione orizzontale", "token in profondità", "attention tra token", "maschera causale", "neural network 3D", "layer", "strati"],
   },
   {
     id: "contesto",

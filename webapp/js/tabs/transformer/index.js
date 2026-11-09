@@ -24,7 +24,7 @@ import { installContext } from "./context/index.js";
 import { loadModelSpec } from "./data.js";
 import { DataFlow } from "./flow.js";
 import { installLod } from "./lod.js";
-import { installNeuronsView } from "./views/neurons.js";
+import { NEURON_LINKS, installNeuronsView } from "./views/neurons.js";
 import { installWeightsView } from "./views/weights.js";
 import { modelSummaryTable, weightsTable } from "./weightsTables.js";
 
@@ -317,6 +317,14 @@ async function gotoTarget(tab, { kind, id } = {}) {
     return true;
   }
   if (kind !== "view") return false;
+  // vista Rete neurale in una disposizione: view:neuroni (a righe, come sempre) e view:neuroni-profondita
+  if (Object.hasOwn(NEURON_LINKS, id)) {
+    stopOtherAction(tab, null);
+    await tab.neuronsView.open(NEURON_LINKS[id]);
+    ui.sidebar.select("viste");
+    showSceneOnPhone(tab);
+    return true;
+  }
   if (tab.views.has(id)) {
     stopOtherAction(tab, null);
     await tab.views.activate(id);
