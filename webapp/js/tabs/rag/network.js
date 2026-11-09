@@ -80,8 +80,20 @@ export const SECTION_IDS = Object.freeze({
 const KIND_LABEL = Object.freeze({ word: "radice", bigram: "coppia", char: "trigramma" });
 const KIND_PLURAL = Object.freeze({ word: "radici", bigram: "coppie", char: "trigrammi" });
 const KIND_ORDER = Object.freeze({ word: 0, bigram: 1, char: 2 });
+/** Prima dimensione libera per l'hashing: le precedenti sono riservate dall'embedder (comune, sconosciute). */
+const FIRST_HASHED = Math.max(SHARED_DIMENSION, UNKNOWN_DIMENSION) + 1;
 const it = (n, digits = 0) => Number(n).toLocaleString("it-IT", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const quoted = (text, max = 90) => `«${text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text}»`;
+
+/**
+ * Da dove viene la domanda disegnata (index.js, `networkSearch`): il campo del pannello Azioni oppure,
+ * se è vuoto, l'ultima ricerca mostrata o una domanda d'esempio. L'introduzione lo dice com'è.
+ */
+const ORIGIN_TEXT = Object.freeze({
+  panel: "quella del pannello Azioni. Per un'altra domanda scrivila lì e riapri la Rete neurale: i numeri delle parti 1 e 2 si ricalcolano.",
+  last: "l'ultima cercata: il campo del pannello Azioni è vuoto. Scrivi lì una domanda e riapri la Rete neurale per vedere la tua.",
+  example: "una domanda d'esempio: il campo del pannello Azioni è vuoto. Scrivi lì una domanda e riapri la Rete neurale per vedere la tua.",
+});
 
 /** Etichetta breve di un chunk, come shortId della stazione Ricerca: "rimborsi-p2:1" → "rimborsi p2·1". */
 export function chunkLabel(id) {
@@ -160,9 +172,10 @@ export function promptSample(run, max = SHOWN.generator.tokens) {
 
 /**
  * La specifica della rete per la domanda corrente.
- * @param {{ kb: ReturnType<import("./pipeline.js").buildKnowledgeBase>, run: ReturnType<import("./pipeline.js").runSearch> }} input
+ * @param {{ kb: ReturnType<import("./pipeline.js").buildKnowledgeBase>, run: ReturnType<import("./pipeline.js").runSearch>, origin?: keyof ORIGIN_TEXT }} input
+ *   origin: da dove viene la domanda (predefinito: il campo del pannello Azioni)
  */
-export function buildRagNetworkSpec({ kb, run }) {
+export function buildRagNetworkSpec({ kb, run, origin = "panel" }) {
   const chunks = kb.inserts.map((r) => ({ id: r.entry.id, vector: r.vector }));
   const N = chunks.length;
   const ex = run.explanation;
@@ -170,17 +183,18 @@ export function buildRagNetworkSpec({ kb, run }) {
   const { dims, total: nonzero } = questionDims(ex.vector);
   const cosine = chunks.map((c) => cosineSimilarity(ex.vector, c.vector));
   const chosen = run.results.map((r) => ({ position: chunks.findIndex((c) => c.id === r.id), id: r.id, score: r.score }));
-  const ctx = { kb, run, N, ex, features, dims, nonzero, chunks, cosine, chosen, prompt: promptSample(run), tokens: encoderTokens(run.question) };
+  const embedder = { dims: kb.embedder.dimensions, shared: kb.embedder.sharedComponent };
+  const ctx = { kb, run, N, ex, features, dims, nonzero, chunks, cosine, chosen, embedder, prompt: promptSample(run), tokens: encoderTokens(run.question) };
 
   const parts = [embedderPart(ctx), databasePart(ctx), encoderPart(ctx), generatorPart(ctx)];
   return {
     title: "Rete neurale del RAG: dalla domanda alla risposta",
     intro: [
-      "Il RAG di questo tab come rete, da sinistra a destra. Parti 1 e 2, con i numeri veri della tua domanda: il nostro embedder (che non è una rete neurale) la trasforma in un vettore, il vettore si confronta con ogni chunk del database, in profondità, e passano i migliori. Parti 3 e 4, illustrative: le due reti neurali di un RAG vero, l'encoder che fa gli embedding e l'LLM che legge il prompt e scrive la risposta.",
-      `Domanda: ${quoted(run.question)}, quella del pannello Azioni. Per un'altra domanda scrivila lì, premi «Cerca» e riapri la Rete neurale.`,
+      "Il RAG di questo tab come rete, da sinistra a destra. Parti 1 e 2, con i numeri veri della domanda qui sotto: il nostro embedder (che non è una rete neurale) la trasforma in un vettore, il vettore si confronta con ogni chunk del database, in profondità, e passano i migliori. Parti 3 e 4, illustrative: le due reti neurali di un RAG vero, l'encoder che fa gli embedding e l'LLM che legge il prompt e scrive la risposta.",
+      `Domanda: ${quoted(run.question)}, ${ORIGIN_TEXT[origin] ?? ORIGIN_TEXT.panel}`,
     ].join("\n\n"),
     scale: [
-      `Parti 1 e 2 (vere): ${features.length < ex.features.length ? `le ${features.length} feature più pesanti delle ${ex.features.length}` : `tutte le ${ex.features.length} feature`} della domanda; ${dims.length < nonzero ? `${dims.length} delle ${nonzero} dimensioni` : `le ${dims.length} dimensioni`} (delle 256) in cui il suo vettore non è zero; tutti i ${N} chunk del database (${kb.config.splitterPreset.label}).`,
+      `Parti 1 e 2 (vere): ${features.length < ex.features.length ? `le ${features.length} feature più pesanti delle ${ex.features.length}` : `tutte le ${ex.features.length} feature`} della domanda; ${dims.length < nonzero ? `${dims.length} delle ${nonzero} dimensioni` : `le ${dims.length} dimensioni`} (delle ${embedder.dims}) in cui il suo vettore non è zero; tutti i ${N} chunk del database (${kb.config.splitterPreset.label}).`,
       `Parte 3 (illustrativa): ${SHOWN.encoder.width} dei ${it(ENCODER.width)} numeri per token, ${SHOWN.encoder.heads} delle ${ENCODER.heads} head, uno dei ${ENCODER.layers} layer; one-hot su ${SHOWN.vocab} voci invece di ${it(ENCODER.vocab)}.`,
       `Parte 4 (illustrativa): ${SHOWN.generator.width} dei ${it(GENERATOR.width)} numeri per token, ${SHOWN.generator.heads} delle ${GENERATOR.heads} head, uno dei ${GENERATOR.layers} layer, ${ctx.prompt.names.length} dei ${it(ctx.prompt.total)} token del prompt; one-hot su ${SHOWN.vocab} voci invece di ${it(GENERATOR.vocab)}.`,
     ].join(" "),
@@ -198,20 +212,24 @@ export function buildRagNetworkSpec({ kb, run }) {
     depth: { count: N, label: "chunk", names: chunks.map((c) => chunkLabel(c.id)) },
     sections: parts.flatMap((p) => p.sections),
     links: parts.flatMap((p) => p.links),
+    // Prima le parti, poi le parentesi grandi che le contengono: a parità di importanza il nucleo piazza le
+    // etichette nell'ordine dell'elenco, così "1 · …" e "2 · …" stanno sulle loro parentesi e "Valori veri"
+    // sopra di loro (nell'ordine opposto il titolo grande, piazzato per primo, spingeva su o nascondeva i piccoli).
+    // Etichette corte: di lato, a rete intera, la parentesi della parte 2 è larga poche decine di pixel.
     groups: [
-      { label: "Valori veri, calcolati nel browser", from: "emb.features", to: "db.topk", color: "#86efac", text: "Le parti 1 e 2 sono il tab vero: ogni numero viene da js/shared/rag e dalla pipeline del tab (pipeline.js), per la domanda del pannello Azioni." },
       { label: "1 · Il nostro embedder", from: "emb.features", to: "emb.q", text: "Testo → feature → hashing → normalizzazione: un embedder a regole, senza una rete neurale, che simula text-embedding-3-small in modo dichiarato." },
       { label: "2 · Database vettoriale", from: "db.chunks", to: "db.topk", text: "La ricerca di RagService.search: la domanda contro ogni chunk della tabella vector_store, poi topK e soglia come in PgVectorStore." },
-      { label: "Illustrativo: reti neurali di un RAG vero", from: "enc.tokens", to: "llm.next", color: "#fcd34d", text: "Le parti 3 e 4 mostrano due modelli aperti come esempio, con i numeri dei loro config ufficiali. Le attivazioni sono simulate con un seme: servono a vedere i meccanismi, non sono calcoli veri." },
+      { label: "Valori veri", from: "emb.features", to: "db.topk", color: "#86efac", text: "Le parti 1 e 2 sono il tab vero: ogni numero è calcolato nel browser da js/shared/rag e dalla pipeline del tab (pipeline.js), per la domanda scritta nell'introduzione." },
       { label: "3 · Encoder (E5 small)", from: "enc.tokens", to: "enc.vec", text: "Come un modello neurale trasforma la domanda in un vettore: token in fila, attention in entrambe le direzioni, media dei token." },
       { label: "4 · LLM (Llama 3 8B)", from: "llm.prompt", to: "llm.next", text: "Il decoder che legge il prompt aumentato (domanda + chunk scelti) e scrive la risposta un token alla volta." },
+      { label: "Illustrativo: valori simulati", from: "enc.tokens", to: "llm.next", color: "#fcd34d", text: "Le parti 3 e 4 mostrano due modelli aperti come esempio, con i numeri dei loro config ufficiali. Le attivazioni sono simulate con un seme: servono a vedere i meccanismi, non sono calcoli veri." },
     ],
     sources: SOURCES,
   };
 }
 
 // ------------------------------------------------------------------------------------- parte 1
-function embedderPart({ ex, features, dims, nonzero }) {
+function embedderPart({ ex, features, dims, nonzero, embedder }) {
   const K = dims.length;
   const at = new Map(dims.map((d, k) => [d, k]));
   const F = Math.max(1, features.length);
@@ -221,7 +239,11 @@ function embedderPart({ ex, features, dims, nonzero }) {
     .filter(([, n]) => n)
     .map(([kind, n]) => `${n} ${n === 1 ? KIND_LABEL[kind] : KIND_PLURAL[kind]}`)
     .join(", ");
-  const dimsNote = K < nonzero ? `${K} delle ${nonzero} non nulle (le più grandi)` : `${K} delle 256 · le altre sono zero`;
+  const dimsNote = K < nonzero ? `${K} delle ${nonzero} non nulle (le più grandi)` : `${K} delle ${embedder.dims} · le altre sono zero`;
+  // la normalizzazione dell'embedder (embedder.js, explain): la parte "specifica" del vettore va a lunghezza
+  // √(1 − s²) e la dimensione comune vale s, così il vettore intero è lungo 1 (s = sharedComponent, 0,66)
+  const s = embedder.shared;
+  const rest = Math.sqrt(1 - s * s);
   // l'hashing come matrice fissa: un collegamento per feature, verso la sua dimensione, peso ±1
   const pairs = [];
   features.forEach((f, i) => {
@@ -249,44 +271,49 @@ function embedderPart({ ex, features, dims, nonzero }) {
       },
       {
         id: "emb.raw",
-        label: "Hashing: il vettore grezzo",
+        label: "Hashing: vettore grezzo",
         sub: dimsNote,
         role: "latent",
         neurons: K,
-        real: 256,
+        real: embedder.dims,
         values: dims.map((d) => ex.raw[d]),
         neuronNames: dims.map(dimLabel),
         text: [
-          "Ogni feature cade in una delle 256 dimensioni scelta da una funzione di hash, con un segno + o − deciso anch'esso dall'hash: è il «trucco dell'hashing». Come smistare la posta in 256 caselle guardando solo il codice postale: nessuno ha scritto una tabella, la casella la decide una formula.",
+          `Ogni feature cade in una delle ${embedder.dims} dimensioni, scelta da una funzione di hash, con un segno + o − deciso anch'esso dall'hash: è il «trucco dell'hashing». Come smistare la posta in tante caselle guardando solo il codice postale: nessuno ha scritto una tabella, la casella la decide una formula. Le feature viste nei documenti vanno nelle dimensioni dalla ${FIRST_HASHED} alla ${embedder.dims - 1}: la ${SHARED_DIMENSION} e la ${UNKNOWN_DIMENSION} sono riservate.`,
           "I collegamenti a sinistra sono proprio questa regola: un solo collegamento per feature, peso +1 (arancione) o −1 (blu). Non è un peso imparato. Se due feature cadono nella stessa casella i loro contributi si sommano (collisione).",
-          "Le feature mai viste nei documenti vanno tutte nella dimensione 1 e si sommano «in quadratura» (radice della somma dei quadrati): allungano il vettore ma non lo avvicinano a nessun documento. La dimensione 0 qui è ancora vuota: la riempie il passo dopo.",
+          `Le feature mai viste nei documenti vanno tutte nella dimensione ${UNKNOWN_DIMENSION} e si sommano «in quadratura» (radice della somma dei quadrati): allungano il vettore ma non lo avvicinano a nessun documento. La dimensione ${SHARED_DIMENSION} qui è ancora vuota: la riempie il passo dopo.`,
         ].join("\n\n"),
       },
       {
         id: "emb.q",
-        label: "Normalizzazione L2: il vettore della domanda",
-        sub: nonzero ? `256 numeri, lunghezza 1 · qui ${K < nonzero ? `${K} dei ${nonzero}` : K} non nulli` : "vettore nullo: nessuna feature utile",
+        label: "Vettore della domanda",
+        sub: nonzero ? `normalizzato, lunghezza 1 · ${embedder.dims} numeri, qui ${K < nonzero ? `${K} dei ${nonzero}` : K} non nulli` : "vettore nullo: nessuna feature utile",
         role: "latent",
         neurons: K,
-        real: 256,
+        real: embedder.dims,
         values: dims.map((d) => ex.vector[d]),
         neuronNames: dims.map(dimLabel),
-        text: [
-          nonzero ? "Il vettore grezzo viene allungato o accorciato fino a lunghezza 1, come i vettori di OpenAI: così la similarità del coseno diventa un semplice prodotto scalare." : "Questa domanda è fatta solo di parole vuote: il vettore grezzo è nullo e non ha una direzione, quindi resta nullo (similarità 0 con ogni chunk). Di solito invece viene allungato o accorciato fino a lunghezza 1, come i vettori di OpenAI.",
-          "In più si accende la dimensione 0, uguale per tutti i testi (0,66): simula una cosa vera dei modelli neurali, i cui vettori condividono sempre una componente comune. Per questo due testi scollegati hanno comunque similarità circa 0,44 e la soglia 0,5 delle lezioni ha senso.",
-          "È lo stesso embedder usato per i chunk: domanda e documenti devono stare sulla stessa mappa (L18 §12.1).",
-        ].join("\n\n"),
+        text: nonzero
+          ? [
+              `Il vettore grezzo viene allungato o accorciato fino a lunghezza ${it(rest, 2)}; poi la dimensione ${SHARED_DIMENSION}, uguale per tutti i testi, prende il valore ${it(s, 2)}. In tutto il vettore è lungo 1 (${it(rest, 2)}² + ${it(s, 2)}² ≈ 1), come i vettori di OpenAI: così la similarità del coseno diventa un semplice prodotto scalare.`,
+              `La dimensione ${SHARED_DIMENSION} simula una cosa vera dei modelli neurali, i cui vettori condividono sempre una componente comune. Per questo due testi scollegati hanno comunque similarità circa ${it(s * s, 2)} (${it(s, 2)} × ${it(s, 2)}) e la soglia 0,5 delle lezioni ha senso.`,
+              "È lo stesso embedder usato per i chunk: domanda e documenti devono stare sulla stessa mappa (L18 §12.1).",
+            ].join("\n\n")
+          : [
+              "Questa domanda è fatta solo di parole vuote: il vettore grezzo è nullo e non ha una direzione, quindi resta tutto zero, anche la componente comune della dimensione 0 (similarità 0 con ogni chunk).",
+              `Di solito invece il vettore viene riscalato a lunghezza ${it(rest, 2)} e la dimensione ${SHARED_DIMENSION} vale ${it(s, 2)}: in tutto lunghezza 1, come i vettori di OpenAI.`,
+            ].join("\n\n"),
       },
     ],
     links: [
       { from: "emb.features", to: "emb.raw", pattern: "explicit", pairs, label: "hashing: un ±1 per feature" },
-      { from: "emb.raw", to: "emb.q", pattern: "identity", label: "diviso per la lunghezza" },
+      { from: "emb.raw", to: "emb.q", pattern: "identity", label: `riscalato a lunghezza ${it(rest, 2)}, più ${it(s, 2)} nella dimensione ${SHARED_DIMENSION}` },
     ],
   };
 }
 
 // ------------------------------------------------------------------------------------- parte 2
-function databasePart({ run, N, ex, dims, nonzero, chunks, cosine, chosen }) {
+function databasePart({ kb, run, N, ex, dims, nonzero, chunks, cosine, chosen, embedder }) {
   const K = dims.length;
   const vectorValues = new Float32Array(K * N);
   const products = new Float32Array(K * N);
@@ -307,12 +334,12 @@ function databasePart({ run, N, ex, dims, nonzero, chunks, cosine, chosen }) {
     sections: [
       {
         id: "db.chunks",
-        label: "Vettori dei chunk (vector_store)",
-        sub: `${N} chunk × ${K} delle 256 dimensioni`,
+        label: "Vettori dei chunk",
+        sub: `vector_store · ${N} chunk × ${K} delle ${embedder.dims} dimensioni`,
         role: "latent",
         neurons: K,
         depth: true,
-        real: 256,
+        real: embedder.dims,
         values: vectorValues,
         neuronNames: dims.map(dimLabel),
         text: [
@@ -323,8 +350,8 @@ function databasePart({ run, N, ex, dims, nonzero, chunks, cosine, chosen }) {
       },
       {
         id: "db.compare",
-        label: "Domanda × chunk, dimensione per dimensione",
-        sub: `${N} chunk × ${K} prodotti`,
+        label: "Domanda × chunk",
+        sub: `prodotti dimensione per dimensione · ${N} chunk × ${K}`,
         role: "data",
         neurons: K,
         depth: true,
@@ -346,15 +373,15 @@ function databasePart({ run, N, ex, dims, nonzero, chunks, cosine, chosen }) {
         values: Float32Array.from(cosine),
         valueLabel: "(similarità)",
         text: [
-          `La somma dei prodotti è la similarità del coseno (i vettori sono lunghi 1): 1 = stessa direzione, 0 = niente in comune. È lo score che Spring AI restituisce, 1 − la distanza <=> di pgvector. La più alta: ${chunkLabel(chunks[best].id)} (${it(cosine[best], 3)}).${partial ? ` La somma conta tutte le ${nonzero} dimensioni non nulle, anche le ${nonzero - K} non disegnate.` : ""}`,
+          `La somma dei prodotti è la similarità del coseno (i vettori sono lunghi 1): 1 = stessa direzione, 0 = niente in comune. È lo score che Spring AI restituisce, 1 − la distanza <=> di pgvector. ${nonzero ? `La più alta: ${chunkLabel(chunks[best].id)} (${it(cosine[best], 3)}).` : "Qui il vettore della domanda è nullo: tutte le similarità valgono 0."}${partial ? ` La somma conta tutte le ${nonzero} dimensioni non nulle, anche le ${nonzero - K} non disegnate.` : ""}`,
           "I collegamenti della somma si vedono sul chunk scelto con la «Fetta» (senza fetta, su quello davanti).",
-          `Qui il confronto è disegnato con tutti i chunk, come la ricerca esatta. ${hnswNote(run, N)}`,
+          `Qui il confronto è disegnato con tutti i chunk, come la ricerca esatta. ${hnswNote(run, N, kb.store.index.efSearch)}`,
         ].join("\n\n"),
       },
       {
         id: "db.topk",
-        label: "Top-k e soglia: i chunk scelti",
-        sub: `${chosen.length} su ${N} · topK ${run.topK}, soglia ${it(run.similarityThreshold, 2)}`,
+        label: "Top-k e soglia",
+        sub: `scelti ${chosen.length} su ${N} · topK ${run.topK}, soglia ${it(run.similarityThreshold, 2)}`,
         role: "output",
         neurons: 1,
         depth: true,
@@ -385,16 +412,25 @@ function databasePart({ run, N, ex, dims, nonzero, chunks, cosine, chosen }) {
 }
 
 /**
- * Quanto ha lavorato davvero l'indice HNSW del tab (come la didascalia dell'azione Ricerca): con pochi
- * chunk calcola anche più distanze della ricerca esatta, perché rilegge alcuni nodi a ogni livello.
+ * Quanto ha lavorato davvero l'indice HNSW del tab (come la didascalia dell'azione Ricerca). Con pochi
+ * chunk non conviene, per due motivi diversi che il testo distingue: con il grafo didattico a più livelli
+ * rilegge alcuni nodi a ogni livello (più distanze dei nodi visitati); con i valori di pgvector il grafo ha
+ * un livello solo ed ef_search (40) supera i chunk, quindi legge tutto il grafo, un nodo una volta.
+ * @param {{ comparisons: number, recall: number, frames?: { visited: number[] }[] }} run
+ * @param {number} N chunk nel database
+ * @param {number} [efSearch] ef_search dell'indice
  */
-export function hnswNote(run, N) {
-  if (run.comparisons < N) return `L'indice HNSW del tab ha calcolato ${it(run.comparisons)} distanze invece di ${it(N)} (recall ${it(run.recall * 100)}%): salta tra pochi nodi del grafo invece di leggerli tutti.`;
-  return `L'indice HNSW del tab ha calcolato ${it(run.comparisons)} distanze, la ricerca esatta ${it(N)}: con così pochi chunk l'indice non conviene (rilegge alcuni nodi a ogni livello). Il vantaggio arriva con migliaia di vettori, come misurano i Grafici del tab.`;
+export function hnswNote(run, N, efSearch) {
+  const n = run.comparisons;
+  if (n < N) return `L'indice HNSW del tab ha calcolato ${it(n)} distanze invece di ${it(N)} (recall ${it(run.recall * 100)}%): salta tra pochi nodi del grafo invece di leggerli tutti.`;
+  // nodi diversi visitati in tutta la ricerca (l'ultimo fotogramma di searchFrames li ha tutti)
+  const distinct = run.frames?.at(-1)?.visited?.length ?? n;
+  const why = n > distinct ? "rilegge alcuni nodi a ogni livello del grafo" : `${efSearch ? `con ef_search ${it(efSearch)} e ` : "con "}solo ${it(N)} chunk legge tutto il grafo`;
+  return `L'indice HNSW del tab ha calcolato ${it(n)} distanze, la ricerca esatta ${it(N)}: con così pochi chunk l'indice non conviene (${why}). Il vantaggio arriva con migliaia di vettori, come misurano i Grafici del tab.`;
 }
 
 // ------------------------------------------------------------------------------------- parte 3
-function encoderPart({ tokens }) {
+function encoderPart({ tokens, embedder }) {
   const E = SHOWN.encoder;
   const T = tokens.names.length;
   const depth = { count: T, label: "token", names: tokens.names };
@@ -403,8 +439,8 @@ function encoderPart({ tokens }) {
     sections: [
       {
         id: "enc.tokens",
-        label: "Token: «query: » + la domanda",
-        sub: `${T} token${cut} · one-hot su ${SHOWN.vocab} delle ${it(ENCODER.vocab)} voci`,
+        label: "Token della domanda",
+        sub: `«query: » + domanda · ${T} token${cut} · one-hot su ${SHOWN.vocab} delle ${it(ENCODER.vocab)} voci`,
         role: "input",
         neurons: SHOWN.vocab,
         depth,
@@ -428,7 +464,7 @@ function encoderPart({ tokens }) {
       },
       {
         id: "enc.attn",
-        label: "Self-attention bidirezionale",
+        label: "Attention bidirezionale",
         sub: `${ENCODER.heads} head da ${ENCODER.width / ENCODER.heads} · qui ${E.heads} · nessuna maschera`,
         role: "attention",
         neurons: E.width,
@@ -480,12 +516,12 @@ function encoderPart({ tokens }) {
       },
       {
         id: "enc.vec",
-        label: "Normalizzazione L2: il vettore",
-        sub: `${ENCODER.width} numeri, lunghezza 1 · qui ${E.width}`,
+        label: "Vettore della frase",
+        sub: `normalizzato, lunghezza 1 · ${ENCODER.width} numeri, qui ${E.width}`,
         role: "latent",
         neurons: E.width,
         real: ENCODER.width,
-        text: `Il vettore viene portato a lunghezza 1 (F.normalize nel codice di E5): è questo che un RAG vero salverebbe e cercherebbe al posto dei nostri 256 numeri, confrontandolo con i chunk codificati con «passage: ». A differenza del nostro, quasi nessuno dei suoi ${ENCODER.width} numeri è zero, e due testi con parole diverse ma lo stesso significato finiscono vicini.`,
+        text: `Il vettore viene portato a lunghezza 1 (F.normalize nel codice di E5): è questo che un RAG vero salverebbe e cercherebbe al posto dei nostri ${embedder.dims} numeri, confrontandolo con i chunk codificati con «passage: ». A differenza del nostro, quasi nessuno dei suoi ${ENCODER.width} numeri è zero, e due testi con parole diverse ma lo stesso significato finiscono vicini.`,
       },
     ],
     links: [

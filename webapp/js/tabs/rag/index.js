@@ -348,7 +348,7 @@ export async function createTab(root, app) {
     const spec = {};
     const refresh = () => {
       if (!builder) return;
-      const next = builder({ kb: tab.kb, run: networkSearch() });
+      const next = builder({ kb: tab.kb, ...networkSearch() });
       for (const key of Object.keys(spec)) delete spec[key];
       Object.assign(spec, next);
     };
@@ -362,10 +362,14 @@ export async function createTab(root, app) {
     };
   }
 
-  /** La ricerca da disegnare: quella della domanda del pannello Azioni o, se è vuota, l'ultima mostrata. */
+  /**
+   * La ricerca da disegnare e da dove viene (l'introduzione della rete lo dice): la domanda del pannello
+   * Azioni o, se il campo è vuoto, l'ultima ricerca mostrata, altrimenti la domanda d'esempio iniziale.
+   */
   function networkSearch() {
-    if (settings.question.trim()) return tab.currentSearch();
-    return world.search?.run ?? runSearch(tab.kb, EXAMPLE_QUESTIONS[2].question, { topK: settings.topK, similarityThreshold: settings.threshold });
+    if (settings.question.trim()) return { run: tab.currentSearch(), origin: "panel" };
+    if (world.search?.run) return { run: world.search.run, origin: "last" };
+    return { run: runSearch(tab.kb, EXAMPLE_QUESTIONS[2].question, { topK: settings.topK, similarityThreshold: settings.threshold }), origin: "example" };
   }
 
   function menuVars() {

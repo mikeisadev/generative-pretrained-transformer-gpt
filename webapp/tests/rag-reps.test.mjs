@@ -60,17 +60,21 @@ test("ordine e conteggi delle sezioni: quattro parti da sinistra a destra, con i
   const order = net.items.map((i) => i.id);
   assert.equal(order.indexOf("enc.x12"), order.indexOf("enc.add2") + 1);
   assert.equal(order.indexOf("llm.x32"), order.indexOf("llm.add2") + 1);
-  // due gruppi grandi (vero / illustrativo) che contengono le quattro parti
+  // le quattro parti, ognuna seguita dalla parentesi grande (vero / illustrativo) che la contiene: a parità di
+  // importanza il nucleo piazza le etichette nell'ordine dell'elenco, così le piccole stanno sulle loro parentesi
   assert.deepEqual(net.groups.map((g) => [g.from.id, g.to.id]), [
-    ["emb.features", "db.topk"],
     ["emb.features", "emb.q"],
     ["db.chunks", "db.topk"],
-    ["enc.tokens", "llm.next"],
+    ["emb.features", "db.topk"],
     ["enc.tokens", "enc.vec"],
     ["llm.prompt", "llm.next"],
+    ["enc.tokens", "llm.next"],
   ]);
-  assert.match(net.groups[0].label, /veri/);
-  assert.match(net.groups[3].label, /Illustrativo/);
+  assert.match(net.groups[2].label, /^Valori veri/);
+  assert.match(net.groups[5].label, /^Illustrativo/);
+  // etichette corte: di lato, a rete intera, le parentesi delle parti vere sono larghe poche decine di pixel
+  for (const s of net.sections) assert.ok(s.label.length <= 24, `${s.id}: etichetta lunga «${s.label}»`);
+  for (const g of net.groups) assert.ok(g.label.length <= 30, `gruppo: etichetta lunga «${g.label}»`);
   for (const s of net.sections) assert.ok(s.text.length > 40, `${s.id}: manca il testo della scheda`);
   assert.ok(net.sources.length >= 10);
 });
@@ -217,14 +221,67 @@ test("valori veri: uguali a quelli calcolati dalla pipeline del tab (embedder, v
   }
 });
 
-test("il testo su HNSW dice quanto ha lavorato davvero l'indice del tab (anche quando non conviene)", () => {
+test("il testo su HNSW dice quanto ha lavorato davvero l'indice del tab, e perché non conviene", () => {
   const { run, spec } = build(DEFAULT_QUESTION);
   const text = sectionOf(spec, "db.cosine").text;
-  assert.ok(text.includes(hnswNote(run, kb.inserts.length)));
+  assert.ok(text.includes(hnswNote(run, kb.inserts.length, kb.store.index.efSearch)));
   assert.ok(text.includes(`${run.comparisons} distanze`));
-  // con 27 chunk e la configurazione didattica l'indice rilegge alcuni nodi: più distanze della ricerca esatta
-  if (run.comparisons >= kb.inserts.length) assert.match(text, /non conviene/);
+  // grafo didattico a più livelli: con 27 chunk rilegge alcuni nodi (più distanze dei nodi visitati)
+  const distinct = run.frames.at(-1).visited.length;
+  assert.ok(run.comparisons > kb.inserts.length && run.comparisons > distinct, `${run.comparisons} distanze, ${distinct} nodi diversi`);
+  assert.match(text, /non conviene \(rilegge alcuni nodi a ogni livello del grafo\)/);
+  // valori di pgvector: un livello solo ed ef_search 40 > 21 chunk → legge tutto il grafo, ogni nodo una volta
+  // (prima il testo diceva anche qui "rilegge alcuni nodi a ogni livello", che non è vero)
+  const pg = buildKnowledgeBase({ splitter: "l17", hnsw: "pgvector" });
+  const pgRun = runSearch(pg, DEFAULT_QUESTION, { topK: 5, similarityThreshold: 0.5 });
+  assert.equal(pg.maxLevel, 0);
+  assert.equal(pgRun.comparisons, pg.inserts.length);
+  const pgText = sectionOf(buildRagNetworkSpec({ kb: pg, run: pgRun }), "db.cosine").text;
+  assert.match(pgText, /con ef_search 40 e solo 21 chunk legge tutto il grafo/);
+  assert.doesNotMatch(pgText, /rilegge/);
   assert.match(hnswNote({ comparisons: 120, recall: 0.8 }, 10_000), /120 distanze invece di 10\.000 \(recall 80%\)/);
+});
+
+test("normalizzazione descritta com'è nell'embedder: parte specifica a √(1 − s²), dimensione 0 = s, lunghezza 1", () => {
+  const { run, spec } = build(DEFAULT_QUESTION);
+  const s = kb.embedder.sharedComponent;
+  const q = sectionOf(spec, "emb.q");
+  const v = run.explanation.vector;
+  // i numeri del testo sono quelli del vettore vero
+  let specific = 0;
+  for (let d = 0; d < v.length; d++) if (d !== SHARED_DIMENSION) specific += v[d] * v[d];
+  assert.ok(close(Math.sqrt(specific), Math.sqrt(1 - s * s), 1e-6));
+  assert.ok(close(v[SHARED_DIMENSION], s, 1e-7));
+  const rest = Math.sqrt(1 - s * s).toLocaleString("it-IT", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+  const shared = s.toLocaleString("it-IT", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+  assert.ok(q.text.includes(`fino a lunghezza ${rest}`) && q.text.includes(`prende il valore ${shared}`), q.text);
+  assert.doesNotMatch(q.text, /fino a lunghezza 1[,;:. ]/, "il vettore grezzo non va a lunghezza 1: ci va il vettore intero, con la dimensione 0");
+  const [scaleLink] = linksFrom(spec, "emb.raw", "emb.q");
+  assert.match(scaleLink.label, new RegExp(`riscalato a lunghezza ${rest}, più ${shared} nella dimensione 0`));
+  // le feature conosciute vanno nelle dimensioni dalla 2 alla 255 (0 e 1 riservate)
+  assert.match(sectionOf(spec, "emb.raw").text, /dalla 2 alla 255: la 0 e la 1 sono riservate/);
+  for (const f of run.explanation.features) if (f.known) assert.ok(f.dimension >= 2 && f.dimension <= 255);
+  // vettore nullo: nemmeno la dimensione 0 si accende, e il coseno non indica un "più simile"
+  const empty = build("come?");
+  assert.ok(empty.run.explanation.vector.every((x) => x === 0));
+  assert.match(sectionOf(empty.spec, "emb.q").text, /resta tutto zero, anche la componente comune/);
+  assert.match(sectionOf(empty.spec, "db.cosine").text, /tutte le similarità valgono 0/);
+  assert.doesNotMatch(sectionOf(empty.spec, "db.cosine").text, /La più alta/);
+});
+
+test("l'introduzione dice da dove viene la domanda disegnata (pannello, ultima ricerca, esempio)", () => {
+  const run = runSearch(kb, DEFAULT_QUESTION, { topK: 5, similarityThreshold: 0.5 });
+  const intro = (origin) => buildRagNetworkSpec({ kb, run, origin }).intro;
+  assert.match(intro(undefined), /quella del pannello Azioni/);
+  assert.match(intro("panel"), /quella del pannello Azioni/);
+  assert.match(intro("last"), /l'ultima cercata: il campo del pannello Azioni è vuoto/);
+  assert.match(intro("example"), /una domanda d'esempio: il campo del pannello Azioni è vuoto/);
+  for (const o of ["panel", "last", "example"]) assert.ok(intro(o).includes(`«${DEFAULT_QUESTION}»`));
+  // index.js passa la provenienza: networkSearch → { run, origin }
+  return readFile(new URL("../js/tabs/rag/index.js", import.meta.url), "utf8").then((source) => {
+    assert.match(source, /builder\(\{ kb: tab\.kb, \.\.\.networkSearch\(\) \}\)/);
+    for (const o of ["panel", "last", "example"]) assert.ok(source.includes(`origin: "${o}"`), o);
+  });
 });
 
 test("il vettore grezzo è davvero la somma delle feature con il segno dell'hash", () => {
@@ -345,8 +402,10 @@ test("brainSpec: regioni, percorsi e marcatori nell'atlante; ogni fonte citata �
   ];
   for (const id of cited) assert.ok(ids.has(id), `fonte citata ma non elencata: ${id}`);
   for (const s of brainSpec.sources) assert.ok(s.title && s.authors && s.year && s.url?.startsWith("https://"), s.id);
-  // la cautela della verifica della ricerca resta scritta accanto al numero incerto
+  // le cautele della verifica della ricerca restano scritte accanto ai numeri incerti: Rolls 2016 (via
+  // perforante) ed Eyal et al. 2018 (spine), entrambe "numero da ricontrollare online" in brain_data.json
   assert.match(brainSpec.facts.find((f) => f.source.id === "rolls2016").note, /ricontrollare/);
+  assert.match(brainSpec.facts.find((f) => f.source.id === "eyal2018").note, /ricontrollare/);
 });
 
 test("brainSpec: i testi sono quelli della ricerca verificata, parola per parola", { skip: !(RESEARCH && existsSync(RESEARCH)) && "BRAIN_RESEARCH non indicato (la ricerca sta fuori dal repository)" }, async () => {

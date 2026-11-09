@@ -14,8 +14,8 @@
  *     "debole/metafora" → "debole", ai_section → aiSection;
  *   - sources: tutte le fonti citate dal tab (analogie, circuito, numeri), senza doppioni;
  *   - facts: i numeri della ricerca con una fonte citata dal tab, più i due che descrivono le cellule
- *     disegnate nel circuito (spine della piramidale, scarica dei canestro PV+); la cautela della
- *     verifica su Rolls 2016 è diventata una nota.
+ *     disegnate nel circuito (spine della piramidale, scarica dei canestro PV+); le cautele della
+ *     verifica sui numeri da ricontrollare (Rolls 2016, Eyal et al. 2018) sono diventate note.
  *
  * Come rigenerarlo: lo script che applica queste regole sta nello scratchpad del round E
  * (reps-rag/gen_brain.mjs, fuori dal repository): node gen_brain.mjs <brain_data.json> <questo file>.
@@ -711,7 +711,7 @@ export const brainSpec = {
     {
       claim: "Spine di una piramidale umana degli strati 2/3",
       value: "circa 25.000–30.000",
-      note: "Eyal et al. riportano il dato citando Benavides-Piccione et al. 2013.",
+      note: "Eyal et al. riportano il dato citando Benavides-Piccione et al. 2013. L'intervallo è da ricontrollare sul testo dell'articolo (verifica della ricerca, 8 novembre 2026).",
       source: {
         id: "eyal2018",
         title: "Human cortical pyramidal neurons: from spines to spikes via models",
