@@ -118,6 +118,78 @@ Lo script di screenshot (Playwright con Chromium) apre tutti i tab e i livelli d
 la navigazione con i tasti e "Centra" (`--nav`), usa il formato telefono con `--mobile` e termina con
 errore se la console ne segnala. L'architettura del codice è descritta in `webapp/ARCHITECTURE.md`.
 
+## Esportare un run e confrontarlo nel Laboratorio pesi
+
+Un *run* è una cartella con i pesi di un training nel formato che la web app sa caricare:
+`run.json` (nome, descrizione, data, config, albero dei moduli con le forme, note),
+`weights.json` + `weights.f32.bin` (lo stesso formato di `webapp/data`) e, a richiesta,
+`benchmark.json` e la storia del training (`training/trace.json` con gli snapshot). Così vedi il
+"prima e dopo" di ogni miglioramento: iperparametri, pesi o architettura, anche fatti con un
+assistente come Claude. Il flusso completo, per esempio per provare GELU al posto di ReLU:
+
+```bash
+# 0. il metro di riferimento: il GPT del corso (già misurato in webapp/data/benchmark/builtin.json)
+python scripts/benchmark.py webapp/data
+
+# 1. modifica il codice in gpt/ (qui: nn.GELU() al posto di nn.ReLU() in gpt/feedforward.py)
+
+# 2. riaddestra registrando la storia; --no-export è importante: non tocca i dati della web app
+python scripts/record_training.py --checkpoint checkpoints/gelu/gpt.pt --out checkpoints/gelu/training --no-export
+#    più veloce e senza storia: python train.py --checkpoint checkpoints/gelu/gpt.pt
+
+# 3. esporta il run in runs/gpt-con-gelu/, misurato con il codice modificato
+python scripts/export_run.py checkpoints/gelu/gpt.pt --name "GPT con GELU" --description "FFN con GELU" \
+    --trace checkpoints/gelu/training --benchmark --not-engine-compatible
+
+# 4. confronta in terminale con il GPT del corso
+python scripts/benchmark.py webapp/data/benchmark/builtin.json runs/gpt-con-gelu/benchmark.json
+```
+
+Poi, nella web app, apri il tab **Laboratorio pesi** e carica la cartella `runs/gpt-con-gelu`
+(scegliendola o trascinandola): i pesi organizzati come il codice Python, il confronto con il GPT del
+corso tensore per tensore, i grafici del training e la tabella del benchmark. Se i pesi hanno nomi e
+forme del GPT del corso, il browser ricalcola il benchmark sull'estratto con il motore JavaScript e
+controlla che coincida con il Python. `--not-engine-compatible` serve quando cambi il *calcolo* senza
+cambiare le forme (GELU, un'altra attivazione): il motore JS eseguirebbe ReLU e darebbe numeri sbagliati,
+così il Laboratorio mostra i pesi senza eseguirli. I run esportati stanno in `runs/`, che git ignora.
+
+| Comando | Che cosa fa |
+|---|---|
+| `python scripts/export_run.py CKPT --name NOME [--description …] [--note …] [--trace DIR] [--benchmark] [--out DIR] [--force]` | esporta un checkpoint in `runs/<nome>/`; `--force` sostituisce un run esistente cancellando solo i file del run |
+| `python scripts/benchmark.py SORGENTE [--out benchmark.json]` | misura un checkpoint `.pt` o una cartella di run (anche `webapp/data`) |
+| `python scripts/benchmark.py A B` | tabella di confronto A/B in italiano; A e B possono essere anche `benchmark.json` già calcolati |
+| `python scripts/export_benchmark_data.py [--check]` | rigenera (o controlla) `webapp/data/benchmark/`: l'estratto per il browser e `builtin.json` |
+
+Su una macchina già occupata da altri programmi aggiungi `--threads 1`: troppi thread di PyTorch si
+ostacolano a vicenda e il benchmark può diventare decine di volte più lento (i numeri non cambiano).
+
+**Il benchmark** (`gpt/benchmark.py`, protocollo `finestre-contigue-v1`) è deterministico e
+confrontabile: la validation completa di Tiny Shakespeare (l'ultimo 10% di `data/input.txt`, 111.540
+caratteri) si taglia in finestre contigue di `block_size` caratteri, e ogni carattere tranne il primo
+viene previsto una volta sola. Misura loss, perplexity, bit per carattere, accuratezza top-1 e top-5 del
+prossimo carattere, un testo generato con prompt e seme fissi (più la continuazione greedy, che il motore
+JS riproduce identica), token al secondo, numero di parametri e durata; per una cartella con la storia
+del training, anche ogni snapshot. I pesi si eseguono con la classe del codice **attuale**: un'architettura
+migliorata si misura con lo stesso metro. Il GPT del corso, misurato così dai pesi committati:
+
+| | loss (nat) | perplexity | bit per carattere | top-1 | top-5 |
+|---|---|---|---|---|---|
+| validation completa (111.539 previsioni) | 1.8145 | 6.138 | 2.618 | 45.62% | 79.70% |
+| estratto per il browser (4.014 previsioni) | 1.7337 | 5.662 | 2.501 | 47.51% | 80.79% |
+
+Un modello che tira a caso ha loss ln 65 = 4.17 nat: lo snapshot dello step 0 è lì vicino (4.40).
+
+**Architettura modificata.** Per esportare non serve la classe del modello: `export_run.py` legge solo
+i tensori dello state_dict, quindi esporta anche pesi con nomi o forme che il codice attuale non sa più
+ricostruire. Per *misurarli*, invece, serve il codice che li esegue: lancia `--benchmark` con il codice
+modificato, prima di tornare indietro, e confronta poi i `benchmark.json` (quello del GPT del corso è
+`webapp/data/benchmark/builtin.json`). Se aggiungi moduli con nomi nuovi, `scripts/record_training.py`
+si ferma con un messaggio chiaro: aggiorna `group_of` in `gpt/recording.py`, oppure addestra con `train.py`.
+
+**Sicurezza.** I checkpoint si leggono con `torch.load(weights_only=True)`: un file scaricato non può
+eseguire codice. I nomi dei file letti dai JSON (snapshot, binario dei pesi) devono stare accanto al
+JSON, e `--force` cancella soltanto i file che l'export scrive.
+
 ## Bug corretti rispetto al notebook
 
 | # | Problema | Correzione | Test |

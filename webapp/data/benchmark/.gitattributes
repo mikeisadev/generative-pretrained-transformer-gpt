@@ -1,0 +1,3 @@
+# L'estratto va servito identico byte per byte: il suo sha256 sta in builtin.json e il browser lo
+# valuta così com'è. Niente conversione degli a capo, nemmeno su Windows (core.autocrlf).
+val_excerpt.txt text eol=lf

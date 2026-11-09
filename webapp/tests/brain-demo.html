@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prova del cervello 3D</title>
+    <link rel="stylesheet" href="../css/core.css" />
+    <link rel="stylesheet" href="../css/nav.css" />
+    <link rel="stylesheet" href="../css/reps.css" />
+    <link rel="stylesheet" href="../css/brain.css" />
+    <style>
+      /* Solo per questa pagina di prova: niente barra dei tab, la pagina è un tab solo. */
+      #app { inset: 0; }
+      .demo-pane { display: grid; gap: 10px; }
+      .demo-pane h1 { font-size: 16px; margin: 0; }
+      .demo-pane p { margin: 0; }
+      .demo-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+      .demo-buttons button { font-size: 12.5px; padding: 5px 9px; }
+      .demo-stats { font: 12px/1.5 "JetBrains Mono", ui-monospace, monospace; color: #cbd5e1; white-space: pre-wrap; margin: 0; }
+      .demo-warnings { color: #fde68a; font-size: 12px; margin: 0; padding-left: 18px; }
+    </style>
+    <script type="importmap">
+      { "imports": { "three": "../vendor/three/three.module.min.js", "three/addons/": "../vendor/three/addons/" } }
+    </script>
+  </head>
+  <body>
+    <div id="app"><div class="tab-root" id="tab"></div></div>
+    <script type="module">
+      import { el, fmt } from "../js/core/dom.js";
+      import { createSceneStack, createTabLayout } from "../js/core/layout.js";
+      import { demoBrainSpec } from "../js/core/brain/demoSpec.js";
+      import { renderBrainPane } from "../js/core/brain/pane.js";
+      import { createBrainView } from "../js/core/brain/view.js";
+
+      // Varianti della specifica: quella d'esempio (via uditiva), una senza circuito e una sbagliata apposta.
+      const SPECS = {
+        demo: demoBrainSpec,
+        regioni: { title: "Solo regioni (nessun circuito)", intro: "Specifica minima: regioni, un percorso e un'analogia segnaposto.", regions: ["hippocampus", "entorhinal", "pfc_dl", "v1"], markers: ["lgn", "pulvinar"], pathways: ["perforant_path", "optic_radiation"], analogies: [] },
+        sbagliata: { title: "Specifica sbagliata", regions: ["ippocampo", "a1"], circuit: { groups: [{ id: "x", type: "boh", count: 99 }], edges: [{ from: "x", to: "y" }] } },
+      };
+      const params = new URL(location.href).searchParams;
+      const specName = SPECS[params.get("spec")] ? params.get("spec") : "demo";
+      const spec = SPECS[specName];
+
+      // Un finto tab come quelli veri: sidebar con il pannello "Cervello" e uno stage con il livello
+      // della rappresentazione (.rep-layer) che ha la sua pila di scena, esattamente come in
+      // core/representations.js (createSceneStack: SceneHost, CameraDirector, Navigation, NavPad).
+      const root = document.getElementById("tab");
+      root.dataset.tab = "prova";
+      const ui = createTabLayout(root, { hint: "Pagina di prova del nucleo: il cervello 3D e il pannello delle analogie, senza i tab." });
+      ui.host.stop();
+      ui.host.renderer.domElement.style.visibility = "hidden";
+      const brainPane = ui.sidebar.addPane({ id: "cervello", title: "Cervello" });
+      const testPane = ui.sidebar.addPane({ id: "prova", title: "Prova" });
+      ui.sidebar.select(params.get("pane") === "prova" ? "prova" : "cervello");
+      const layer = el("div", { className: "rep-layer", role: "region", ariaLabel: "Cervello (rappresentazione alternativa)", dataset: { rep: "brain", tab: "prova-cervello" } });
+      ui.stage.append(layer);
+      const stack = createSceneStack(layer, { root: layer });
+
+      const statsBox = el("pre", { className: "demo-stats" }, "…");
+      const warnings = el("ul", { className: "demo-warnings" });
+      const button = (label, fn) => el("button", { type: "button", onclick: fn }, label);
+      testPane.append(
+        el(
+          "div",
+          { className: "demo-pane" },
+          el("h1", {}, "Cervello 3D"),
+          el("p", { className: "hint" }, "Specifiche: ", ...Object.keys(SPECS).flatMap((k) => [el("a", { href: `?spec=${k}` }, k), " "]), " · qualità: ", el("a", { href: `?spec=${specName}&q=low` }, "bassa"), " ", el("a", { href: `?spec=${specName}&q=high` }, "alta")),
+          el("div", { className: "demo-buttons" },
+            button("Regioni", () => view.setScale("regions")),
+            button("Neuroni", () => view.setScale("neurons")),
+            button("Focus: ippocampo", () => view.focus(["hippocampus"])),
+            button("Focus: A1 + STG", () => view.focus(["a1", "stg"])),
+            button("Focus: radiazione uditiva", () => view.focus(["auditory_radiation"])),
+            button("Focus: circuito (A1)", () => view.focus("circuit:a1")),
+            button("Taglio coronale", () => view.setCut("coronal")),
+            button("Taglio sagittale", () => view.setCut("sagittal")),
+            button("Togli il taglio", () => view.setCut(null)),
+            button("Impulsi", () => view.play()),
+            button("Ricrea la vista", () => recreate()),
+          ),
+          el("p", { className: "hint" }, "Costo del codice del cervello (escluso il disegno della GPU): costruzione, ciclo per frame a riposo, etichette quando la camera si muove."),
+          statsBox,
+          warnings,
+        ),
+      );
+
+      const memory = {};
+      let view = null;
+      let pane = null;
+      function create() {
+        view = createBrainView({ host: stack.host, director: stack.director, nav: stack.nav, layer, tabId: "prova", spec, app: null, reps: null, memory, quality: params.get("q") ?? undefined });
+        window.__brain.view = view;
+        view.ready.then(() => {
+          layer.querySelector(":scope > .rep-loading")?.remove();
+          view.onShow();
+          warnings.replaceChildren(...view.spec.warnings.map((w) => el("li", {}, w)));
+          if (params.get("scale") === "neurons") view.setScale("neurons");
+          if (params.get("focus")) view.focus(params.get("focus").split(","));
+        });
+      }
+      function recreate() {
+        view.onHide();
+        view.dispose();
+        create();
+      }
+      pane = renderBrainPane(brainPane, spec, { onShow3D: (focus) => (focus?.length ? view.focus(focus) : view.setScale("regions")), app: null });
+
+      // frame rate misurato con requestAnimationFrame (tutto: JavaScript + disegno)
+      const frames = [];
+      let last = performance.now();
+      function measure(now) {
+        frames.push(now - last);
+        last = now;
+        if (frames.length > 60) frames.shift();
+        requestAnimationFrame(measure);
+      }
+      requestAnimationFrame(measure);
+      const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+      setInterval(() => {
+        const s = view?.stats;
+        if (!s || !view.brain) return;
+        const a = s.anatomy ?? {};
+        statsBox.textContent = [
+          `qualità ${s.quality} · vertici del cervello ${fmt(s.vertices)}`,
+          `costruzione ${fmt(s.buildMs, 1)} ms (base ${fmt(a.base ?? 0, 0)}, corteccia ${fmt(a.cortex ?? 0, 0)}, cervelletto ${fmt(a.cerebellum ?? 0, 0)}, strutture ${fmt(a.deep ?? 0, 0)} ms)`,
+          s.circuit ? `circuito ${fmt(s.circuitMs, 1)} ms: ${fmt(s.circuit.segments)} segmenti, ${fmt(s.circuit.somata + s.circuit.small)} sfere, ${fmt(s.circuit.fibers)} tratti di fibra, ${fmt(s.circuit.triangles)} triangoli` : "circuito non ancora costruito",
+          `frame ${fmt(avg(frames), 1)} ms (${fmt(1000 / Math.max(1, avg(frames)), 0)} fps)`,
+          `etichette ${fmt(s.labelsMs, 2)} ms (${fmt(s.labelUpdates)} aggiornamenti)`,
+        ].join("\n");
+      }, 500);
+
+      window.__brain = { ui, stack, layer, view: null, frames, create, recreate, memory, pane };
+      stack.host.start();
+      stack.host.resize();
+      create();
+    </script>
+  </body>
+</html>
