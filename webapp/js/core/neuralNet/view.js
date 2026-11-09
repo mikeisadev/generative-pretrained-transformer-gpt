@@ -23,7 +23,7 @@ import * as THREE from "three";
 import { el, fmt, prefersReducedMotion } from "../dom.js";
 import { MODE } from "./activations.js";
 import { NetworkCard } from "./card.js";
-import { avoidRect, partIndexAt, readableHeight, walkParts } from "./framing.js";
+import { avoidRect, avoidRectVariants, partIndexAt, readableHeight, walkParts } from "./framing.js";
 import { attentionSource } from "./honesty.js";
 import { buildNetworkModel } from "./model.js";
 import { PATTERNS, linkSummary } from "./roles.js";
@@ -187,7 +187,7 @@ export function createNetworkView(ctx) {
     let free = rect;
     let distance = rect ? distanceFor(e, rect, margin) : Infinity;
     if (!rect) {
-      for (const r of freeRects()) {
+      for (const r of freeRects({ variants: true })) {
         const dr = distanceFor(e, r, margin);
         if (dr < distance - 1e-6) {
           distance = dr;
@@ -221,8 +221,10 @@ export function createNetworkView(ctx) {
   /**
    * Le parti dello stage libere dalla scheda (a destra e sotto), o tutto lo stage, senza il pad della
    * navigazione: una striscia inquadrata più grande arriverebbe nell'angolo in basso a destra, sotto di lui.
+   * variants: per ogni parte i due tagli attorno al pad (sopra e a sinistra), per chi sceglie quello dove
+   * ciò che inquadra viene più grande; altrimenti un taglio solo, dove resta più area (avoidRect).
    */
-  function freeRects() {
+  function freeRects({ variants = false } = {}) {
     const { W, H } = stageView();
     const rects = card?.freeRects(host.container) ?? [{ x0: 0, y0: 0, x1: W, y1: H }];
     const pad = layer.querySelector(":scope > .nav-pad");
@@ -230,7 +232,8 @@ export function createNetworkView(ctx) {
     const box = host.container.getBoundingClientRect();
     const r = pad.getBoundingClientRect();
     if (!r.width || !r.height) return rects;
-    return rects.map((free) => avoidRect(free, { x0: r.left - box.left, y0: r.top - box.top, x1: r.right - box.left, y1: r.bottom - box.top }));
+    const block = { x0: r.left - box.left, y0: r.top - box.top, x1: r.right - box.left, y1: r.bottom - box.top };
+    return variants ? rects.flatMap((free) => avoidRectVariants(free, block)) : rects.map((free) => avoidRect(free, block));
   }
 
   /**

@@ -60,12 +60,14 @@ const attentionName = (l) => (l.within || l.from === l.to ? l.to.label : `${l.fr
 const unique = (items) => [...new Set(items)];
 
 /**
- * Le frasi di "Scala e onestà" su che cosa è vero: testo semplice, una per riga. Vuoto se è tutto vero
- * o tutto simulato (lo dice già il badge).
+ * Le frasi di "Scala e onestà" su che cosa è vero: testo semplice, una per riga, la prima sempre sui
+ * valori (il badge porta qui: chi lo preme trova la risposta, anche quando è tutto vero o tutto simulato).
  */
 export function honestyLines(sources, seed) {
   const lines = [];
   const { real, simulated, attention, illustrativePairs } = sources;
+  if (sources.state === "real") lines.push(`Valori veri in tutte le sezioni: li ha calcolati il modello${attention.real.length ? ", come i pesi di attention" : ""}.`);
+  if (sources.state === "simulated") lines.push(`Tutti i valori sono una simulazione didattica (seme ${seed}): mostrano il meccanismo, non le attivazioni di un modello vero.`);
   if (sources.state === "partial") {
     if (simulated.length) {
       lines.push(`Valori veri in ${plural(real.length, "sezione", "sezioni")} su ${int(real.length + simulated.length)}: ${listText(unique(real.map((s) => s.label)))}. ${simulated.length === 1 ? "L'altra è" : `Le altre ${int(simulated.length)} sono`} una simulazione didattica (seme ${seed}).`);

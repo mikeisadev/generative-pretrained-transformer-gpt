@@ -117,7 +117,8 @@ export function depthControls({ fraction, onFraction, onPlay, onThick, onSide, o
   const index = Math.max(0, DEPTH_FRACTIONS.indexOf(fraction));
   const range = el("input", { type: "range", min: 0, max: DEPTH_FRACTIONS.length - 1, step: 1, value: index, ariaLabel: "Quota dei pesi più forti di ogni matrice, disegnati sulla fetta scelta" });
   const out = el("output");
-  // si ricostruisce la rete: al rilascio del cursore (change), non a ogni passo del trascinamento
+  // la quota cambia al rilascio del cursore (change), non a ogni passo del trascinamento: di solito senza
+  // ricostruire (setSliceDensity, ~3 ms); solo la prima salita sopra la quota costruita rifà la rete, al 25%
   range.addEventListener("input", () => (out.textContent = pct(DEPTH_FRACTIONS[Number(range.value)])));
   range.addEventListener("change", () => onFraction(DEPTH_FRACTIONS[Number(range.value)]));
   const play = el("button", { type: "button", ariaPressed: "false", onclick: onPlay }, "▶ Anima");

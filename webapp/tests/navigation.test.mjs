@@ -270,6 +270,11 @@ test("posto della didascalia (captionPlacement): accanto al pad, sopra il pad, m
   // la barra del player in basso al centro: la didascalia sale sopra di lei
   const bar = { left: 500, right: 1100, top: 680, bottom: 834 };
   assert.equal(captionPlacement({ width: 1600, left: 396, sh: 848, height: 23, pad, bar }).bottom, 848 - 680 + 8);
+  // grafici aperti durante un'azione (Immagini e video, 1280 px): la barra sta nella scena visibile e anche il pad
+  // è salito sopra di lei: la didascalia, salita pure lei, non gli finisce addosso (sopra il pad: accanto non c'è posto)
+  const raised = { right: 472, bottom: 848 - 680 + 10, w: 190, h: 146 };
+  const action = captionPlacement({ width: 1280, left: 396, sh: 848, height: 23, pad: raised, chartsWidth: 460, bar: { left: 120, right: 760, top: 680, bottom: 834 } });
+  assert.deepEqual(action, { right: 476, bottom: raised.bottom + 146 + 8, hidden: false, abovePad: true });
   // telefono: a destra lo spazio del pulsante del pad; sopra il codice ridotto se gli finirebbe sotto
   const code = { left: 16, right: 374, top: 733, bottom: 778 };
   assert.deepEqual(captionPlacement({ width: 390, left: 16, sh: 792, height: 46, code, narrow: true }), { right: 56, bottom: 792 - 733 + 6, hidden: false, abovePad: false });

@@ -24,6 +24,7 @@ const { NetworkScene, sizeText } = await import("../js/core/neuralNet/scene.js")
 const { buildNetworkModel } = await import("../js/core/neuralNet/model.js");
 const { DEMO_SPECS } = await import("../js/core/neuralNet/demoSpecs.js");
 const { CameraDirector, instancedBounds, meshBounds } = await import("../js/core/director.js");
+const { Navigation } = await import("../js/core/navigation.js");
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} ≉ ${b}`);
 
@@ -211,3 +212,69 @@ test("director: volo in corso, finish() alla meta, intenzione dello studente", a
   assert.equal(director.intentActive, true);
   assert.equal(director.lastIntent, stamp + 1);
 });
+
+test("Transformer: la quota mostrata senza ricostruire disegna le stesse coppie della rete costruita a quella quota", async () => {
+  const { GPTEngine, expectedParameters } = await import("../js/engine/gpt.js");
+  const { DEPTH_FRACTIONS, buildDepthSpec, sliceCounts, weightOrders } = await import("../js/tabs/transformer/views/neuronDepthSpec.js");
+  // un GPT minuscolo con pesi pseudo-casuali (lo stesso formato del modello vero)
+  const config = { vocab_size: 11, block_size: 8, n_embd: 16, n_head: 4, n_layer: 2, dropout: 0 };
+  let offset = 0;
+  const params = expectedParameters(config).map(({ name, shape }) => {
+    const numel = shape.reduce((a, b) => a * b, 1);
+    const entry = { name, shape, offset, numel };
+    offset += numel;
+    return entry;
+  });
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32) * 2 - 1;
+  const data = Float32Array.from({ length: offset }, () => rnd() * 0.5);
+  const manifest = { format_version: 1, dtype: "float32", byte_order: "little", file: "w.bin", config, vocab: ["\n", " ", "a", "b", "c", "d", "e", "f", "g", "h", "!"], total_params: offset, params, training: null };
+  const engine = GPTEngine.fromBuffers(manifest, data.buffer);
+  const { trace } = engine.forward(engine.encode("abcda"), { trace: true });
+  const param = (name) => engine.paramViews.get(name).data;
+  const orders = weightOrders(engine.config, param);
+  const specAt = (fraction) => buildDepthSpec({ config: engine.config, vocab: engine.vocab, trace, param, fraction, orders });
+
+  // come neuronDepth.js: costruita una volta alla quota massima, poi solo setSliceDensity
+  const bigSpec = specAt(Math.max(...DEPTH_FRACTIONS));
+  const big = new NetworkScene(buildNetworkModel(bigSpec), { labels: false });
+  const sizes = { links: bigSpec.links.map((l) => ({ pattern: l.pattern, numel: l.numel ?? 0 })) };
+  const key = (list, i) => `${list.link[i]}:${list.from[i]}>${list.to[i]}=${list.weight[i]}`;
+  for (const f of DEPTH_FRACTIONS) {
+    const counts = sliceCounts(sizes, f);
+    const drawn = big.setSliceDensity((link) => counts[link.index]);
+    const fresh = buildNetworkModel(specAt(f)).links.sliceSegments;
+    assert.equal(drawn, fresh.count, `quota ${f}: tanti pesi quanti costruendo a quella quota`);
+    const list = big.model.links.sliceSegments;
+    const shown = Array.from({ length: drawn }, (_, slot) => key(list, big.sliceShown[slot])).sort();
+    const built = Array.from({ length: fresh.count }, (_, i) => key(fresh, i)).sort();
+    assert.deepEqual(shown, built, `quota ${f}: le stesse coppie con gli stessi pesi`);
+  }
+  big.dispose();
+});
+
+test("navigation: setBounds restituisce la sorgente di prima, getBounds la legge; posa di \"Centra\" in copia", () => {
+  // solo i metodi dell'API (niente DOM): lo stato che usano, su un oggetto del prototipo
+  const nav = Object.assign(Object.create(Navigation.prototype), { boundsSource: null, boundsAt: 0, homePose: null, framesSinceStart: 7 });
+  const box = new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
+  const fn = () => box;
+  assert.equal(nav.setBounds(box), null, "prima: automatici");
+  assert.equal(nav.getBounds(), box);
+  assert.equal(nav.boundsAt, -Infinity, "i confini nuovi valgono subito");
+  assert.equal(nav.setBounds(fn), box, "chi li cambia per un po' sa che cosa rimettere");
+  assert.equal(nav.setBounds(null), fn);
+  assert.equal(nav.getBounds(), null);
+
+  assert.equal(nav.getHomePose(), null);
+  const position = new THREE.Vector3(1, 2, 3);
+  nav.setHomePose({ position, target: new THREE.Vector3(0, 1, 0) });
+  position.x = 50; // la posa data è copiata
+  const pose = nav.getHomePose();
+  assert.deepEqual(pose.position.toArray(), [1, 2, 3]);
+  pose.target.y = 99; // e anche quella letta
+  assert.deepEqual(nav.getHomePose().target.toArray(), [0, 1, 0]);
+  nav.setHomePose(null);
+  assert.equal(nav.getHomePose(), null);
+  assert.equal(nav.framesSinceStart, 0, "null: la si fotografa di nuovo al prossimo volo finito");
+});
+

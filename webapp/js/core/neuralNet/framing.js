@@ -79,15 +79,25 @@ export function partIndexAt(parts, x) {
 }
 
 /**
- * La parte libera `free` senza il rettangolo `block` (il pad in un angolo): tagliata sopra di lui o alla
- * sua sinistra, dove resta più area. Con il pad del desktop (alto e stretto, in basso a destra) vince di
- * solito il taglio a sinistra: resta tutta l'altezza, e una rete lunga viene più alta (si legge meglio)
- * a costo di una parte in più da scorrere. Tutto in pixel dello stage { x0, y0, x1, y1 }.
+ * I due modi di togliere alla parte libera `free` il rettangolo `block` (il pad in un angolo): tagliata
+ * sopra di lui o alla sua sinistra. [free] se non si toccano. Tutto in pixel dello stage { x0, y0, x1, y1 }.
+ * Chi inquadra una forma nota (tutta la rete, una sezione) li prova tutti e due e tiene quello dove la
+ * forma viene più grande: una rete larga sta meglio sopra il pad, una alta alla sua sinistra.
  */
-export function avoidRect(free, block, gap = 8) {
-  if (block.x1 <= free.x0 || block.x0 >= free.x1 || block.y1 <= free.y0 || block.y0 >= free.y1) return free;
+export function avoidRectVariants(free, block, gap = 8) {
+  if (block.x1 <= free.x0 || block.x0 >= free.x1 || block.y1 <= free.y0 || block.y0 >= free.y1) return [free];
   const above = { ...free, y1: Math.max(free.y0, Math.min(free.y1, block.y0 - gap)) };
   const left = { ...free, x1: Math.max(free.x0, Math.min(free.x1, block.x0 - gap)) };
+  return [above, left];
+}
+
+/**
+ * Uno solo dei due tagli (avoidRectVariants): dove resta più area. È quello delle parti di una rete
+ * lunga, che non hanno una forma da far entrare: con il pad del desktop vince di solito il taglio a
+ * sinistra, resta tutta l'altezza e la rete viene più alta (si legge meglio) a costo di una parte in più.
+ */
+export function avoidRect(free, block, gap = 8) {
+  const [a, b = a] = avoidRectVariants(free, block, gap);
   const area = (r) => (r.x1 - r.x0) * (r.y1 - r.y0);
-  return area(above) >= area(left) ? above : left;
+  return area(a) >= area(b) ? a : b;
 }

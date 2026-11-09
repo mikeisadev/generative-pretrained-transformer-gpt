@@ -350,6 +350,27 @@ export class NavPad {
     for (const node of [this.stage, this.pad, this.player?.bar, this.codePanel?.root, caption]) if (node) ro.observe(node);
     sub(() => ro.disconnect());
 
+    // In un livello delle rappresentazioni la scheda della vista (rete, cervello) nasce dopo i chip, quando la
+    // sua specifica è pronta, e cambia misura (ridotta, aperta): i chip si rimettono a posto a ogni figlio nuovo
+    // dello stage e a ogni suo cambio di misura (eventi, mai per frame). Sul telefono il benvenuto copriva la
+    // scheda del Cervello, arrivata dopo di lui.
+    if (this.root === this.stage) {
+      const sized = new ResizeObserver(() => this.scheduleHud());
+      const watch = () => {
+        for (const node of this.stage.children) if (node !== this.hud && !(node instanceof HTMLCanvasElement)) sized.observe(node);
+      };
+      const added = new MutationObserver(() => {
+        watch();
+        this.scheduleHud();
+      });
+      added.observe(this.stage, { childList: true });
+      watch();
+      sub(() => {
+        added.disconnect();
+        sized.disconnect();
+      });
+    }
+
     const onNarrow = () => {
       if (this.narrow.matches) this.setCollapsed(true, { persist: false });
       this.scheduleLayout();
@@ -378,6 +399,7 @@ export class NavPad {
   dispose() {
     for (const off of this.disposers.splice(0)) off();
     cancelAnimationFrame(this.raf);
+    cancelAnimationFrame(this.hudRaf);
     clearTimeout(this.toastTimer);
     this.pad.remove();
     this.hud.remove();
@@ -479,7 +501,7 @@ export class NavPad {
    * (radice = stage: core/representations.js) evitano la scheda della vista, che sta in alto a sinistra:
    * a destra della scheda se lì c'è posto, altrimenti sotto (sul telefono copriva i suoi comandi). Nello
    * stage di un tab non fa niente: lì le regole dei tab (CSS) sanno dove stanno le loro barre.
-   * A eventi (un chip che compare, un ridimensionamento), mai per frame.
+   * A eventi (un chip che compare, un ridimensionamento, una scheda che nasce o cambia misura), mai per frame.
    */
   placeHud() {
     if (this.root !== this.stage) return;
@@ -538,6 +560,15 @@ export class NavPad {
   }
 
   // ---------------------------------------------------------------- posizionamento
+  /** placeHud al prossimo frame, una volta sola anche se lo chiedono più eventi insieme. */
+  scheduleHud() {
+    if (this.hudRaf) return;
+    this.hudRaf = requestAnimationFrame(() => {
+      this.hudRaf = 0;
+      this.placeHud();
+    });
+  }
+
   scheduleLayout() {
     if (this.raf) return;
     this.raf = requestAnimationFrame(() => {

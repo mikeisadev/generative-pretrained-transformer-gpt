@@ -15,7 +15,7 @@ import { PATTERNS, ROLES, linkSummary } from "../js/core/neuralNet/roles.js";
 import { buildNetworkModel } from "../js/core/neuralNet/model.js";
 import { LIMITS, NetworkSpecError, normalizeSpec } from "../js/core/neuralNet/spec.js";
 import { LONG_NETWORK_RATIO, startsCollapsed } from "../js/core/neuralNet/card.js";
-import { avoidRect, partIndexAt, partTitle, readableHeight, walkParts } from "../js/core/neuralNet/framing.js";
+import { avoidRect, avoidRectVariants, partIndexAt, partTitle, readableHeight, walkParts } from "../js/core/neuralNet/framing.js";
 import { attentionSource, badgeOf, honestyLines, listText, plural, valueSources } from "../js/core/neuralNet/honesty.js";
 import { distanceToBox, occluderOpacity } from "../js/core/neuralNet/occlusion.js";
 
@@ -759,7 +759,7 @@ test("onestà: badge vere / in parte vere / simulazione, elenco delle sezioni ve
   const real = of(spec(["a", "b"], { weights: W }));
   assert.equal(real.state, "real");
   assert.deepEqual(badgeOf(real, 9), { text: "Attivazioni vere", className: "real", title: "I valori sono quelli calcolati dal modello." });
-  assert.deepEqual(honestyLines(real, 9), []);
+  assert.deepEqual(honestyLines(real, 9), ["Valori veri in tutte le sezioni: li ha calcolati il modello, come i pesi di attention."]);
   const partial = of(spec(["a"], {}));
   assert.equal(partial.state, "partial");
   assert.equal(badgeOf(partial, 9).text, "Attivazioni: in parte vere");
@@ -772,7 +772,7 @@ test("onestà: badge vere / in parte vere / simulazione, elenco delle sezioni ve
   const sim = of(spec([], {}));
   assert.equal(sim.state, "simulated");
   assert.equal(badgeOf(sim, 9).className, "sim");
-  assert.deepEqual(honestyLines(sim, 9), []);
+  assert.deepEqual(honestyLines(sim, 9), ["Tutti i valori sono una simulazione didattica (seme 9): mostrano il meccanismo, non le attivazioni di un modello vero."]);
   assert.equal(attentionSource({ weights: null }), "simulated");
   assert.equal(plural(1, "neurone", "neuroni"), "1 neurone");
   assert.equal(plural(4096, "canale", "canali"), "4.096 canali");
@@ -806,6 +806,8 @@ test("inquadratura delle reti lunghe: altezza leggibile, parti a blocchi interi,
   assert.deepEqual(avoidRect(free, { x0: 1000, y0: 700, x1: 1190, y1: 790 }), { ...free, x1: 992 }, "pad quasi quadrato: a sinistra resta più area");
   assert.deepEqual(avoidRect(free, { x0: 1140, y0: 400, x1: 1196, y1: 790 }), { ...free, x1: 1132 }, "pad alto e stretto: a sinistra");
   assert.equal(avoidRect(free, { x0: 0, y0: 0, x1: 10, y1: 10 }), free, "fuori: niente da togliere");
+  assert.deepEqual(avoidRectVariants(free, { x0: 1000, y0: 700, x1: 1190, y1: 790 }), [{ ...free, y1: 692 }, { ...free, x1: 992 }], "i due tagli, sopra e a sinistra");
+  assert.deepEqual(avoidRectVariants(free, { x0: 0, y0: 0, x1: 10, y1: 10 }), [free]);
 });
 
 test("occlusione: le lastre fantasma tra la camera e il punto guardato si attenuano, di lato no", () => {

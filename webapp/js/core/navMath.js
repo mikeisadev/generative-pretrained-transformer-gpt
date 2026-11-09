@@ -257,9 +257,10 @@ export const CAPTION_HIDE_WIDTH = 140;
 /**
  * Dove va la didascalia in basso del tab (`.caption`, figlia della radice: right e bottom in px dal bordo
  * destro e dal fondo, che sono quelli dello stage). Pura: la usa navPad.js a ogni evento di layout.
- * - Sullo schermo largo: accanto al pad se stanno sulla stessa riga e lei resta larga almeno
- *   CAPTION_MIN_WIDTH, altrimenti sopra il pad su tutta la larghezza visibile; mai sotto i grafici aperti;
- *   sopra la barra del player se la toccherebbe; nascosta se nemmeno così è larga CAPTION_HIDE_WIDTH.
+ * - Sullo schermo largo: sopra la barra del player se la toccherebbe; poi, se il pad sta sulla stessa fascia
+ *   (in fondo, o anche lui sopra la barra), accanto al pad se lei resta larga almeno CAPTION_MIN_WIDTH,
+ *   altrimenti sopra il pad su tutta la larghezza visibile; mai sotto i grafici aperti; nascosta se nemmeno
+ *   così è larga CAPTION_HIDE_WIDTH.
  * - Sul telefono: a destra lascia il posto al pulsante unico del pad (`fabRoom`); se finirebbe sotto il
  *   codice in basso (una didascalia di più righe sotto l'intestazione del codice ridotto) sale sopra il
  *   codice, con la stessa larghezza (così il numero di righe non cambia e il posto non oscilla).
@@ -279,27 +280,34 @@ export function captionPlacement({ width, left, sh, height, pad = null, chartsWi
   let right;
   let bottom = base;
   let abovePad = false;
+  // La barra del player sta in basso al centro: la didascalia non le passa sotto (sale sopra di lei).
+  const clearBar = (r, b) => {
+    if (!bar) return b;
+    const top = sh - b - height;
+    const overlaps = left < bar.right && width - r > bar.left && top < bar.bottom && sh - b > bar.top;
+    return overlaps ? Math.round(sh - bar.top + 8) : b;
+  };
   if (narrow) {
     right = fabRoom;
     if (code && code.top > sh / 2 && sh - code.bottom < base + height) bottom = Math.round(sh - code.top + 6);
+    bottom = clearBar(right, bottom);
   } else {
     const floor = chartsWidth ? chartsWidth + 16 : 16;
     right = floor;
-    if (pad && pad.w && pad.bottom < 44) {
-      const beside = Math.max(floor, pad.right + pad.w + 10);
-      if (width - left - beside >= CAPTION_MIN_WIDTH) right = beside;
-      else {
-        bottom = Math.round(pad.bottom + pad.h + 8);
-        abovePad = true;
+    bottom = clearBar(right, base);
+    // Il pad sulla stessa fascia (in fondo, o sopra la barra del player come la didascalia): accanto o sopra.
+    if (pad && pad.w) {
+      const sameBand = pad.bottom < bottom + height && pad.bottom + pad.h > bottom;
+      const overlapsX = width - right > width - pad.right - pad.w;
+      if (sameBand && overlapsX) {
+        const beside = Math.max(floor, pad.right + pad.w + 10);
+        if (width - left - beside >= CAPTION_MIN_WIDTH) right = beside;
+        else {
+          bottom = Math.round(pad.bottom + pad.h + 8);
+          abovePad = true;
+        }
       }
     }
-  }
-  // La barra del player sta in basso al centro: la didascalia non le passa sotto.
-  if (bar) {
-    const top = sh - bottom - height;
-    const x1 = width - right;
-    const overlaps = left < bar.right && x1 > bar.left && top < bar.bottom && sh - bottom > bar.top;
-    if (overlaps) bottom = Math.round(sh - bar.top + 8);
   }
   return { right, bottom, hidden: width - left - right < CAPTION_HIDE_WIDTH, abovePad };
 }
