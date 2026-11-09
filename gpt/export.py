@@ -39,11 +39,15 @@ File prodotti in ``webapp/data/``:
 from __future__ import annotations
 
 import base64
+import functools
 import inspect
 import json
+import re
 import textwrap
+import types
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -115,27 +119,153 @@ def _quantize_signed(t: torch.Tensor) -> dict[str, Any]:
     return {"shape": list(matrix.shape), "scale": round(scale, 6), "data": _b64(q)}
 
 
+# --- attention di un'architettura qualsiasi ------------------------------------------------------
+#
+# Interfaccia (la stessa di Head in gpt/attention.py): un modulo è un'attention se ha il METODO
+# ``attention_weights``, che riceve gli stessi argomenti di ``forward`` e restituisce le probabilità
+# di attention dopo maschera e softmax (prima del dropout): ``(B, T, T)`` per una head, come Head,
+# oppure ``(B, H, T, T)`` per H head calcolate insieme (un'attention "fusa", con una sola Linear per
+# Q, K e V). Ogni riga somma a 1. Un'attention che non lo espone (per esempio con
+# ``F.scaled_dot_product_attention``, che non restituisce le probabilità) semplicemente non c'è:
+# chi usa capture_attention salta le metriche dell'attention invece di fermarsi.
+
+ATTENTION_METHOD = "attention_weights"
+# Un indice di nn.Sequential o nn.ModuleList ("blocks.3"): solo cifre ASCII, come /^\d+$/ nel browser.
+_INDEX = re.compile(r"[0-9]+")
+# Le righe delle probabilità sommano a 1; il margine copre float16 e bfloat16, non i punteggi grezzi.
+_ROW_SUM_ATOL = 1e-2
+
+
+@dataclass(frozen=True)
+class AttentionSite:
+    """Un modulo che espone le probabilità di attention e lo strato del modello a cui appartiene."""
+
+    path: str  # nome in named_modules, es. "blocks.2.sa.heads.0"
+    layer: int  # 0, 1, … nell'ordine in cui gli strati compaiono nel modello
+    layer_path: str  # il blocco ripetuto che lo contiene, es. "blocks.2" ("" = il modello intero)
+    module: nn.Module
+
+
+def attention_layer_path(path: str) -> str:
+    """Il blocco ripetuto che contiene un modulo: il percorso fino al primo indice numerico SOPRA di lui.
+
+    ``blocks.2.sa.heads.0`` → ``blocks.2``; ``transformer.h.2.attn`` → ``transformer.h.2``. L'indice
+    del modulo stesso non conta (in ``block.sa.heads.0``, con un solo blocco, ``0`` è la head): un
+    modulo fuori da blocchi numerati appartiene a ``""``, il modello intero, cioè a un solo strato.
+    """
+    containers = path.split(".")[:-1]
+    for i, part in enumerate(containers):
+        if _INDEX.fullmatch(part):
+            return ".".join(containers[: i + 1])
+    return ""
+
+
+def attention_sites(net: nn.Module) -> list[AttentionSite]:
+    """I moduli di ``net`` con il metodo ``attention_weights``, nell'ordine di ``named_modules``.
+
+    Gli strati si numerano nell'ordine in cui compaiono (per il GPT del corso ``blocks.<i>`` → i).
+    Se un modulo con il metodo ne contiene altri che lo hanno, conta solo il più esterno: le sue
+    probabilità comprendono già quelle dei figli, che altrimenti verrebbero contate due volte.
+    """
+    sites: list[AttentionSite] = []
+    layers: dict[str, int] = {}
+    for path, module in net.named_modules():
+        # Un METODO: un sotto-modulo o un tensore che si chiamano così non sono l'interfaccia.
+        if not isinstance(getattr(module, ATTENTION_METHOD, None), types.MethodType):
+            continue
+        if any(site.path == "" or path.startswith(site.path + ".") for site in sites):
+            continue
+        layer_path = attention_layer_path(path)
+        layer = layers.setdefault(layer_path, len(layers))
+        sites.append(AttentionSite(path, layer, layer_path, module))
+    return sites
+
+
 @contextmanager
-def capture_attention(net: GPTLanguageModel) -> Iterator[dict[tuple[int, int], torch.Tensor]]:
+def capture_attention(
+    net: nn.Module, problems: list[str] | None = None
+) -> Iterator[dict[tuple[int, int], torch.Tensor]]:
     """Dentro il ``with``, ogni forward salva i pesi di attention (B, T, T) di ogni head.
 
-    Le chiavi sono ``(layer, head)``. Gli hook vengono rimossi all'uscita
-    anche in caso di errore, così il modello torna esattamente com'era.
+    Funziona con qualunque architettura: gli hook vanno sui moduli di ``attention_sites`` (quelli
+    che espongono ``attention_weights``, ovunque siano nel modello). Le chiavi sono ``(layer, head)``:
+    ``layer`` è lo strato di ``attention_sites``, le head di uno strato si numerano nell'ordine del
+    forward (un modulo ``(B, H, T, T)`` ne dà H). Per il GPT del corso la chiave di
+    ``blocks.<l>.sa.heads.<h>`` è ``(l, h)``. Senza moduli che lo espongono il dizionario resta vuoto.
+
+    Args:
+        problems: se è una lista, un modulo il cui ``attention_weights`` fallisce o restituisce
+            qualcosa che non sono probabilità viene saltato e il motivo finisce qui, una volta sola
+            (per chi registra un training: un errore nella misura non deve fermarlo). Senza lista
+            l'errore arriva al chiamante.
+
+    Gli hook vengono rimossi all'uscita anche in caso di errore, così il modello torna esattamente com'era.
     """
     attention: dict[tuple[int, int], torch.Tensor] = {}
+    next_head: dict[int, int] = {}  # strato → prossima head libera nel forward in corso
+    sites = attention_sites(net)
     hooks = []
-    for layer, blk in enumerate(net.blocks):
-        for h, head in enumerate(blk.sa.heads):
-
-            def capture(module, inputs, _output, key=(layer, h)):
-                attention[key] = module.attention_weights(inputs[0]).detach()
-
-            hooks.append(head.register_forward_hook(capture))
+    if sites:
+        # Ogni forward del modello ricomincia da head 0: un secondo forward sovrascrive il primo.
+        hooks.append(net.register_forward_pre_hook(lambda _module, _args: next_head.clear()))
+    for site in sites:
+        capture = functools.partial(_capture_site, site, attention, next_head, problems)
+        hooks.append(site.module.register_forward_hook(capture, with_kwargs=True))
     try:
         yield attention
     finally:
         for hk in hooks:
             hk.remove()
+
+
+class AttentionWeightsError(ValueError):
+    """``attention_weights`` ha restituito qualcosa che non sono probabilità di attention leggibili."""
+
+
+def _capture_site(site, attention, next_head, problems, module, args, kwargs, _output) -> None:
+    """Hook di un modulo di attention: chiede le probabilità con gli stessi argomenti del forward."""
+    where = f"{site.path}.{ATTENTION_METHOD}()"
+    try:
+        weights = _attention_probabilities(getattr(module, ATTENTION_METHOD)(*args, **kwargs))
+    except AttentionWeightsError as error:
+        _report(f"{where}: {error}", problems)
+        return
+    except Exception as error:  # il codice di chi ha modificato il modello: si segnala, non si ferma
+        if problems is None:
+            raise
+        _report(f"{where} ha dato un errore ({type(error).__name__}: {error})", problems)
+        return
+    first = next_head.get(site.layer, 0)
+    if weights.dim() == 3:  # una head, come Head del corso: il tensore così com'è
+        attention[(site.layer, first)] = weights
+        next_head[site.layer] = first + 1
+        return
+    for h in range(weights.shape[1]):
+        attention[(site.layer, first + h)] = weights[:, h]
+    next_head[site.layer] = first + weights.shape[1]
+
+
+def _report(message: str, problems: list[str] | None) -> None:
+    if problems is None:
+        raise AttentionWeightsError(message)
+    if message not in problems:  # una volta sola, anche se il forward si ripete a ogni snapshot
+        problems.append(message)
+
+
+@torch.no_grad()
+def _attention_probabilities(value: Any) -> torch.Tensor:
+    """Il risultato di ``attention_weights``, staccato dal grafo, se sono davvero probabilità leggibili."""
+    if not isinstance(value, torch.Tensor) or not value.is_floating_point():
+        raise AttentionWeightsError(f"atteso un tensore float di probabilità, ottenuto {type(value).__name__}")
+    if value.dim() not in (3, 4) or value.shape[-1] != value.shape[-2]:
+        raise AttentionWeightsError(f"forma {tuple(value.shape)}, attese (B, T, T) per una head o (B, H, T, T)")
+    value = value.detach()
+    if not bool(torch.isfinite(value).all()):
+        raise AttentionWeightsError("probabilità non finite (NaN o infinito): il training è divergente?")
+    rows = value.float().sum(-1)
+    if bool((value < 0).any()) or not torch.allclose(rows, torch.ones_like(rows), atol=_ROW_SUM_ATOL):
+        raise AttentionWeightsError("non sono probabilità: ogni riga deve sommare a 1 (softmax dopo la maschera)")
+    return value
 
 
 @torch.no_grad()

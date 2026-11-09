@@ -13,6 +13,16 @@ import { unionRect } from "./plan.js";
 import { visibleChar } from "./settings.js";
 import { onChange, progressCount } from "./stepKit.js";
 
+/**
+ * Un esempio di riga dal vocabolario VERO del run: «la riga 43 è «e»…» nel GPT del corso (una costante
+ * scritta a mano sarebbe sbagliata per un altro vocabolario, e lo era anche per questo: la riga 12 è «?»).
+ */
+export function rowExample(vocab) {
+  const list = Array.isArray(vocab) ? vocab : [];
+  const id = list.indexOf("e") >= 0 ? list.indexOf("e") : list.findIndex((c) => /\p{L}/u.test(c));
+  return id >= 0 ? `la riga ${id} è «${visibleChar(list[id])}»…` : "una riga per token";
+}
+
 export function logitsSteps(stage, f) {
   const S = stage.scene;
   const N = OUTPUT_NAMES.lmHead;
@@ -49,7 +59,7 @@ export function logitsSteps(stage, f) {
       },
       board: () => [
         { title: `x = ln_f(x) · token ${token}`, kicker: "Logits" },
-        { line: [`lm_head ha ${V} righe, una per carattere (la riga 12 è «e»…): ogni riga dà il punteggio del suo carattere. Più il vettore del token «somiglia» alla riga, più il punteggio è alto.`] },
+        { line: [`lm_head ha ${V} righe, una per carattere (${rowExample(f.vocab)}): ogni riga dà il punteggio del suo carattere. Più il vettore del token «somiglia» alla riga, più il punteggio è alto.`] },
         { vector: { values: D.h, max: 16, caption: "x (i primi 16):" } },
       ],
       frame: () => all,

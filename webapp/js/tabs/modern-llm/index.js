@@ -327,7 +327,7 @@ export async function createTab(root, app) {
     app,
     network: {
       load: () => import("./network.js").then((m) => m.networkSpec),
-      description: `${primaryModel.name} neurone per neurone, da sinistra a destra: i ${primaryModel.config.layers} layer con le ripetizioni compresse. Girando la camera vedi i token del prompt: finestra locale, KV globale compressa e indexer, router ed esperti.`,
+      description: `${primaryModel.name} in versione ridotta, neurone per neurone da sinistra a destra: i ${primaryModel.config.layers} layer con le ripetizioni compresse in «× N». Girando la camera vedi i token del prompt: finestra locale, KV globale compressa e indexer, router ed esperti. Valori illustrativi.`,
     },
     brain: {
       load: () => import("./brain.js").then((m) => m.brainSpec),

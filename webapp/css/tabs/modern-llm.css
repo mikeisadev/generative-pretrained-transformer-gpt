@@ -216,6 +216,15 @@
 .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) { gap: 2px; padding-left: 6px; padding-right: 6px; }
 .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) > button { padding: 6px 7px; font-size: 12.5px; }
 .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]):has(> button[data-pane="full-pesi"]:not([hidden])) > button { padding: 6px 5px; font-size: 12px; }
+/* Telefono (cassetto di 342 px): le schede chiedevano 346 px (6, vista d'insieme) e 350 px (7, vista completa) e
+   "Fonti" finiva da sola sulla seconda riga. Meno aria ai lati e tra le schede: 305 e 316 px, bersagli alti
+   32 px e larghi almeno 32. */
+@media (max-width: 900px) {
+  .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) { gap: 1px; padding-left: 4px; padding-right: 4px; }
+  .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]) > button { padding: 6px 4px; }
+  .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]):has(> button[data-pane="full-pesi"]:not([hidden])) { gap: 1px; padding-left: 4px; padding-right: 4px; }
+  .tab-root[data-tab="modern-llm"] .sidebar-nav:has(> button[data-pane="cervello"]):has(> button[data-pane="full-pesi"]:not([hidden])) > button { padding: 6px 3px; }
+}
 
 /* Pulsanti in fondo a un passo del Percorso: animazione e collegamento all'architettura completa */
 .mllm-step-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }

@@ -197,14 +197,15 @@ def test_groups_cover_every_parameter_once(recorded):
     assert trace["groups"][-2:] == ["ln_f", "lm_head"]
 
 
-def test_group_of_maps_names_and_rejects_unknown_ones():
+def test_group_of_keeps_the_course_groups_and_never_rejects_a_name():
     assert group_of("blocks.3.sa.heads.1.query.weight") == "blocks.3.attention"
     assert group_of("blocks.0.sa.proj.bias") == "blocks.0.attention"
     assert group_of("blocks.1.ln2.weight") == "blocks.1.layernorm"
     assert group_of("blocks.1.ffwd.net.2.weight") == "blocks.1.ffwd"
     assert group_of("lm_head.bias") == "lm_head"
-    with pytest.raises(ValueError):
-        group_of("decoder.weight")
+    # Un nome che il GPT del corso non ha va nel suo modulo (prima fermava la registrazione).
+    assert group_of("decoder.weight") == "decoder"
+    assert group_of("blocks.1.norm1.weight") == "blocks.1.norm1"
     assert len(parameter_groups(GPTLanguageModel(GPTConfig()))) == 2 + 3 * 4 + 2
 
 

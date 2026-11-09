@@ -174,7 +174,7 @@ export class LabScene {
         }
       }
       const meaning = tensorMeaning(b.path, b.shape, { vocab: this.vocab, config: this.config });
-      // etichette di righe e colonne con il loro significato (riga 12 = «e»…): per un vettore steso in
+      // etichette di righe e colonne con il loro significato (riga 43 = «e»…): per un vettore steso in
       // riga gli elementi sono le colonne, per un vettore in colonna (bias accanto a W) sono le righe
       const element = (k) => meaning.rows.label(k);
       const vector = b.matrix.vector;

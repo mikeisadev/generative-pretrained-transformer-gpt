@@ -11,7 +11,7 @@ import { EXPORT_STEPS, INTRO } from "./content.js";
 
 /** I tensori principali del GPT del corso, con i sinonimi che uno studente cercherebbe. */
 const TENSORS = [
-  { name: "token_embedding_table.weight", title: "Tabella degli embedding dei token (65 × 64)", text: "Una riga di 64 numeri per ogni carattere del vocabolario: la riga 12 è il carattere «e».", keywords: ["embedding", "wte", "token", "vocabolario", "nn.Embedding"] },
+  { name: "token_embedding_table.weight", title: "Tabella degli embedding dei token (65 × 64)", text: "Una riga di 64 numeri per ogni carattere del vocabolario: la riga 43 è il carattere «e».", keywords: ["embedding", "wte", "token", "vocabolario", "nn.Embedding"] },
   { name: "position_embedding_table.weight", title: "Tabella degli embedding delle posizioni (32 × 64)", text: "Una riga per ogni posizione del contesto: dice al modello dove sta il token.", keywords: ["posizione", "positional embedding", "wpe"] },
   { name: "blocks.0.sa.heads.0.key.weight", title: "Key della head 0 del blocco 0 (16 × 64)", text: "self.key = nn.Linear(config.n_embd, self.head_size, bias=False): che cosa contiene ogni token.", keywords: ["key", "attention", "head", "nn.Linear", "Wk"] },
   { name: "blocks.0.sa.heads.0.query.weight", title: "Query della head 0 del blocco 0 (16 × 64)", text: "self.query = nn.Linear(…): che cosa cerca ogni token.", keywords: ["query", "attention", "Wq"] },

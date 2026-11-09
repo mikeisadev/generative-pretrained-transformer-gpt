@@ -20,14 +20,16 @@ export function signed(value, digits = 4) {
   return value > 0 ? `+${text}` : text;
 }
 
-/** Notazione scientifica leggibile: sci(0.000034) → "3,4 · 10⁻⁵". */
+/**
+ * Notazione scientifica leggibile: sci(0.000034) → "3,4 · 10⁻⁵". La mantissa si arrotonda con
+ * toExponential, che sposta anche l'esponente: sci(0.000999) → "1,0 · 10⁻³" (non "10,0 · 10⁻⁴").
+ */
 export function sci(value, digits = 2) {
   if (!Number.isFinite(value)) return formatCell(value, 0);
   if (value === 0) return "0";
-  const exp = Math.floor(Math.log10(Math.abs(value)));
-  const mant = value / 10 ** exp;
-  const sup = String(exp).replace("-", "⁻").replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]);
-  return `${formatCell(mant, Math.max(0, digits - 1))} · 10${sup}`;
+  const [mantissa, exponent] = Math.abs(value).toExponential(Math.max(0, digits - 1)).split("e");
+  const sup = String(Number(exponent)).replace("-", "⁻").replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]);
+  return `${value < 0 ? MINUS : ""}${mantissa.replace(".", ",")} · 10${sup}`;
 }
 
 /** Il valore con tutta la precisione utile di un float32 ("−0,01234568"). */

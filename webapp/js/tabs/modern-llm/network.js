@@ -23,7 +23,7 @@
  * config non descrive con gli stessi campi (KDA lineare, GQA a finestre alterne): buildNetworkSpec li
  * rifiuta (drawnLayers lancia un errore) invece di disegnarli sbagliati.
  */
-import { formatCount, formatLayers, layerByNumber, layerParams, paramTotals } from "./full/model.js";
+import { formatCount, formatLayers, formatShare, layerByNumber, layerParams, paramTotals } from "./full/model.js";
 import { MODEL_BY_ID, PRIMARY_MODEL_ID } from "./full/models/index.js";
 import { drawnLayers, layerAttention, selectEntries } from "./networkMechanisms.js";
 
@@ -63,9 +63,13 @@ export const SHOWN = Object.freeze({
 const LAYER_PARTS = ["norm1", "kv", "(gkv)", "(idx)", "attn", "add1", "norm2", "router", "experts", "add2"];
 
 const it = (n, digits = 0) => Number(n).toLocaleString("it-IT", { useGrouping: "always", minimumFractionDigits: digits, maximumFractionDigits: digits });
-const percent = (x) => `${it(100 * x, 1)} %`;
+// percentuali scritte come nel resto del tab ("98,5%": formatShare della vista completa)
+const percent = (x) => formatShare(x);
 const list = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} e ${items.at(-1)}`);
-const capitalize = (s) => s.charAt(0) + s.slice(1).toLowerCase();
+/** "ENCODER causale" → "Encoder causale" (le etichette dei segmenti nel modulo dati sono in maiuscolo). */
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+/** Articolo davanti a un numero in cifre, come si legge: «lo 0», «l'8», «l'11», «il 25». */
+const theNumber = (n) => (n === 0 ? "lo 0" : /^(1|8|11|8\d|8\d\d)$/.test(String(n)) ? `l'${n}` : `il ${n}`);
 const paragraphs = (...parts) => parts.filter(Boolean).join("\n\n");
 const isSpecial = (token) => /^<.*>$/.test(token);
 
@@ -119,7 +123,7 @@ export function buildNetworkSpec(model = MODEL_BY_ID.get(PRIMARY_MODEL_ID)) {
     title: `Rete neurale di ${model.name} (ridotta)`,
     intro: paragraphs(
       `${model.name} disegnato come rete neurale: da sinistra a destra il flusso, dal tokenizer alla softmax; dall'alto in basso i numeri del vettore di ogni token; in profondità i ${T} token del prompt. Gira la camera («Guarda lo spessore»): vedi la finestra locale, la KV globale compressa con l'indexer che sceglie le voci, e il router che manda ogni token ai suoi ${c.topK} esperti.`,
-      `Prompt d'esempio: la domanda «${readableText(PROMPT.tokens.slice(0, PROMPT.prompt))}» nel formato di chat di DeepSeek, con i token speciali di inizio, dell'utente, dell'assistente e del ragionamento (<think>), poi l'inizio della risposta già scritto dal modello: «${readableText(PROMPT.tokens.slice(PROMPT.prompt))}». I ${T} token sono scritti ai lati della rete e nel menu «Fetta». ${ctx.honest.tokens}`,
+      `Prompt d'esempio: la domanda «${readableText(PROMPT.tokens.slice(0, PROMPT.prompt))}» con i token speciali del tokenizer di ${model.short} (inizio, utente, assistente e ragionamento <think>) messi come nel formato di chat di DeepSeek, poi l'inizio della risposta già scritto dal modello: «${readableText(PROMPT.tokens.slice(PROMPT.prompt))}». I ${T} token sono scritti ai lati della rete e nel menu «Fetta». ${ctx.honest.tokens} Anche l'ordine dei token speciali è indicativo: il template di chat di ${model.short} non è tra le fonti verificate.`,
       `È il modello dell'«Architettura LLM moderni completa»: la stessa rete anche dalla vista d'insieme, qualunque modello sia scelto nel selettore.`,
     ),
     scale: [
@@ -218,8 +222,9 @@ function layerPart(ctx, d, previous) {
   prefixOf.set(d.index, p);
   const kind = model.kinds[d.block.kind];
   const id = (part) => `${p}.${part}`;
-  // in fondo a ogni sezione: di quali layer veri è il rappresentante
-  const layer = { where: `Layer ${kind.label}: ${formatLayers(d.block.layers)}${d.block.layers.length > 1 ? `, ne vedi uno (il ${d.rep})` : ""}.` };
+  // in fondo a ogni sezione: di quali layer veri è il rappresentante ("Layer 20 (Full ← H20)." se è uno solo)
+  const many = d.block.layers.length > 1;
+  const layer = { where: many ? `Layer ${kind.label}: ${formatLayers(d.block.layers)}, ne vedi uno (${theNumber(d.rep)}).` : `Layer ${d.rep} (${kind.label}).` };
 
   // la scelta delle voci globali: calcolata dai layer sorgente dell'indexer, riusata dagli altri
   if (r.indexes) selections.set(d.index, selectEntries({ tokens: T, m: r.compress, k: SHOWN.entries, seed: `${model.id}:${d.rep}` }));
@@ -281,10 +286,11 @@ function layerGroupText(ctx, d, kind) {
   const { model } = ctx;
   const lp = layerParams(model, layerByNumber(model, d.rep));
   const engram = d.block.flags.filter((f) => f.id === "engram").map((f) => `${f.layers.length === 1 ? "Il layer" : "I layer"} ${list(f.layers.map(String))} ${f.layers.length === 1 ? "ha" : "hanno"} in più la memoria Engram (non disegnata).`);
-  return paragraphs(
-    `${kind.name}: ${kind.text}`,
-    `${capitalize(d.block.sub)}${d.block.layers.length > 1 ? `: ne vedi uno, il ${d.rep}` : ""}. Circa ${formatCount(lp.total)} parametri per layer, ${formatCount(lp.parts.routed)} negli esperti.${engram.length ? ` ${engram.join(" ")}` : ""}`,
-  );
+  // i numeri veri dei layer (formatLayers): "25-27, 29-31, 33-35, 37-39", non "12 layer · 25 … 39", che
+  // sembrerebbe una fila continua (i layer 28, 32 e 36 sono Reindex)
+  const n = d.block.layers.length;
+  const which = n > 1 ? `Layer ${formatLayers(d.block.layers)} (${n} layer): ne vedi uno, ${theNumber(d.rep)}.` : `Layer ${d.rep}: è l'unico di questo tipo.`;
+  return paragraphs(`${kind.name}. ${kind.text}`, `${which} Circa ${formatCount(lp.total)} parametri per layer, ${formatCount(lp.parts.routed)} negli esperti.${engram.length ? ` ${engram.join(" ")}` : ""}`);
 }
 
 /** La sezione con l'uscita dell'encoder (H20): il residuo dopo il layer disegnato che contiene il suo ultimo layer. */
@@ -401,11 +407,10 @@ function attentionSection(ctx, id, r, layer) {
   let how;
   if (r.compress === 0) how = `Solo finestra: in questo layer non c'è KV globale, gli archi arrivano solo dai ${it(c.window)} token più vicini (qui ${SHOWN.window}).`;
   else if (r.writesKV) how = "Gli archi arrivano dalla finestra (KV latente) e dalle voci globali di questo layer, quelle scelte dall'indexer.";
-  else {
-    const choice = r.indexSource === r.kvSource ? "con la sua scelta delle voci" : `con la scelta delle voci del layer ${r.indexSource}`;
-    how = `Reuse: nessuna KV globale propria. Gli archi lunghi vengono dalla KV globale del layer ${r.kvSource}, ${choice}; questo layer calcola solo la sua finestra.`;
-  }
-  const theta = r.compress === 0 ? it(c.ropeTheta) : `${it(c.compressRopeTheta)} con YaRN`;
+  // Reindex: la KV globale è di un altro layer, ma la scelta delle voci è sua (il suo indexer, a sinistra)
+  else if (r.indexes) how = `Reindex: nessuna KV globale propria. Gli archi lunghi vengono dalla KV globale del layer ${r.kvSource}, ma le voci le sceglie l'indexer di questo layer, che ricalcola il top-${it(c.indexTopK)}; in più c'è la sua finestra, come in ogni layer.`;
+  else how = `Reuse: nessuna KV globale propria. Gli archi lunghi vengono dalla KV globale del layer ${r.kvSource}, con le voci scelte dall'indexer del layer ${r.indexSource}; questo layer calcola solo la sua finestra.`;
+  const theta = r.compress === 0 ? it(c.ropeTheta) : `${it(c.compressRopeTheta)} e YaRN`;
   const shared = c.heads / c.kvHeads > 1 ? ` Come ${c.heads} lettori con domande diverse che consultano la stessa copia degli appunti.` : "";
   return {
     id,
@@ -509,7 +514,8 @@ function repeatOf(ctx, group) {
     text: paragraphs(
       group.kind === "group"
         ? `Il blocco [${unit}] si ripete ${group.repeat} volte (${layers}): ne vedi uno vero, le lastre fantasma dicono che dopo ce ne sono altri uguali, con la stessa forma e pesi diversi. Come nella striscia dei Blocchi.`
-        : `${group.repeat} layer ${unit} di fila (${layers}): ne vedi uno vero, le lastre fantasma sono gli altri, con la stessa forma e pesi diversi.`,
+        : // con 2 layer il nucleo disegna una sola lastra fantasma: «l'altro», non «gli altri»
+          `${group.repeat} layer ${unit} di fila (${layers}): ne vedi uno vero, ${group.repeat === 2 ? "la lastra fantasma è l'altro" : "le lastre fantasma sono gli altri"}, con la stessa forma e pesi diversi.`,
       `Parametri del gruppo: ${formatCount(group.params)}.`,
     ),
   };
@@ -608,7 +614,7 @@ function draftPart(ctx, previous) {
       depth: true,
       real: c.hidden,
       text: paragraphs(
-        `Ogni blocco draft ha una finestra di ${it(c.window)} token con sink e un MoE piccolo (${ds.experts} esperti, ${ds.topK} attivi): qui ne vedi solo l'attention a finestra (qui ${SHOWN.window} token), il resto è come nei layer a sinistra. I blocchi sono ${ds.layers}, in fila.`,
+        `Ogni blocco draft ha una finestra di ${it(c.window)} token con sink e un MoE più piccolo di quello dei layer (${ds.experts} esperti, ${ds.topK} attivi): qui ne vedi solo l'attention a finestra (qui ${SHOWN.window} token e ${SHOWN.draftHeads} head); norme, residuo e MoE non sono disegnati. I blocchi sono ${ds.layers}, in fila.`,
         honest.attention,
       ),
     },

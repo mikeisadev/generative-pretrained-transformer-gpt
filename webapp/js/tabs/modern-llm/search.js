@@ -178,7 +178,7 @@ const representations = [
     id: "rete",
     kind: "view",
     title: "Rete neurale (LLM moderni)",
-    text: `${primary.name} disegnato neurone per neurone, da sinistra a destra: tokenizer, embedding, le 4 corsie del residuo, i layer nell'ordine vero con le ripetizioni compresse in «× N», head, softmax e DSpark. In profondità i token del prompt: la finestra locale, la KV globale compressa (2 token → 1 voce) con l'indexer che sceglie le voci, l'attention causale, il router che manda ogni token ai suoi esperti. Valori illustrativi.`,
+    text: `${primary.name} in versione ridotta, disegnato neurone per neurone da sinistra a destra: tokenizer, embedding, le 4 corsie del residuo, i layer nell'ordine vero con le ripetizioni compresse in «× N», head, softmax e DSpark. In profondità i token del prompt: la finestra locale, la KV globale compressa (2 token → 1 voce) con l'indexer che sceglie le voci, l'attention causale, il router che manda ogni token ai suoi esperti. Valori illustrativi.`,
     keywords: [
       "rete neurale", "neural network", "neuroni", "rappresentazione", "profondità", "spessore", "MoE", "mixture of experts", "router", "esperti", "experts", "esperto condiviso",
       "top-k", "KV", "KV cache", "KV latente", "KV globale", "compressione", "attention causale", "causal attention", "finestra", "sliding window", "indexer", "MQA",

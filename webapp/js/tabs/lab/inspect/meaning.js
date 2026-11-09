@@ -1,7 +1,7 @@
 /**
  * Che cosa vogliono dire righe, colonne e celle di un tensore del GPT (logica pura, testata).
  *
- * Una matrice di numeri senza etichette non insegna niente: la riga 12 di token_embedding_table è "il
+ * Una matrice di numeri senza etichette non insegna niente: la riga 43 di token_embedding_table è "il
  * carattere «e»", la colonna 5 di una key è "la dimensione 5 di x dopo ln1", la colonna 37 di proj è "la
  * head 2, dimensione 5 della concatenazione". Le regole seguono i nomi del codice del corso (gpt/*.py) e
  * le convenzioni di PyTorch (nn.Linear (out, in): riga = uscita, colonna = ingresso); per un nome

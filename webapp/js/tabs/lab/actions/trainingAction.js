@@ -249,7 +249,7 @@ export function trainingStepSteps(stage, { tab, engine, ids, token, run }) {
             ],
           },
         },
-        { note: `I numeri nelle celle di lm_head ora sono quelli dopo il primo passo di AdamW. Primo passo di un AdamW appena creato (β₁ = ${ADAMW_DEFAULTS.beta1}, β₂ = ${ADAMW_DEFAULTS.beta2}, ε = 10⁻⁸, weight decay ${ADAMW_DEFAULTS.weightDecay}: i valori predefiniti di PyTorch). Il training vero è al passo 5.000 con le medie m e v accumulate, che il checkpoint non salva: il suo passo vero non si può rifare qui.` },
+        { note: `I numeri nelle celle di lm_head ora sono quelli dopo il primo passo di AdamW. Primo passo di un AdamW appena creato (β₁ = ${plain(ADAMW_DEFAULTS.beta1)}, β₂ = ${plain(ADAMW_DEFAULTS.beta2)}, ε = ${sci(ADAMW_DEFAULTS.eps ?? 1e-8, 1).replace(/^1,0 · /, "")}, weight decay ${plain(ADAMW_DEFAULTS.weightDecay)}: i valori predefiniti di PyTorch). ${trainedAt(tab.state.step ?? run.trace?.train_config?.max_iters ?? null)}` },
       ],
       frame: targetWindow,
     },
