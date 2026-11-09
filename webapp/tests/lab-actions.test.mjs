@@ -529,6 +529,11 @@ test("numeri all'italiana per la lavagna", () => {
   assert.equal(F.signed(-0.5, 2), "−0,50");
   assert.equal(F.sci(0.000034), "3,4 · 10⁻⁵");
   assert.equal(F.sci(0), "0");
+  // la mantissa arrotondata a 10 sposta l'esponente (il |Δ| medio di AdamW, ~lr: era "10,0 · 10⁻⁴")
+  assert.equal(F.sci(0.000999), "1,0 · 10⁻³");
+  assert.equal(F.sci(-0.0099951), "−1,0 · 10⁻²");
+  assert.equal(F.sci(1e-8, 1), "1 · 10⁻⁸");
+  assert.equal(F.num(0.0000996), "1,0 · 10⁻⁴");
   assert.equal(F.pct(0.4123), "41,2%");
   assert.equal(F.pct(0.0004), "0,04%");
   assert.equal(F.int(209729), "209.729");

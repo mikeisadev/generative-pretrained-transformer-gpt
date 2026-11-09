@@ -249,7 +249,7 @@ export function trainingStepSteps(stage, { tab, engine, ids, token, run }) {
             ],
           },
         },
-        { note: `I numeri nelle celle di lm_head ora sono quelli dopo il primo passo di AdamW. Primo passo di un AdamW appena creato (β₁ = ${plain(ADAMW_DEFAULTS.beta1)}, β₂ = ${plain(ADAMW_DEFAULTS.beta2)}, ε = ${sci(ADAMW_DEFAULTS.eps ?? 1e-8, 1).replace(/^1,0 · /, "")}, weight decay ${plain(ADAMW_DEFAULTS.weightDecay)}: i valori predefiniti di PyTorch). ${trainedAt(tab.state.step ?? run.trace?.train_config?.max_iters ?? null)}` },
+        { note: `I numeri nelle celle di lm_head ora sono quelli dopo il primo passo di AdamW. Primo passo di un AdamW appena creato (β₁ = ${plain(ADAMW_DEFAULTS.beta1)}, β₂ = ${plain(ADAMW_DEFAULTS.beta2)}, ε = ${sci(ADAMW_DEFAULTS.eps, 1).replace(/^1 · /, "")}, weight decay ${plain(ADAMW_DEFAULTS.weightDecay)}: i valori predefiniti di PyTorch). ${trainedAt(tab.state.step ?? run.trace?.train_config?.max_iters ?? null)}` },
       ],
       frame: targetWindow,
     },
@@ -272,9 +272,24 @@ export function trainingStepSteps(stage, { tab, engine, ids, token, run }) {
         { title: "∂L/∂h = Wᵀ · (p − y), poi ln_f", kicker: "Backpropagation" },
         { vector: { values: D.dh, max: 12, caption: `∂L/∂h (i primi 12 di ${C}): il segnale d'errore che torna indietro.` } },
         { formula: ["ln_f: h = x̂ · γ + β  →  ∂L/∂β = ∂L/∂h,  ∂L/∂γ = ∂L/∂h · x̂"] },
-        { note: "Verificati con le differenze finite sul motore JS (un test sposta γ e β di ln_f e misura la loss). Il resto (i 4 blocchi, gli embedding) non è mostrato: nel training vero torch.autograd calcola tutti i gradienti e AdamW aggiorna tutti i pesi insieme." },
+        { note: `Verificati con le differenze finite sul motore JS (un test sposta γ e β di ln_f e misura la loss). Il resto (${engine.config.n_layer === 1 ? "il blocco" : `i ${int(engine.config.n_layer)} blocchi`}, gli embedding) non è mostrato: nel training vero torch.autograd calcola tutti i gradienti e AdamW aggiorna tutti i pesi insieme.` },
       ],
       frame: () => (lnFGamma && lnFBeta ? unionRect(rowAboveRect(lnFGamma), rowBelowRect(lnFBeta)) : unionRect(dhRow, G.input, G.W)),
     },
   ];
+}
+
+/** Un iperparametro come lo scrive l'interfaccia: virgola decimale ("0,999"), mai il punto. */
+function plain(value) {
+  return String(value).replace(".", ",");
+}
+
+/**
+ * Il passo vero di AdamW non si rifà: i suoi momenti m e v non sono nel checkpoint. Lo step viene dal run
+ * (lo snapshot nella scena o la fine del training), non da un numero scritto a mano.
+ */
+function trainedAt(step) {
+  if (step === 0) return "Allo step 0 il training vero fa proprio un primo passo come questo, ma sulla media di un batch di esempi invece che su uno solo.";
+  const where = Number.isInteger(step) ? `al passo ${int(step)}` : "dopo migliaia di passi";
+  return `Il training vero, ${where}, ha le medie m e v accumulate, che il checkpoint non salva: il suo passo vero non si può rifare qui.`;
 }

@@ -440,6 +440,10 @@ test("indice della ricerca: voci valide, id unici, ogni vista si apre con un lin
     if (t?.type === "tensor" && !t.name.endsWith(".tril")) assert.ok(builtin.tensor(t.name), `tensore inesistente: ${t.name}`);
   }
   for (const id of Object.keys(VIEW_IDS)) assert.ok(keys.has(`view:${id}`) || ["centro"].includes(id), `vista senza voce: ${id}`);
+  // i testi che citano una riga del vocabolario devono dire il carattere vero (era «la riga 12 è «e»»: è «?»)
+  for (const e of searchIndex) {
+    for (const m of String(e.text ?? "").matchAll(/riga (\d+) è il carattere «(.)»/g)) assert.equal(builtin.vocab[Number(m[1])], m[2], `${e.id}: ${m[0]}`);
+  }
 });
 
 // ---------------------------------------------------------------- caricamenti rotti
